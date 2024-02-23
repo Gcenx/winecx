@@ -59,8 +59,6 @@
 # include <link.h>
 #endif
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -72,6 +70,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
+#define NTDLL_DWARF_H_NO_UNWINDER
+#include "dwarf.h"
 
 /***********************************************************************
  * signal context platform-specific definitions
@@ -135,7 +135,7 @@ static void save_fpu( CONTEXT *context, const ucontext_t *sigcontext )
     struct vfp_sigframe *frame = get_extended_sigcontext( sigcontext, 0x56465001 );
 
     if (!frame) return;
-    memcpy( context->u.D, frame->fpregs, sizeof(context->u.D) );
+    memcpy( context->D, frame->fpregs, sizeof(context->D) );
     context->Fpscr = frame->fpscr;
 }
 
@@ -144,7 +144,7 @@ static void restore_fpu( const CONTEXT *context, ucontext_t *sigcontext )
     struct vfp_sigframe *frame = get_extended_sigcontext( sigcontext, 0x56465001 );
 
     if (!frame) return;
-    memcpy( frame->fpregs, context->u.D, sizeof(context->u.D) );
+    memcpy( frame->fpregs, context->D, sizeof(context->D) );
     frame->fpscr = context->Fpscr;
 }
 
@@ -174,6 +174,42 @@ enum arm_trap_code
     TRAP_ARM_ALIGNFLT   = 17,  /* Alignment check exception */
 };
 
+/* stack layout when calling KiUserExceptionDispatcher */
+struct exc_stack_layout
+{
+    CONTEXT              context;        /* 000 */
+    EXCEPTION_RECORD     rec;            /* 1a0 */
+    ULONG                redzone[2];     /* 1f0 */
+};
+C_ASSERT( offsetof(struct exc_stack_layout, rec) == 0x1a0 );
+C_ASSERT( sizeof(struct exc_stack_layout) == 0x1f8 );
+
+/* stack layout when calling KiUserApcDispatcher */
+struct apc_stack_layout
+{
+    void                *func;           /* 000 APC to call*/
+    ULONG                args[3];        /* 004 function arguments */
+    ULONG                alertable;      /* 010 */
+    ULONG                align;          /* 014 */
+    CONTEXT              context;        /* 018 */
+    ULONG                redzone[2];     /* 1b8 */
+};
+C_ASSERT( offsetof(struct apc_stack_layout, context) == 0x18 );
+C_ASSERT( sizeof(struct apc_stack_layout) == 0x1c0 );
+
+/* stack layout when calling KiUserCallbackDispatcher */
+struct callback_stack_layout
+{
+    void                *args;           /* 000 arguments */
+    ULONG                len;            /* 004 arguments len */
+    ULONG                id;             /* 008 function id */
+    ULONG                lr;             /* 00c */
+    ULONG                sp;             /* 010 */
+    ULONG                pc;             /* 014 */
+    BYTE                 args_data[0];   /* 018 copied argument data*/
+};
+C_ASSERT( sizeof(struct callback_stack_layout) == 0x18 );
+
 struct syscall_frame
 {
     UINT                  r0;             /* 000 */
@@ -196,7 +232,7 @@ struct syscall_frame
     UINT                  restore_flags;  /* 044 */
     UINT                  fpscr;          /* 048 */
     struct syscall_frame *prev_frame;     /* 04c */
-    SYSTEM_SERVICE_TABLE *syscall_table;  /* 050 */
+    void                 *syscall_cfa;    /* 050 */
     UINT                  align[3];       /* 054 */
     ULONGLONG             d[32];          /* 060 */
 };
@@ -205,12 +241,12 @@ C_ASSERT( sizeof( struct syscall_frame ) == 0x160);
 
 struct arm_thread_data
 {
-    void                 *exit_frame;    /* 1d4 exit frame pointer */
+    SYSTEM_SERVICE_TABLE *syscall_table; /* 1d4 syscall table */
     struct syscall_frame *syscall_frame; /* 1d8 frame pointer on syscall entry */
 };
 
 C_ASSERT( sizeof(struct arm_thread_data) <= sizeof(((struct ntdll_thread_data *)0)->cpu_data) );
-C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct arm_thread_data, exit_frame ) == 0x1d4 );
+C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct arm_thread_data, syscall_table ) == 0x1d4 );
 C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct arm_thread_data, syscall_frame ) == 0x1d8 );
 
 static inline struct arm_thread_data *arm_thread_data(void)
@@ -288,7 +324,7 @@ static void pop_vfp(CONTEXT *context, int first, int last)
     int i;
     for (i = first; i <= last; i++)
     {
-        context->u.D[i] = *(ULONGLONG *)context->Sp;
+        context->D[i] = *(ULONGLONG *)context->Sp;
         context->Sp += 8;
     }
 }
@@ -943,7 +979,7 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
     if (flags & CONTEXT_FLOATING_POINT)
     {
         frame->fpscr = context->Fpscr;
-        memcpy( frame->d, context->u.D, sizeof(context->u.D) );
+        memcpy( frame->d, context->D, sizeof(context->D) );
     }
     frame->restore_flags |= flags & ~CONTEXT_INTEGER;
     return STATUS_SUCCESS;
@@ -962,7 +998,7 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
 
     if (!self)
     {
-        NTSTATUS ret = get_thread_context( handle, &context, &self, IMAGE_FILE_MACHINE_ARMNT );
+        NTSTATUS ret = get_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_ARMNT );
         if (ret || !self) return ret;
     }
 
@@ -994,7 +1030,7 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
     if (needed_flags & CONTEXT_FLOATING_POINT)
     {
         context->Fpscr = frame->fpscr;
-        memcpy( context->u.D, frame->d, sizeof(frame->d) );
+        memcpy( context->D, frame->d, sizeof(frame->d) );
         context->ContextFlags |= CONTEXT_FLOATING_POINT;
     }
     return STATUS_SUCCESS;
@@ -1019,25 +1055,6 @@ NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
 }
 
 
-__ASM_GLOBAL_FUNC( raise_func_trampoline,
-                   "push {r12,lr}\n\t" /* (Padding +) Pc in the original frame */
-                   "ldr r3, [r1, #0x38]\n\t" /* context->Sp */
-                   "push {r3}\n\t" /* Original Sp */
-                   __ASM_CFI(".cfi_escape 0x0f,0x03,0x7D,0x04,0x06\n\t") /* CFA, DW_OP_breg13 + 0x04, DW_OP_deref */
-                   __ASM_CFI(".cfi_escape 0x10,0x0e,0x02,0x7D,0x0c\n\t") /* LR, DW_OP_breg13 + 0x0c */
-                   __ASM_EHABI(".save {sp}\n\t")
-                   __ASM_EHABI(".pad #-12\n\t")
-                   __ASM_EHABI(".save {pc}\n\t")
-                   __ASM_EHABI(".pad #8\n\t")
-                   __ASM_EHABI(".save {lr}\n\t")
-                   /* We can't express restoring both Pc and Lr with CFI
-                    * directives, but we manually load Lr from the stack
-                    * in unwind_builtin_dll above. */
-                   "ldr r3, [r1, #0x3c]\n\t" /* context->Lr */
-                   "push {r3}\n\t" /* Original Lr */
-                   "blx r2\n\t"
-                   "udf #0")
-
 /***********************************************************************
  *           setup_exception
  *
@@ -1045,13 +1062,8 @@ __ASM_GLOBAL_FUNC( raise_func_trampoline,
  */
 static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
 {
-    struct
-    {
-        CONTEXT          context;
-        EXCEPTION_RECORD rec;
-    } *stack;
-
-    void *stack_ptr = (void *)(SP_sig(sigcontext) & ~3);
+    struct exc_stack_layout *stack;
+    void *stack_ptr = (void *)(SP_sig(sigcontext) & ~7);
     CONTEXT context;
     NTSTATUS status;
 
@@ -1065,19 +1077,18 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
         return;
     }
 
+    /* fix up instruction pointer in context for EXCEPTION_BREAKPOINT */
+    if (rec->ExceptionCode == EXCEPTION_BREAKPOINT) context.Pc -= 2;
+
     stack = virtual_setup_exception( stack_ptr, sizeof(*stack), rec );
     stack->rec = *rec;
     stack->context = context;
 
     /* now modify the sigcontext to return to the raise function */
     SP_sig(sigcontext) = (DWORD)stack;
-    LR_sig(sigcontext) = context.Pc;
-    PC_sig(sigcontext) = (DWORD)raise_func_trampoline;
+    PC_sig(sigcontext) = (DWORD)pKiUserExceptionDispatcher;
     if (PC_sig(sigcontext) & 1) CPSR_sig(sigcontext) |= 0x20;
     else CPSR_sig(sigcontext) &= ~0x20;
-    REGn_sig(0, sigcontext) = (DWORD)&stack->rec;  /* first arg for KiUserExceptionDispatcher */
-    REGn_sig(1, sigcontext) = (DWORD)&stack->context; /* second arg for KiUserExceptionDispatcher */
-    REGn_sig(2, sigcontext) = (DWORD)pKiUserExceptionDispatcher;
 }
 
 
@@ -1089,14 +1100,9 @@ NTSTATUS call_user_apc_dispatcher( CONTEXT *context, ULONG_PTR arg1, ULONG_PTR a
 {
     struct syscall_frame *frame = arm_thread_data()->syscall_frame;
     ULONG sp = context ? context->Sp : frame->sp;
-    struct apc_stack_layout
-    {
-        void   *func;
-        void   *align;
-        CONTEXT context;
-    } *stack;
+    struct apc_stack_layout *stack;
 
-    sp &= ~15;
+    sp &= ~7;
     stack = (struct apc_stack_layout *)sp - 1;
     if (context)
     {
@@ -1109,14 +1115,14 @@ NTSTATUS call_user_apc_dispatcher( CONTEXT *context, ULONG_PTR arg1, ULONG_PTR a
         NtGetContextThread( GetCurrentThread(), &stack->context );
         stack->context.R0 = status;
     }
+    stack->func    = func;
+    stack->args[0] = arg1;
+    stack->args[1] = arg2;
+    stack->args[2] = arg3;
+
     frame->sp = (DWORD)stack;
     frame->pc = (DWORD)pKiUserApcDispatcher;
-    frame->r0 = (DWORD)&stack->context;
-    frame->r1 = arg1;
-    frame->r2 = arg2;
-    frame->r3 = arg3;
-    stack->func = func;
-    frame->restore_flags |= CONTEXT_CONTROL | CONTEXT_INTEGER;
+    frame->restore_flags |= CONTEXT_CONTROL;
     return status;
 }
 
@@ -1135,18 +1141,17 @@ void call_raise_user_exception_dispatcher(void)
  */
 NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
+    struct exc_stack_layout *stack;
     struct syscall_frame *frame = arm_thread_data()->syscall_frame;
-    DWORD lr = frame->lr;
-    DWORD sp = frame->sp;
     NTSTATUS status = NtSetContextThread( GetCurrentThread(), context );
 
     if (status) return status;
-    frame->r0 = (DWORD)rec;
-    frame->r1 = (DWORD)context;
+    stack = (struct exc_stack_layout *)(context->Sp & ~7) - 1;
+    memmove( &stack->context, context, sizeof(*context) );
+    memmove( &stack->rec, rec, sizeof(*rec) );
     frame->pc = (DWORD)pKiUserExceptionDispatcher;
-    frame->lr = lr;
-    frame->sp = sp;
-    frame->restore_flags |= CONTEXT_INTEGER | CONTEXT_CONTROL;
+    frame->sp = (DWORD)stack;
+    frame->restore_flags |= CONTEXT_CONTROL;
     return status;
 }
 
@@ -1154,13 +1159,25 @@ NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context
 /***********************************************************************
  *           call_user_mode_callback
  */
-extern NTSTATUS CDECL call_user_mode_callback( void *func, void *stack, void **ret_ptr,
-                                               ULONG *ret_len, TEB *teb );
+extern NTSTATUS call_user_mode_callback( ULONG user_sp, void **ret_ptr, ULONG *ret_len,
+                                         void *func, TEB *teb );
 __ASM_GLOBAL_FUNC( call_user_mode_callback,
-                   "push {r2-r12,lr}\n\t"
-                   "ldr r4, [sp, #0x30]\n\t"  /* teb */
+                   "push {r4-r12,lr}\n\t"
+                   "add r7, sp, #0x28\n\t"    /* syscall_cfa */
+                   __ASM_CFI(".cfi_def_cfa 7,0\n\t")
+                   __ASM_CFI(".cfi_offset r4,-0x28\n\t")
+                   __ASM_CFI(".cfi_offset r5,-0x24\n\t")
+                   __ASM_CFI(".cfi_offset r6,-0x20\n\t")
+                   __ASM_CFI(".cfi_offset r7,-0x1c\n\t")
+                   __ASM_CFI(".cfi_offset r8,-0x18\n\t")
+                   __ASM_CFI(".cfi_offset r9,-0x14\n\t")
+                   __ASM_CFI(".cfi_offset r10,-0x10\n\t")
+                   __ASM_CFI(".cfi_offset r11,-0x0c\n\t")
+                   __ASM_CFI(".cfi_offset r12,-0x08\n\t")
+                   __ASM_CFI(".cfi_offset lr,-0x04\n\t")
+                   "ldr r4, [sp, #0x28]\n\t"  /* teb */
                    "ldr r5, [r4]\n\t"         /* teb->Tib.ExceptionList */
-                   "str r5, [sp, #0x28]\n\t"
+                   "push {r1,r2,r4,r5}\n\t"   /* ret_ptr, ret_len, teb, exception_list */
 #ifndef __SOFTFP__
                    "sub sp, sp, #0x90\n\t"
                    "mov r5, sp\n\t"
@@ -1171,20 +1188,18 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
                    "sub sp, sp, #0x160\n\t"   /* sizeof(struct syscall_frame) + registers */
                    "ldr r5, [r4, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
                    "str r5, [sp, #0x4c]\n\t"  /* frame->prev_frame */
+                   "str r7, [sp, #0x50]\n\t"  /* frame->syscall_cfa */
                    "str sp, [r4, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
-                   "ldr r6, [r5, #0x50]\n\t"  /* prev_frame->syscall_table */
-                   "str r6, [sp, #0x50]\n\t"  /* frame->syscall_table */
-                   "mov ip, r0\n\t"
-                   "mov sp, r1\n\t"
-                   "pop {r0-r3}\n\t"
-                   "bx ip" )
+                   /* switch to user stack */
+                   "mov sp, r0\n\t"
+                   "bx r3" )
 
 
 /***********************************************************************
  *           user_mode_callback_return
  */
-extern void CDECL DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
-                                                               NTSTATUS status, TEB *teb );
+extern void DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
+                                                         NTSTATUS status, TEB *teb );
 __ASM_GLOBAL_FUNC( user_mode_callback_return,
                    "ldr r4, [r3, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
                    "ldr r5, [r4, #0x4c]\n\t"  /* frame->prev_frame */
@@ -1197,42 +1212,58 @@ __ASM_GLOBAL_FUNC( user_mode_callback_return,
                    "add r5, r5, #0x90\n\t"
 #endif
                    "mov sp, r5\n\t"
-                   "ldr r5, [sp, #0x28]\n\t"
-                   "str r5, [r3]\n\t"         /* teb->Tib.ExceptionList */
-                   "pop {r5, r6}\n\t"         /* ret_ptr, ret_len */
-                   "str r0, [r5]\n\t"         /* ret_ptr */
-                   "str r1, [r6]\n\t"         /* ret_len */
+                   "pop {r4-r7}\n\t"          /* ret_ptr, ret_len, teb, exception_list */
+                   "str r7, [r3]\n\t"         /* teb->Tib.ExceptionList */
+                   "str r0, [r4]\n\t"         /* ret_ptr */
+                   "str r1, [r5]\n\t"         /* ret_len */
                    "mov r0, r2\n\t"           /* status */
                    "pop {r4-r12,pc}" )
 
 
 /***********************************************************************
+ *           user_mode_abort_thread
+ */
+extern void DECLSPEC_NORETURN user_mode_abort_thread( NTSTATUS status, struct syscall_frame *frame );
+__ASM_GLOBAL_FUNC( user_mode_abort_thread,
+                   __ASM_EHABI(".cantunwind\n\t")
+                   "ldr r7, [r1, #0x28]\n\t"  /* frame->syscall_cfa */
+                   "sub r7, r7, #0x28\n\t"
+                   /* switch to kernel stack */
+                   "mov sp, r7\n\t"
+                   __ASM_CFI(".cfi_def_cfa 7,0x28\n\t")
+                   __ASM_CFI(".cfi_offset r4,-0x28\n\t")
+                   __ASM_CFI(".cfi_offset r5,-0x24\n\t")
+                   __ASM_CFI(".cfi_offset r6,-0x20\n\t")
+                   __ASM_CFI(".cfi_offset r7,-0x1c\n\t")
+                   __ASM_CFI(".cfi_offset r8,-0x18\n\t")
+                   __ASM_CFI(".cfi_offset r9,-0x14\n\t")
+                   __ASM_CFI(".cfi_offset r10,-0x10\n\t")
+                   __ASM_CFI(".cfi_offset r11,-0x0c\n\t")
+                   __ASM_CFI(".cfi_offset r12,-0x08\n\t")
+                   __ASM_CFI(".cfi_offset lr,-0x04\n\t")
+                   "bl " __ASM_NAME("abort_thread") )
+
+
+/***********************************************************************
  *           KeUserModeCallback
  */
-NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
+NTSTATUS KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
 {
     struct syscall_frame *frame = arm_thread_data()->syscall_frame;
-    void *args_data = (void *)((frame->sp - len) & ~15);
-    ULONG_PTR *stack = args_data;
-
-    /* if we have no syscall frame, call the callback directly */
-    if ((char *)&frame < (char *)ntdll_get_thread_data()->kernel_stack ||
-        (char *)&frame > (char *)arm_thread_data()->syscall_frame)
-    {
-        NTSTATUS (WINAPI *func)(const void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
-        return func( args, len );
-    }
+    ULONG sp = (frame->sp - offsetof( struct callback_stack_layout, args_data[len] ) - 8) & ~7;
+    struct callback_stack_layout *stack = (struct callback_stack_layout *)sp;
 
     if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&frame)
         return STATUS_STACK_OVERFLOW;
 
-    memcpy( args_data, args, len );
-    *(--stack) = 0;
-    *(--stack) = len;
-    *(--stack) = (ULONG_PTR)args_data;
-    *(--stack) = id;
-
-    return call_user_mode_callback( pKiUserCallbackDispatcher, stack, ret_ptr, ret_len, NtCurrentTeb() );
+    stack->args = stack->args_data;
+    stack->len  = len;
+    stack->id   = id;
+    stack->lr   = frame->lr;
+    stack->sp   = frame->sp;
+    stack->pc   = frame->pc;
+    memcpy( stack->args_data, args, len );
+    return call_user_mode_callback( sp, ret_ptr, ret_len, pKiUserCallbackDispatcher, NtCurrentTeb() );
 }
 
 
@@ -1256,7 +1287,7 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
     struct syscall_frame *frame = arm_thread_data()->syscall_frame;
     UINT i;
 
-    if (!is_inside_syscall( context ) && !ntdll_get_thread_data()->jmp_buf) return FALSE;
+    if (!is_inside_syscall( context )) return FALSE;
 
     TRACE( "code=%lx flags=%lx addr=%p pc=%08lx\n",
            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, (DWORD)PC_sig(context) );
@@ -1320,6 +1351,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             return;
         }
         case 0xfe:  /* breakpoint */
+            PC_sig(context) += 2;  /* skip the instruction */
             rec.ExceptionCode = EXCEPTION_BREAKPOINT;
             rec.NumberParameters = 1;
             break;
@@ -1472,6 +1504,7 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  */
 static void quit_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
+    if (!is_inside_syscall( sigcontext )) user_mode_abort_thread( 0, arm_thread_data()->syscall_frame );
     abort_thread(0);
 }
 
@@ -1586,13 +1619,13 @@ void signal_init_process(void)
 /***********************************************************************
  *           call_init_thunk
  */
-void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB *teb )
+void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB *teb,
+                      struct syscall_frame *frame, void *syscall_cfa )
 {
     struct arm_thread_data *thread_data = (struct arm_thread_data *)&teb->GdiTebBatch;
-    struct syscall_frame *frame = thread_data->syscall_frame;
     CONTEXT *ctx, context = { CONTEXT_ALL };
 
-    __asm__ __volatile__( "mcr p15, 0, %0, c13, c0, 2" : : "r" (teb) );
+    thread_data->syscall_table = KeServiceDescriptorTable;
 
     context.R0 = (DWORD)entry;
     context.R1 = (DWORD)arg;
@@ -1612,9 +1645,8 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
     frame->sp = (DWORD)ctx;
     frame->pc = (DWORD)pLdrInitializeThunk;
     frame->r0 = (DWORD)ctx;
-    frame->prev_frame = NULL;
     frame->restore_flags |= CONTEXT_INTEGER;
-    frame->syscall_table = KeServiceDescriptorTable;
+    frame->syscall_cfa    = syscall_cfa;
 
     pthread_sigmask( SIG_UNBLOCK, &server_block_set, NULL );
     __wine_syscall_dispatcher_return( frame, 0 );
@@ -1627,29 +1659,17 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
 __ASM_GLOBAL_FUNC( signal_start_thread,
                    __ASM_EHABI(".cantunwind\n\t")
                    "push {r4-r12,lr}\n\t"
-                   /* store exit frame */
-                   "str sp, [r3, #0x1d4]\n\t" /* arm_thread_data()->exit_frame */
+                   "add r7, sp, #0x28\n\t"    /* syscall_cfa */
+                   "mcr p15, 0, r3, c13, c0, 2\n\t" /* set teb register */
                    /* set syscall frame */
                    "ldr r6, [r3, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
                    "cbnz r6, 1f\n\t"
                    "sub r6, sp, #0x160\n\t"   /* sizeof(struct syscall_frame) */
                    "str r6, [r3, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
+                   /* switch to kernel stack */
                    "1:\tmov sp, r6\n\t"
+                   "push {r6,r7}\n\t"
                    "bl " __ASM_NAME("call_init_thunk") )
-
-
-/***********************************************************************
- *           signal_exit_thread
- */
-__ASM_GLOBAL_FUNC( signal_exit_thread,
-                   __ASM_EHABI(".cantunwind\n\t")
-                   "ldr r3, [r2, #0x1d4]\n\t"  /* arm_thread_data()->exit_frame */
-                   "mov ip, #0\n\t"
-                   "str ip, [r2, #0x1d4]\n\t"
-                   "cmp r3, ip\n\t"
-                   "it ne\n\t"
-                   "movne sp, r3\n\t"
-                   "blx r1" )
 
 
 /***********************************************************************
@@ -1657,12 +1677,12 @@ __ASM_GLOBAL_FUNC( signal_exit_thread,
  */
 __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    __ASM_EHABI(".cantunwind\n\t")
-                   "mrc p15, 0, r1, c13, c0, 2\n\t" /* NtCurrentTeb() */
-                   "ldr r1, [r1, #0x1d8]\n\t"       /* arm_thread_data()->syscall_frame */
+                   "mrc p15, 0, r2, c13, c0, 2\n\t" /* NtCurrentTeb() */
+                   "ldr r1, [r2, #0x1d8]\n\t"       /* arm_thread_data()->syscall_frame */
                    "add r0, r1, #0x10\n\t"
                    "stm r0, {r4-r12,lr}\n\t"
-                   "add r2, sp, #0x10\n\t"
-                   "str r2, [r1, #0x38]\n\t"
+                   "add r0, sp, #0x10\n\t"
+                   "str r0, [r1, #0x38]\n\t"
                    "str r3, [r1, #0x3c]\n\t"
                    "mrs r0, CPSR\n\t"
                    "bfi r0, lr, #5, #1\n\t"         /* set thumb bit */
@@ -1676,9 +1696,21 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "vstm r0, {d0-d15}\n\t"
 #endif
                    "mov r6, sp\n\t"
-                   "mov sp, r1\n\t"
                    "mov r8, r1\n\t"
-                   "ldr r5, [r1, #0x50]\n\t"        /* frame->syscall_table */
+                   /* switch to kernel stack */
+                   "mov sp, r1\n\t"
+                   __ASM_CFI_CFA_IS_AT2(r8, 0xd0, 0x00) /* frame->syscall_cfa */
+                   __ASM_CFI(".cfi_offset r4,-0x28\n\t")
+                   __ASM_CFI(".cfi_offset r5,-0x24\n\t")
+                   __ASM_CFI(".cfi_offset r6,-0x20\n\t")
+                   __ASM_CFI(".cfi_offset r7,-0x1c\n\t")
+                   __ASM_CFI(".cfi_offset r8,-0x18\n\t")
+                   __ASM_CFI(".cfi_offset r9,-0x14\n\t")
+                   __ASM_CFI(".cfi_offset r10,-0x10\n\t")
+                   __ASM_CFI(".cfi_offset r11,-0x0c\n\t")
+                   __ASM_CFI(".cfi_offset r12,-0x08\n\t")
+                   __ASM_CFI(".cfi_offset lr,-0x04\n\t")
+                   "ldr r5, [r2, #0x1d4]\n\t"       /* arm_thread_data()->syscall_table */
                    "ubfx r4, ip, #12, #2\n\t"       /* syscall table number */
                    "bfc ip, #12, #20\n\t"           /* syscall number */
                    "add r4, r5, r4, lsl #4\n\t"
@@ -1716,9 +1748,11 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "it ne\n\t"
                    "ldmne r8, {r0-r3}\n\t"
                    "ldr lr, [r8, #0x3c]\n\t"
+                   /* switch to user stack */
                    "ldr sp, [r8, #0x38]\n\t"
                    "add r8, r8, #0x10\n\t"
                    "ldm r8, {r4-r12,pc}\n"
+
                    "5:\tmovw r0, #0x000d\n\t" /* STATUS_INVALID_PARAMETER */
                    "movt r0, #0xc000\n\t"
                    "add sp, sp, #0x10\n\t"
@@ -1753,12 +1787,25 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                    "vstm r4, {d0-d15}\n\t"
 #endif
                    "ldr ip, [r0, r2, lsl #2]\n\t"
+                   "mov r8, r1\n\t"
+                   /* switch to kernel stack */
                    "mov sp, r1\n\t"
+                   __ASM_CFI_CFA_IS_AT2(r8, 0xd0, 0x00) /* frame->syscall_cfa */
+                   __ASM_CFI(".cfi_offset r4,-0x28\n\t")
+                   __ASM_CFI(".cfi_offset r5,-0x24\n\t")
+                   __ASM_CFI(".cfi_offset r6,-0x20\n\t")
+                   __ASM_CFI(".cfi_offset r7,-0x1c\n\t")
+                   __ASM_CFI(".cfi_offset r8,-0x18\n\t")
+                   __ASM_CFI(".cfi_offset r9,-0x14\n\t")
+                   __ASM_CFI(".cfi_offset r10,-0x10\n\t")
+                   __ASM_CFI(".cfi_offset r11,-0x0c\n\t")
+                   __ASM_CFI(".cfi_offset r12,-0x08\n\t")
+                   __ASM_CFI(".cfi_offset lr,-0x04\n\t")
                    "mov r0, r3\n\t"                 /* args */
                    "blx ip\n"
-                   "mov r8, sp\n\t"
                    "ldr r1, [r8, #0x44]\n\t"        /* frame->restore_flags */
                    "cbnz r1, 1f\n\t"
+                   /* switch to user stack */
                    "ldr sp, [r8, #0x38]\n\t"
                    "add r8, r8, #0x10\n\t"
                    "ldm r8, {r4-r12,pc}\n\t"

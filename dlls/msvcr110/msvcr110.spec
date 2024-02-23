@@ -17,9 +17,9 @@
 @ stub -arch=arm ??0_CancellationTokenState@details@Concurrency@@AAA@XZ
 @ stub -arch=i386 ??0_CancellationTokenState@details@Concurrency@@AAE@XZ
 @ stub -arch=win64 ??0_CancellationTokenState@details@Concurrency@@AEAA@XZ
-@ stub -arch=arm ??0_Cancellation_beacon@details@Concurrency@@QAA@XZ
-@ stub -arch=i386 ??0_Cancellation_beacon@details@Concurrency@@QAE@XZ
-@ stub -arch=win64 ??0_Cancellation_beacon@details@Concurrency@@QEAA@XZ
+@ cdecl -arch=arm ??0_Cancellation_beacon@details@Concurrency@@QAA@XZ(ptr) _Cancellation_beacon_ctor
+@ thiscall -arch=i386 ??0_Cancellation_beacon@details@Concurrency@@QAE@XZ(ptr) _Cancellation_beacon_ctor
+@ cdecl -arch=win64 ??0_Cancellation_beacon@details@Concurrency@@QEAA@XZ(ptr) _Cancellation_beacon_ctor
 @ cdecl -arch=arm ??0_Condition_variable@details@Concurrency@@QAA@XZ(ptr) _Condition_variable_ctor
 @ thiscall -arch=i386 ??0_Condition_variable@details@Concurrency@@QAE@XZ(ptr) _Condition_variable_ctor
 @ cdecl -arch=win64 ??0_Condition_variable@details@Concurrency@@QEAA@XZ(ptr) _Condition_variable_ctor
@@ -275,9 +275,9 @@
 @ stub -arch=arm ??1_CancellationTokenState@details@Concurrency@@UAA@XZ
 @ stub -arch=i386 ??1_CancellationTokenState@details@Concurrency@@UAE@XZ
 @ stub -arch=win64 ??1_CancellationTokenState@details@Concurrency@@UEAA@XZ
-@ stub -arch=arm ??1_Cancellation_beacon@details@Concurrency@@QAA@XZ
-@ stub -arch=i386 ??1_Cancellation_beacon@details@Concurrency@@QAE@XZ
-@ stub -arch=win64 ??1_Cancellation_beacon@details@Concurrency@@QEAA@XZ
+@ cdecl -arch=arm ??1_Cancellation_beacon@details@Concurrency@@QAA@XZ(ptr) _Cancellation_beacon_dtor
+@ thiscall -arch=i386 ??1_Cancellation_beacon@details@Concurrency@@QAE@XZ(ptr) _Cancellation_beacon_dtor
+@ cdecl -arch=win64 ??1_Cancellation_beacon@details@Concurrency@@QEAA@XZ(ptr) _Cancellation_beacon_dtor
 @ cdecl -arch=arm ??1_Condition_variable@details@Concurrency@@QAA@XZ(ptr) _Condition_variable_dtor
 @ thiscall -arch=i386 ??1_Condition_variable@details@Concurrency@@QAE@XZ(ptr) _Condition_variable_dtor
 @ cdecl -arch=win64 ??1_Condition_variable@details@Concurrency@@QEAA@XZ(ptr) _Condition_variable_dtor
@@ -493,9 +493,9 @@
 @ stub -arch=arm ?_Cancel@_TaskCollection@details@Concurrency@@QAAXXZ
 @ stub -arch=i386 ?_Cancel@_TaskCollection@details@Concurrency@@QAEXXZ
 @ stub -arch=win64 ?_Cancel@_TaskCollection@details@Concurrency@@QEAAXXZ
-@ stub -arch=arm ?_CheckTaskCollection@_UnrealizedChore@details@Concurrency@@IAAXXZ
-@ stub -arch=i386 ?_CheckTaskCollection@_UnrealizedChore@details@Concurrency@@IAEXXZ
-@ stub -arch=win64 ?_CheckTaskCollection@_UnrealizedChore@details@Concurrency@@IEAAXXZ
+@ cdecl -arch=arm ?_CheckTaskCollection@_UnrealizedChore@details@Concurrency@@IAAXXZ(ptr) _UnrealizedChore__CheckTaskCollection
+@ thiscall -arch=i386 ?_CheckTaskCollection@_UnrealizedChore@details@Concurrency@@IAEXXZ(ptr) _UnrealizedChore__CheckTaskCollection
+@ cdecl -arch=win64 ?_CheckTaskCollection@_UnrealizedChore@details@Concurrency@@IEAAXXZ(ptr) _UnrealizedChore__CheckTaskCollection
 @ stub -arch=arm ?_CleanupToken@_StructuredTaskCollection@details@Concurrency@@AAAXXZ
 @ stub -arch=i386 ?_CleanupToken@_StructuredTaskCollection@details@Concurrency@@AAEXXZ
 @ stub -arch=win64 ?_CleanupToken@_StructuredTaskCollection@details@Concurrency@@AEAAXXZ
@@ -550,9 +550,9 @@
 @ stub -arch=arm ?_IsCanceling@_TaskCollection@details@Concurrency@@QAA_NXZ
 @ stub -arch=i386 ?_IsCanceling@_TaskCollection@details@Concurrency@@QAE_NXZ
 @ stub -arch=win64 ?_IsCanceling@_TaskCollection@details@Concurrency@@QEAA_NXZ
-@ stub -arch=arm ?_IsSynchronouslyBlocked@_Context@details@Concurrency@@QBA_NXZ
-@ stub -arch=i386 ?_IsSynchronouslyBlocked@_Context@details@Concurrency@@QBE_NXZ
-@ stub -arch=win64 ?_IsSynchronouslyBlocked@_Context@details@Concurrency@@QEBA_NXZ
+@ cdecl -arch=arm ?_IsSynchronouslyBlocked@_Context@details@Concurrency@@QBA_NXZ(ptr) _Context_IsSynchronouslyBlocked
+@ thiscall -arch=i386 ?_IsSynchronouslyBlocked@_Context@details@Concurrency@@QBE_NXZ(ptr) _Context_IsSynchronouslyBlocked
+@ cdecl -arch=win64 ?_IsSynchronouslyBlocked@_Context@details@Concurrency@@QEBA_NXZ(ptr) _Context_IsSynchronouslyBlocked
 @ stub -arch=win32 ?_Name_base@type_info@@CAPBDPBV1@PAU__type_info_node@@@Z
 @ stub -arch=win64 ?_Name_base@type_info@@CAPEBDPEBV1@PEAU__type_info_node@@@Z
 @ stub -arch=win32 ?_Name_base_internal@type_info@@CAPBDPBV1@PAU__type_info_node@@@Z
@@ -872,15 +872,15 @@
 @ cdecl __AdjustPointer(ptr ptr)
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
-@ stdcall -arch=x86_64,arm __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
-@ cdecl -arch=i386,x86_64,arm,arm64 __CppXcptFilter(long ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxDetectRethrow(ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxExceptionFilter(ptr ptr long ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) __CxxFrameHandler
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) __CxxFrameHandler
+@ stdcall -arch=!i386 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
+@ cdecl __CppXcptFilter(long ptr)
+@ cdecl __CxxDetectRethrow(ptr)
+@ cdecl __CxxExceptionFilter(ptr ptr long ptr)
+@ cdecl -norelay __CxxFrameHandler(ptr ptr ptr ptr)
+@ cdecl -norelay __CxxFrameHandler2(ptr ptr ptr ptr) __CxxFrameHandler
+@ cdecl -norelay __CxxFrameHandler3(ptr ptr ptr ptr) __CxxFrameHandler
 @ stdcall -arch=i386 __CxxLongjmpUnwind(ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxQueryExceptionSize()
+@ cdecl __CxxQueryExceptionSize()
 @ cdecl __CxxRegisterExceptionObject(ptr ptr)
 @ cdecl __CxxUnregisterExceptionObject(ptr long)
 @ cdecl __DestructExceptionObject(ptr)
@@ -946,8 +946,8 @@
 @ cdecl __isascii(long)
 @ cdecl __iscsym(long)
 @ cdecl __iscsymf(long)
-@ stub __iswcsym
-@ stub __iswcsymf
+@ cdecl __iswcsym(long)
+@ cdecl __iswcsymf(long)
 @ stdcall -arch=arm __jump_unwind(ptr ptr) ntdll.__jump_unwind
 # extern __lconv
 @ cdecl __lconv_init()
@@ -1081,10 +1081,10 @@
 @ cdecl _control87(long long)
 @ cdecl _controlfp(long long)
 @ cdecl _controlfp_s(ptr long long)
-@ cdecl _copysign(double double)
-@ cdecl -arch=!i386 _copysignf(float float)
+@ cdecl _copysign(double double) copysign
+@ cdecl -arch=!i386 _copysignf(float float) copysignf
 @ varargs _cprintf(str)
-@ stub _cprintf_l
+@ varargs _cprintf_l(str ptr)
 @ stub _cprintf_p
 @ stub _cprintf_p_l
 @ stub _cprintf_s
@@ -1105,7 +1105,7 @@
 @ cdecl _ctime64_s(str long ptr)
 @ cdecl _cwait(ptr long long)
 @ varargs _cwprintf(wstr)
-@ stub _cwprintf_l
+@ varargs _cwprintf_l(wstr ptr)
 @ stub _cwprintf_p
 @ stub _cwprintf_p_l
 @ stub _cwprintf_s
@@ -1172,7 +1172,7 @@
 @ extern _fmode MSVCRT__fmode
 @ cdecl _fpclass(double)
 @ cdecl -arch=!i386 _fpclassf(float)
-@ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr)
+@ cdecl _fpieee_flt(long ptr ptr)
 @ cdecl _fpreset()
 @ varargs _fprintf_l(ptr str ptr)
 @ varargs _fprintf_p(ptr str)
@@ -1399,7 +1399,7 @@
 @ cdecl -arch=i386 -norelay _libm_sse2_sqrt_precise() __libm_sse2_sqrt_precise
 @ cdecl -arch=i386 -norelay _libm_sse2_tan_precise() __libm_sse2_tan
 @ cdecl _loaddll(str)
-@ cdecl -arch=x86_64 _local_unwind(ptr ptr)
+@ cdecl -arch=win64 _local_unwind(ptr ptr)
 @ cdecl -arch=i386 _local_unwind2(ptr long)
 @ cdecl -arch=i386 _local_unwind4(ptr ptr long)
 @ cdecl _localtime32(ptr)
@@ -1409,8 +1409,8 @@
 @ cdecl _lock(long)
 @ cdecl _lock_file(ptr)
 @ cdecl _locking(long long long)
-@ cdecl _logb(double)
-@ cdecl -arch=!i386 _logbf(float)
+@ cdecl _logb(double) logb
+@ cdecl -arch=!i386 _logbf(float) logbf
 @ cdecl -arch=i386 _longjmpex(ptr long) MSVCRT_longjmp
 @ cdecl _lrotl(long long) MSVCRT__lrotl
 @ cdecl _lrotr(long long) MSVCRT__lrotr
@@ -1451,9 +1451,9 @@
 @ cdecl _mbctoupper(long)
 @ cdecl _mbctoupper_l(long ptr)
 @ extern _mbctype MSVCRT_mbctype
-@ stub _mblen_l
+@ cdecl _mblen_l(str long ptr)
 @ cdecl _mbsbtype(str long)
-@ stub _mbsbtype_l
+@ cdecl _mbsbtype_l(str long ptr)
 @ cdecl _mbscat_s(ptr long str)
 @ cdecl _mbscat_s_l(ptr long str ptr)
 @ cdecl _mbschr(str long)
@@ -1467,7 +1467,7 @@
 @ cdecl _mbscspn(str str)
 @ cdecl _mbscspn_l(str str ptr)
 @ cdecl _mbsdec(ptr ptr)
-@ stub _mbsdec_l
+@ cdecl _mbsdec_l(ptr ptr ptr)
 @ cdecl _mbsicmp(str str)
 @ cdecl _mbsicmp_l(str str ptr)
 @ cdecl _mbsicoll(str str)
@@ -1477,49 +1477,49 @@
 @ cdecl _mbslen(str)
 @ cdecl _mbslen_l(str ptr)
 @ cdecl _mbslwr(str)
-@ stub _mbslwr_l
+@ cdecl _mbslwr_l(str ptr)
 @ cdecl _mbslwr_s(str long)
 @ cdecl _mbslwr_s_l(str long ptr)
 @ cdecl _mbsnbcat(str str long)
-@ stub _mbsnbcat_l
+@ cdecl _mbsnbcat_l(str str long ptr)
 @ cdecl _mbsnbcat_s(str long ptr long)
-@ stub _mbsnbcat_s_l
+@ cdecl _mbsnbcat_s_l(str long ptr long ptr)
 @ cdecl _mbsnbcmp(str str long)
-@ stub _mbsnbcmp_l
+@ cdecl _mbsnbcmp_l(str str long ptr)
 @ cdecl _mbsnbcnt(ptr long)
-@ stub _mbsnbcnt_l
+@ cdecl _mbsnbcnt_l(ptr long ptr)
 @ cdecl _mbsnbcoll(str str long)
 @ cdecl _mbsnbcoll_l(str str long ptr)
 @ cdecl _mbsnbcpy(ptr str long)
-@ stub _mbsnbcpy_l
+@ cdecl _mbsnbcpy_l(ptr str long ptr)
 @ cdecl _mbsnbcpy_s(ptr long str long)
 @ cdecl _mbsnbcpy_s_l(ptr long str long ptr)
 @ cdecl _mbsnbicmp(str str long)
-@ stub _mbsnbicmp_l
+@ cdecl _mbsnbicmp_l(str str long ptr)
 @ cdecl _mbsnbicoll(str str long)
 @ cdecl _mbsnbicoll_l(str str long ptr)
 @ cdecl _mbsnbset(ptr long long)
-@ stub _mbsnbset_l
+@ cdecl _mbsnbset_l(str long long ptr)
 @ stub _mbsnbset_s
 @ stub _mbsnbset_s_l
 @ cdecl _mbsncat(str str long)
-@ stub _mbsncat_l
+@ cdecl _mbsncat_l(str str long ptr)
 @ stub _mbsncat_s
 @ stub _mbsncat_s_l
 @ cdecl _mbsnccnt(str long)
-@ stub _mbsnccnt_l
+@ cdecl _mbsnccnt_l(str long ptr)
 @ cdecl _mbsncmp(str str long)
-@ stub _mbsncmp_l
+@ cdecl _mbsncmp_l(str str long ptr)
 @ stub _mbsncoll(str str long)
 @ stub _mbsncoll_l
 @ cdecl _mbsncpy(ptr str long)
-@ stub _mbsncpy_l
+@ cdecl _mbsncpy_l(ptr str long ptr)
 @ stub _mbsncpy_s
 @ stub _mbsncpy_s_l
 @ cdecl _mbsnextc(str)
 @ cdecl _mbsnextc_l(str ptr)
 @ cdecl _mbsnicmp(str str long)
-@ stub _mbsnicmp_l
+@ cdecl _mbsnicmp_l(str str long ptr)
 @ stub _mbsnicoll(str str long)
 @ stub _mbsnicoll_l
 @ cdecl _mbsninc(str long)
@@ -1527,23 +1527,23 @@
 @ cdecl _mbsnlen(str long)
 @ cdecl _mbsnlen_l(str long ptr)
 @ cdecl _mbsnset(ptr long long)
-@ stub _mbsnset_l
+@ cdecl _mbsnset_l(ptr long long ptr)
 @ stub _mbsnset_s
 @ stub _mbsnset_s_l
 @ cdecl _mbspbrk(str str)
-@ stub _mbspbrk_l
+@ cdecl _mbspbrk_l(str str ptr)
 @ cdecl _mbsrchr(str long)
-@ stub _mbsrchr_l
+@ cdecl _mbsrchr_l(str long ptr)
 @ cdecl _mbsrev(str)
-@ stub _mbsrev_l
+@ cdecl _mbsrev_l(str ptr)
 @ cdecl _mbsset(ptr long)
-@ stub _mbsset_l
+@ cdecl _mbsset_l(ptr long ptr)
 @ stub _mbsset_s
 @ stub _mbsset_s_l
 @ cdecl _mbsspn(str str)
 @ cdecl _mbsspn_l(str str ptr)
 @ cdecl _mbsspnp(str str)
-@ stub _mbsspnp_l
+@ cdecl _mbsspnp_l(str str ptr)
 @ cdecl _mbsstr(str str)
 @ stub _mbsstr_l
 @ cdecl _mbstok(str str)
@@ -1557,7 +1557,7 @@
 @ stub _mbstrnlen
 @ stub _mbstrnlen_l
 @ cdecl _mbsupr(str)
-@ stub _mbsupr_l
+@ cdecl _mbsupr_l(str ptr)
 @ cdecl _mbsupr_s(str long)
 @ cdecl _mbsupr_s_l(str long ptr)
 @ cdecl _mbtowc_l(ptr str long ptr)
@@ -1572,8 +1572,8 @@
 @ cdecl _mktime32(ptr)
 @ cdecl _mktime64(ptr)
 @ cdecl _msize(ptr)
-@ cdecl _nextafter(double double)
-@ cdecl -arch=x86_64 _nextafterf(float float)
+@ cdecl _nextafter(double double) nextafter
+@ cdecl -arch=x86_64 _nextafterf(float float) nextafterf
 @ cdecl _onexit(ptr)
 @ varargs _open(str long)
 @ cdecl _open_osfhandle(long long)
@@ -1641,9 +1641,9 @@
 @ cdecl _set_printf_count_output(long)
 @ cdecl _set_purecall_handler(ptr)
 @ cdecl _seterrormode(long)
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay _setjmp(ptr) MSVCRT__setjmp
+@ cdecl -norelay _setjmp(ptr) MSVCRT__setjmp
 @ cdecl -arch=i386 -norelay _setjmp3(ptr long) MSVCRT__setjmp3
-@ cdecl -arch=x86_64,arm -norelay _setjmpex(ptr ptr) __wine_setjmpex
+@ cdecl -arch=!i386 -norelay _setjmpex(ptr ptr) __wine_setjmpex
 @ cdecl _setmaxstdio(long)
 @ cdecl _setmbcp(long)
 @ cdecl _setmode(long long)
@@ -1987,7 +1987,7 @@
 @ cdecl -arch=!i386 acosf(float)
 @ cdecl asctime(ptr)
 @ cdecl asctime_s(ptr long ptr)
-@ cdecl asin(double)
+@ cdecl asin(double) MSVCRT_asin
 @ cdecl -arch=!i386 asinf(float)
 @ cdecl atan(double)
 @ cdecl -arch=!i386 atanf(float)
@@ -2097,7 +2097,7 @@
 @ cdecl -arch=!i386 logf(float)
 @ cdecl log10(double)
 @ cdecl -arch=!i386 log10f(float)
-@ cdecl -arch=i386,x86_64,arm,arm64 longjmp(ptr long) MSVCRT_longjmp
+@ cdecl longjmp(ptr long) MSVCRT_longjmp
 @ cdecl malloc(long)
 @ cdecl mblen(ptr long)
 @ cdecl mbrlen(ptr long ptr)
@@ -2148,8 +2148,8 @@
 @ cdecl -arch=!i386 sinhf(float)
 @ varargs sprintf(ptr str)
 @ varargs sprintf_s(ptr long str)
-@ cdecl sqrt(double)
-@ cdecl -arch=!i386 sqrtf(float)
+@ cdecl sqrt(double) MSVCRT_sqrt
+@ cdecl -arch=!i386 sqrtf(float) MSVCRT_sqrtf
 @ cdecl srand(long)
 @ varargs sscanf(str str)
 @ varargs sscanf_s(str str)
@@ -2187,8 +2187,8 @@
 @ cdecl system(str)
 @ cdecl tan(double)
 @ cdecl -arch=!i386 tanf(float)
-@ cdecl tanh(double)
-@ cdecl -arch=!i386 tanhf(float)
+@ cdecl tanh(double) MSVCRT_tanh
+@ cdecl -arch=!i386 tanhf(float) MSVCRT_tanhf
 @ cdecl tmpfile()
 @ cdecl tmpfile_s(ptr)
 @ cdecl tmpnam(ptr)

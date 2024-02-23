@@ -43,30 +43,29 @@
  *
  * Regarding PDB files:
  * -------------------
- * They are implemented as a set of internal files (as a small file
- * system). The file is split into blocks, an internal file is made
- * of a set of blocks. Internal files are accessed through
- * numbers. For example,
- * 1/ is the ROOT (basic information on the file)
- * 2/ is the Symbol information (global symbols, local variables...)
- * 3/ is the Type internal file (each the symbols can have type
+ * They are implemented as a set of internal streams (as a small file
+ * system). The file is split into blocks, an internal stream is made of a set
+ * of blocks, that can be non continuous. The table of contents gives the set of
+ * blocks for a given stream.
+ * Some internal streams are accessed through numbers. For example,
+ * #1 is the ROOT (basic information on the file)
+ * #2 is the Symbol information (global symbols, local variables...)
+ * #3 is the Type internal stream (each the symbols can have type
  * information associated with it).
  *
  * Over the years, three formats existed for the PDB:
- * - ?? was rather linked to 16 bit code (our support shall be rather
- *   bad)
- * - JG: it's the signature embedded in the file header. This format
- *   has been used in MSVC 2.0 => 5.0.
- * - DS: it's the signature embedded in the file header. It's the
- *   current format supported my MS.
+ * - ?? was rather linked to 16 bit code (our support shall be rather bad)
+ * - JG: it's the signature embedded in the file header. This format has been
+ *   used in MSVC 2.0 => 5.0.
+ * - DS: it's the signature embedded in the file header. It's the current format
+ *   supported my MS.
  *
- * Types internal stream
+ * Types internal stream (aka TPI)
  * ---------------------
- * Types (from the Type internal file) have existed in three flavors
- * (note that those flavors came as historical evolution, but there
- * isn't a one to one link between types evolution and PDB formats'
- * evolutions:
- * - the first flavor (suffixed by V1 in this file), where the types
+ * Types (from the Type internal stream) have existed in three flavors (note
+ * that those flavors came as historical evolution, but there isn't a one to one
+ * link between types evolution and PDB formats' evolutions:
+ * - the first flavor (suffixed by V1 in mscvpdb.h), where the types
  *   and subtypes are 16 bit entities; and where strings are in Pascal
  *   format (first char is their length and are not 0 terminated)
  * - the second flavor (suffixed by V2) differs from first flavor with
@@ -2376,7 +2375,7 @@ struct startend
  * ======================================== */
 
 
-struct PDB_FILE
+struct PDB_JG_STREAM
 {
     unsigned int        size;
     unsigned int        unknown;
@@ -2387,9 +2386,9 @@ struct PDB_JG_HEADER
     char                ident[40];
     unsigned int        signature;
     unsigned int        block_size;
-    unsigned short      free_list;
+    unsigned short      free_list_block;
     unsigned short      total_alloc;
-    struct PDB_FILE     toc;
+    struct PDB_JG_STREAM toc;
     unsigned short      toc_block[1];
 };
 
@@ -2397,23 +2396,23 @@ struct PDB_DS_HEADER
 {
     char                signature[32];
     unsigned int        block_size;
-    unsigned int        unknown1;
-    unsigned int        num_pages;
+    unsigned int        free_list_block;
+    unsigned int        num_blocks;
     unsigned int        toc_size;
     unsigned int        unknown2;
-    unsigned int        toc_page;
+    unsigned int        toc_block;
 };
 
 struct PDB_JG_TOC
 {
-    unsigned int        num_files;
-    struct PDB_FILE     file[1];
+    unsigned int        num_streams;
+    struct PDB_JG_STREAM streams[1];
 };
 
 struct PDB_DS_TOC
 {
-    unsigned int        num_files;
-    unsigned int        file_size[1];
+    unsigned int        num_streams;
+    unsigned int        stream_size[1];
 };
 
 struct PDB_JG_ROOT
@@ -2441,7 +2440,7 @@ typedef struct _PDB_TYPES_OLD
     unsigned short first_index;
     unsigned short last_index;
     unsigned int   type_size;
-    unsigned short hash_file;
+    unsigned short hash_stream;
     unsigned short pad;
 } PDB_TYPES_OLD, *PPDB_TYPES_OLD;
 
@@ -2452,16 +2451,16 @@ typedef struct _PDB_TYPES
     unsigned int   first_index;
     unsigned int   last_index;
     unsigned int   type_size;
-    unsigned short hash_file;
+    unsigned short hash_stream;
     unsigned short pad;
-    unsigned int   hash_size;
+    unsigned int   hash_value_size;
     unsigned int   hash_num_buckets;
     unsigned int   hash_offset;
-    unsigned int   hash_len;
+    unsigned int   hash_size;
     unsigned int   search_offset;
-    unsigned int   search_len;
+    unsigned int   search_size;
     unsigned int   type_remap_offset;
-    unsigned int   type_remap_len;
+    unsigned int   type_remap_size;
 } PDB_TYPES, *PPDB_TYPES;
 
 typedef struct _PDB_SYMBOL_RANGE
@@ -2493,7 +2492,7 @@ typedef struct _PDB_SYMBOL_FILE
     unsigned int     unknown1;
     PDB_SYMBOL_RANGE range;
     unsigned short   flag;
-    unsigned short   file;
+    unsigned short   stream;
     unsigned int     symbol_size;
     unsigned int     lineno_size;
     unsigned int     lineno2_size;
@@ -2507,7 +2506,7 @@ typedef struct _PDB_SYMBOL_FILE_EX
     unsigned int        unknown1;
     PDB_SYMBOL_RANGE_EX range;
     unsigned short      flag;
-    unsigned short      file;
+    unsigned short      stream;
     unsigned int        symbol_size;
     unsigned int        lineno_size;
     unsigned int        lineno2_size;
@@ -2535,13 +2534,13 @@ typedef struct _PDB_SYMBOL_IMPORT
 
 typedef struct _PDB_SYMBOLS_OLD
 {
-    unsigned short global_hash_file;
-    unsigned short public_file;
-    unsigned short gsym_file;
+    unsigned short global_hash_stream;
+    unsigned short public_stream;
+    unsigned short gsym_stream;
     unsigned short pad;
     unsigned int   module_size;
-    unsigned int   offset_size;
-    unsigned int   hash_size;
+    unsigned int   sectcontrib_size;
+    unsigned int   segmap_size;
     unsigned int   srcmodule_size;
 } PDB_SYMBOLS_OLD, *PPDB_SYMBOLS_OLD;
 
@@ -2550,15 +2549,15 @@ typedef struct _PDB_SYMBOLS
     unsigned int   signature;
     unsigned int   version;
     unsigned int   age;
-    unsigned short global_hash_file;
+    unsigned short global_hash_stream;
     unsigned short flags;
-    unsigned short public_file;
+    unsigned short public_stream;
     unsigned short bldVer;
-    unsigned short gsym_file;
+    unsigned short gsym_stream;
     unsigned short rbldVer;
     unsigned int   module_size;
-    unsigned int   offset_size;
-    unsigned int   hash_size;
+    unsigned int   sectcontrib_size;
+    unsigned int   segmap_size;
     unsigned int   srcmodule_size;
     unsigned int   pdbimport_size;
     unsigned int   resvd0;
@@ -2576,7 +2575,7 @@ typedef struct
     unsigned short unk1;
     unsigned short unk2;
     unsigned short unk3;
-    unsigned short segments;
+    unsigned short sections_stream;
 } PDB_STREAM_INDEXES_OLD;
 
 typedef struct
@@ -2586,7 +2585,7 @@ typedef struct
     unsigned short unk1;
     unsigned short unk2;
     unsigned short unk3;
-    unsigned short segments;
+    unsigned short sections_stream;
     unsigned short unk4;
     unsigned short unk5;
     unsigned short unk6;
@@ -2631,11 +2630,11 @@ typedef struct
 {
     unsigned signature;
     unsigned version;
-    unsigned size_hash_records;
+    unsigned hash_records_size;
     unsigned unknown;
 } DBI_HASH_HEADER;
 /* This header is followed by:
- * - DBI_HASH_RECORDS (on hdr:size_hash_records bytes)
+ * - DBI_HASH_RECORDS (on hdr:hash_records_size bytes)
  * - a bitmap of DBI_MAX_HASH + 1 entries (on DBI_BITMAP_HASH_SIZE bytes)
  * - a table (one entry per present bit in bitmap) as index into hdr:num_records
  */
@@ -2657,11 +2656,11 @@ typedef struct
     unsigned hash_size;
     unsigned address_map_size;
     unsigned num_thunks;
-    unsigned size_thunk;
+    unsigned thunk_size;
     unsigned short section_thunk_table;
     unsigned short _pad0;
     unsigned offset_thunk_table;
-    unsigned num_sects;
+    unsigned num_sections;
 } DBI_PUBLIC_HEADER;
 
 #include "poppack.h"
@@ -2821,3 +2820,13 @@ typedef struct OMFSourceModule
     unsigned short  cSeg;
     unsigned int    baseSrcFile[1];
 } OMFSourceModule;
+
+
+/* undocumented. IMAGE_DEBUG_TYPE_REPRO directory entry */
+typedef struct
+{
+    unsigned        flags;           /* only seen 0x20 */
+    GUID            guid;            /* guid used in CODEVIEW debug entry */
+    unsigned        unk[3];          /* unknown, potentially hash of some internal parts of image */
+    unsigned        debug_timestamp; /* used in all DEBUG entries as timestamp (including this one) */
+} IMAGE_DEBUG_REPRO;

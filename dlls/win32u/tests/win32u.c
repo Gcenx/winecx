@@ -24,6 +24,28 @@
 #include "winbase.h"
 #include "ntuser.h"
 
+#define check_member_( file, line, val, exp, fmt, member )                                         \
+    ok_(file, line)( (val).member == (exp).member, "got " #member " " fmt "\n", (val).member )
+#define check_member( val, exp, fmt, member )                                                      \
+    check_member_( __FILE__, __LINE__, val, exp, fmt, member )
+
+static void flush_events(void)
+{
+    int min_timeout = 100, diff = 200;
+    DWORD time = GetTickCount() + diff;
+    MSG msg;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects( 0, NULL, FALSE, min_timeout, QS_ALLINPUT ) == WAIT_TIMEOUT) break;
+        while (PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ))
+        {
+            TranslateMessage( &msg );
+            DispatchMessageA( &msg );
+        }
+        diff = time - GetTickCount();
+    }
+}
 
 static void test_NtUserEnumDisplayDevices(void)
 {
@@ -197,6 +219,223 @@ static void test_class(void)
         "NtUserGetAtomName returned %lx %lu\n", ret, GetLastError() );
     ok( buf[0] == 0xcccc, "buf = %s\n", debugstr_w(buf) );
 
+}
+
+static void test_NtUserCreateInputContext(void)
+{
+    UINT_PTR value, attr3;
+    HIMC himc;
+    UINT ret;
+
+    SetLastError( 0xdeadbeef );
+    himc = NtUserCreateInputContext( 0 );
+    todo_wine
+    ok( !himc, "NtUserCreateInputContext succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = NtUserDestroyInputContext( himc );
+    todo_wine
+    ok( !ret, "NtUserDestroyInputContext succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_HANDLE, "got error %lu\n", GetLastError() );
+
+
+    himc = NtUserCreateInputContext( 0xdeadbeef );
+    ok( !!himc, "NtUserCreateInputContext failed, error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 0 );
+    todo_wine
+    ok( value == GetCurrentProcessId(), "NtUserQueryInputContext 0 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 1 );
+    ok( value == GetCurrentThreadId(), "NtUserQueryInputContext 1 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 2 );
+    ok( value == 0, "NtUserQueryInputContext 2 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 3 );
+    todo_wine
+    ok( !!value, "NtUserQueryInputContext 3 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    attr3 = value;
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 4 );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserUpdateInputContext( himc, 0, 0 );
+    todo_wine
+    ok( !ret, "NtUserUpdateInputContext 0 succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_ALREADY_INITIALIZED, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = NtUserUpdateInputContext( himc, 1, 0xdeadbeef );
+    todo_wine
+    ok( !!ret, "NtUserUpdateInputContext 1 failed\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = NtUserUpdateInputContext( himc, 2, 0xdeadbeef );
+    ok( !ret, "NtUserUpdateInputContext 2 succeeded\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = NtUserUpdateInputContext( himc, 3, 0x0badf00d );
+    ok( !ret, "NtUserUpdateInputContext 3 succeeded\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = NtUserUpdateInputContext( himc, 4, 0xdeadbeef );
+    ok( !ret, "NtUserUpdateInputContext 4 succeeded\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 0 );
+    todo_wine
+    ok( value == GetCurrentProcessId(), "NtUserQueryInputContext 0 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 1 );
+    ok( value == GetCurrentThreadId(), "NtUserQueryInputContext 1 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 2 );
+    ok( value == 0, "NtUserQueryInputContext 2 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 3 );
+    ok( value == attr3, "NtUserQueryInputContext 3 returned %#Ix\n", value );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    value = NtUserQueryInputContext( himc, 4 );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+
+    ret = NtUserDestroyInputContext( himc );
+    ok( !!ret, "NtUserDestroyInputContext failed, error %lu\n", GetLastError() );
+}
+
+static int himc_compare( const void *a, const void *b )
+{
+    return (UINT_PTR)*(HIMC *)a - (UINT_PTR)*(HIMC *)b;
+}
+
+static DWORD CALLBACK test_NtUserBuildHimcList_thread( void *arg )
+{
+    HIMC buf[8], *himc = arg;
+    NTSTATUS status;
+    UINT size;
+
+    size = 0xdeadbeef;
+    memset( buf, 0xcd, sizeof(buf) );
+    status = NtUserBuildHimcList( GetCurrentThreadId(), ARRAYSIZE( buf ), buf, &size );
+    ok( !status, "NtUserBuildHimcList failed: %#lx\n", status );
+    todo_wine
+    ok( size == 1, "size = %u\n", size );
+    ok( !!buf[0], "buf[0] = %p\n", buf[0] );
+
+    ok( buf[0] != himc[0], "buf[0] = %p\n", buf[0] );
+    ok( buf[0] != himc[1], "buf[0] = %p\n", buf[0] );
+    himc[2] = buf[0];
+    qsort( himc, 3, sizeof(*himc), himc_compare );
+
+    size = 0xdeadbeef;
+    memset( buf, 0xcd, sizeof(buf) );
+    status = NtUserBuildHimcList( -1, ARRAYSIZE( buf ), buf, &size );
+    ok( !status, "NtUserBuildHimcList failed: %#lx\n", status );
+    todo_wine
+    ok( size == 3, "size = %u\n", size );
+
+    qsort( buf, size, sizeof(*buf), himc_compare );
+    /* FIXME: Wine only lazily creates a default thread IMC */
+    todo_wine
+    ok( buf[0] == himc[0], "buf[0] = %p\n", buf[0] );
+    todo_wine
+    ok( buf[1] == himc[1], "buf[1] = %p\n", buf[1] );
+    todo_wine
+    ok( buf[2] == himc[2], "buf[2] = %p\n", buf[2] );
+
+    return 0;
+}
+
+static void test_NtUserBuildHimcList(void)
+{
+    HIMC buf[8], himc[3], new_himc;
+    NTSTATUS status;
+    UINT size, ret;
+    HANDLE thread;
+
+    size = 0xdeadbeef;
+    memset( buf, 0xcd, sizeof(buf) );
+    status = NtUserBuildHimcList( GetCurrentThreadId(), ARRAYSIZE( buf ), buf, &size );
+    ok( !status, "NtUserBuildHimcList failed: %#lx\n", status );
+    ok( size == 1, "size = %u\n", size );
+    ok( !!buf[0], "buf[0] = %p\n", buf[0] );
+    himc[0] = buf[0];
+
+
+    new_himc = NtUserCreateInputContext( 0xdeadbeef );
+    ok( !!new_himc, "NtUserCreateInputContext failed, error %lu\n", GetLastError() );
+
+    himc[1] = new_himc;
+    qsort( himc, 2, sizeof(*himc), himc_compare );
+
+    size = 0xdeadbeef;
+    memset( buf, 0xcd, sizeof(buf) );
+    status = NtUserBuildHimcList( GetCurrentThreadId(), ARRAYSIZE( buf ), buf, &size );
+    ok( !status, "NtUserBuildHimcList failed: %#lx\n", status );
+    ok( size == 2, "size = %u\n", size );
+
+    qsort( buf, size, sizeof(*buf), himc_compare );
+    ok( buf[0] == himc[0], "buf[0] = %p\n", buf[0] );
+    ok( buf[1] == himc[1], "buf[1] = %p\n", buf[1] );
+
+    size = 0xdeadbeef;
+    memset( buf, 0xcd, sizeof(buf) );
+    status = NtUserBuildHimcList( 0, ARRAYSIZE( buf ), buf, &size );
+    ok( !status, "NtUserBuildHimcList failed: %#lx\n", status );
+    ok( size == 2, "size = %u\n", size );
+
+    qsort( buf, size, sizeof(*buf), himc_compare );
+    ok( buf[0] == himc[0], "buf[0] = %p\n", buf[0] );
+    ok( buf[1] == himc[1], "buf[1] = %p\n", buf[1] );
+
+    size = 0xdeadbeef;
+    memset( buf, 0xcd, sizeof(buf) );
+    status = NtUserBuildHimcList( -1, ARRAYSIZE( buf ), buf, &size );
+    ok( !status, "NtUserBuildHimcList failed: %#lx\n", status );
+    ok( size == 2, "size = %u\n", size );
+
+    qsort( buf, size, sizeof(*buf), himc_compare );
+    ok( buf[0] == himc[0], "buf[0] = %p\n", buf[0] );
+    ok( buf[1] == himc[1], "buf[1] = %p\n", buf[1] );
+
+    thread = CreateThread( NULL, 0, test_NtUserBuildHimcList_thread, himc, 0, NULL );
+    ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
+    ret = WaitForSingleObject( thread, 5000 );
+    ok( !ret, "WaitForSingleObject returned %#x\n", ret );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHimcList( 1, ARRAYSIZE( buf ), buf, &size );
+    todo_wine
+    ok( status == STATUS_INVALID_PARAMETER, "NtUserBuildHimcList returned %#lx\n", status );
+    size = 0xdeadbeef;
+    status = NtUserBuildHimcList( GetCurrentProcessId(), ARRAYSIZE( buf ), buf, &size );
+    todo_wine
+    ok( status == STATUS_INVALID_PARAMETER, "NtUserBuildHimcList returned %#lx\n", status );
+    size = 0xdeadbeef;
+    status = NtUserBuildHimcList( GetCurrentThreadId(), 1, NULL, &size );
+    ok( status == STATUS_UNSUCCESSFUL, "NtUserBuildHimcList returned %#lx\n", status );
+    size = 0xdeadbeef;
+    status = NtUserBuildHimcList( GetCurrentThreadId(), 0, buf, &size );
+    ok( !status, "NtUserBuildHimcList failed: %#lx\n", status );
+    ok( size == 0, "size = %u\n", size );
+
+    ret = NtUserDestroyInputContext( new_himc );
+    ok( !!ret, "NtUserDestroyInputContext failed, error %lu\n", GetLastError() );
 }
 
 static BOOL WINAPI count_win( HWND hwnd, LPARAM lparam )
@@ -839,6 +1078,284 @@ static void test_inter_process_child( HWND hwnd )
     PostMessageA( hwnd, WM_USER, 0, 0 );
 }
 
+static DWORD CALLBACK test_NtUserGetPointerInfoList_thread( void *arg )
+{
+    POINTER_INFO pointer_info[4] = {0};
+    UINT32 entry_count, pointer_count;
+    HWND hwnd;
+    BOOL ret;
+
+    hwnd = CreateWindowW( L"test", L"test name", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 200, 200, 0, 0, NULL, 0 );
+    flush_events();
+
+    memset( &pointer_info, 0xcd, sizeof(pointer_info) );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO), &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    ok( pointer_count == 2, "got pointer_count %u\n", pointer_count );
+    ok( entry_count == 2, "got entry_count %u\n", entry_count );
+
+    DestroyWindow( hwnd );
+
+    return 0;
+}
+
+#define check_pointer_info( a, b ) check_pointer_info_( __LINE__, a, b )
+static void check_pointer_info_( int line, const POINTER_INFO *actual, const POINTER_INFO *expected )
+{
+    check_member( *actual, *expected, "%#lx", pointerType );
+    check_member( *actual, *expected, "%#x", pointerId );
+    check_member( *actual, *expected, "%#x", frameId );
+    check_member( *actual, *expected, "%#x", pointerFlags );
+    check_member( *actual, *expected, "%p", sourceDevice );
+    check_member( *actual, *expected, "%p", hwndTarget );
+    check_member( *actual, *expected, "%+ld", ptPixelLocation.x );
+    check_member( *actual, *expected, "%+ld", ptPixelLocation.y );
+    check_member( *actual, *expected, "%+ld", ptHimetricLocation.x );
+    check_member( *actual, *expected, "%+ld", ptHimetricLocation.y );
+    check_member( *actual, *expected, "%+ld", ptPixelLocationRaw.x );
+    check_member( *actual, *expected, "%+ld", ptPixelLocationRaw.y );
+    check_member( *actual, *expected, "%+ld", ptHimetricLocationRaw.x );
+    check_member( *actual, *expected, "%+ld", ptHimetricLocationRaw.y );
+    check_member( *actual, *expected, "%lu", dwTime );
+    check_member( *actual, *expected, "%u", historyCount );
+    check_member( *actual, *expected, "%#x", InputData );
+    check_member( *actual, *expected, "%#lx", dwKeyStates );
+    check_member( *actual, *expected, "%I64u", PerformanceCount );
+    check_member( *actual, *expected, "%#x", ButtonChangeType );
+}
+
+static void test_NtUserGetPointerInfoList( BOOL mouse_in_pointer_enabled )
+{
+    void *invalid_ptr = (void *)0xdeadbeef;
+    POINTER_TOUCH_INFO touch_info[4] = {0};
+    POINTER_PEN_INFO pen_info[4] = {0};
+    POINTER_INFO pointer_info[4] = {0};
+    UINT32 entry_count, pointer_count;
+    WNDCLASSW cls =
+    {
+        .lpfnWndProc   = DefWindowProcW,
+        .hInstance     = GetModuleHandleW( NULL ),
+        .hbrBackground = GetStockObject( WHITE_BRUSH ),
+        .lpszClassName = L"test",
+    };
+    HANDLE thread;
+    SIZE_T size;
+    ATOM class;
+    DWORD res;
+    HWND hwnd;
+    BOOL ret;
+
+    class = RegisterClassW( &cls );
+    ok( class, "RegisterClassW failed: %lu\n", GetLastError() );
+
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO), invalid_ptr, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_NOACCESS, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO), &entry_count, invalid_ptr, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_NOACCESS, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO), &entry_count, &pointer_count, invalid_ptr );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_NOACCESS || broken(GetLastError() == ERROR_INVALID_PARAMETER) /* w10 32bit */, "got error %lu\n", GetLastError() );
+
+    memset( pointer_info, 0xcd, sizeof(pointer_info) );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO), &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    ok( pointer_count == 2, "got pointer_count %u\n", pointer_count );
+    ok( entry_count == 2, "got entry_count %u\n", entry_count );
+
+    SetCursorPos( 500, 500 );  /* avoid generating mouse message on window creation */
+
+    hwnd = CreateWindowW( L"test", L"test name", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 200, 200, 0, 0, NULL, 0 );
+    flush_events();
+
+    memset( pointer_info, 0xcd, sizeof(pointer_info) );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO), &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    ok( pointer_count == 2, "got pointer_count %u\n", pointer_count );
+    ok( entry_count == 2, "got entry_count %u\n", entry_count );
+
+    SetCursorPos( 200, 200 );
+    flush_events();
+    mouse_event( MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0 );
+    flush_events();
+    mouse_event( MOUSEEVENTF_LEFTUP, 0, 0, 0, 0 );
+    flush_events();
+    mouse_event( MOUSEEVENTF_MOVE, 10, 10, 0, 0 );
+    flush_events();
+
+    memset( pointer_info, 0xcd, sizeof(pointer_info) );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO), &entry_count, &pointer_count, pointer_info );
+    todo_wine_if(mouse_in_pointer_enabled)
+    ok( ret == mouse_in_pointer_enabled, "NtUserGetPointerInfoList failed, error %lu\n", GetLastError() );
+    if (!ret)
+    {
+        todo_wine
+        ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+        goto done;
+    }
+
+    ok( pointer_count == 1, "got pointer_count %u\n", pointer_count );
+    ok( entry_count == 1, "got entry_count %u\n", entry_count );
+    ok( pointer_info[0].pointerType == PT_MOUSE, "got pointerType %lu\n", pointer_info[0].pointerType );
+    ok( pointer_info[0].pointerId == 1, "got pointerId %u\n", pointer_info[0].pointerId );
+    ok( !!pointer_info[0].frameId, "got frameId %u\n", pointer_info[0].frameId );
+    ok( pointer_info[0].pointerFlags == (0x20000 | POINTER_MESSAGE_FLAG_INRANGE | POINTER_MESSAGE_FLAG_PRIMARY),
+        "got pointerFlags %#x\n", pointer_info[0].pointerFlags );
+    ok( pointer_info[0].sourceDevice == INVALID_HANDLE_VALUE || broken(!!pointer_info[0].sourceDevice) /* w1064v1809 32bit */,
+        "got sourceDevice %p\n", pointer_info[0].sourceDevice );
+    ok( pointer_info[0].hwndTarget == hwnd, "got hwndTarget %p\n", pointer_info[0].hwndTarget );
+    ok( !!pointer_info[0].ptPixelLocation.x, "got ptPixelLocation %s\n", wine_dbgstr_point( &pointer_info[0].ptPixelLocation ) );
+    ok( !!pointer_info[0].ptPixelLocation.y, "got ptPixelLocation %s\n", wine_dbgstr_point( &pointer_info[0].ptPixelLocation ) );
+    ok( !!pointer_info[0].ptHimetricLocation.x, "got ptHimetricLocation %s\n", wine_dbgstr_point( &pointer_info[0].ptHimetricLocation ) );
+    ok( !!pointer_info[0].ptHimetricLocation.y, "got ptHimetricLocation %s\n", wine_dbgstr_point( &pointer_info[0].ptHimetricLocation ) );
+    ok( !!pointer_info[0].ptPixelLocationRaw.x, "got ptPixelLocationRaw %s\n", wine_dbgstr_point( &pointer_info[0].ptPixelLocationRaw ) );
+    ok( !!pointer_info[0].ptPixelLocationRaw.y, "got ptPixelLocationRaw %s\n", wine_dbgstr_point( &pointer_info[0].ptPixelLocationRaw ) );
+    ok( !!pointer_info[0].ptHimetricLocationRaw.x, "got ptHimetricLocationRaw %s\n", wine_dbgstr_point( &pointer_info[0].ptHimetricLocationRaw ) );
+    ok( !!pointer_info[0].ptHimetricLocationRaw.y, "got ptHimetricLocationRaw %s\n", wine_dbgstr_point( &pointer_info[0].ptHimetricLocationRaw ) );
+    ok( !!pointer_info[0].dwTime, "got dwTime %lu\n", pointer_info[0].dwTime );
+    ok( pointer_info[0].historyCount == 1, "got historyCount %u\n", pointer_info[0].historyCount );
+    ok( pointer_info[0].InputData == 0, "got InputData %u\n", pointer_info[0].InputData );
+    ok( pointer_info[0].dwKeyStates == 0, "got dwKeyStates %lu\n", pointer_info[0].dwKeyStates );
+    ok( !!pointer_info[0].PerformanceCount, "got PerformanceCount %I64u\n", pointer_info[0].PerformanceCount );
+    ok( pointer_info[0].ButtonChangeType == 0, "got ButtonChangeType %u\n", pointer_info[0].ButtonChangeType );
+
+    thread = CreateThread( NULL, 0, test_NtUserGetPointerInfoList_thread, NULL, 0, NULL );
+    res = WaitForSingleObject( thread, 5000 );
+    ok( !res, "WaitForSingleObject returned %#lx, error %lu\n", res, GetLastError() );
+
+    memset( pen_info, 0xa5, sizeof(pen_info) );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_PEN, 0, 0, sizeof(POINTER_PEN_INFO), &entry_count, &pointer_count, pen_info );
+    ok( ret, "NtUserGetPointerInfoList failed, error %lu\n", GetLastError() );
+    ok( pointer_count == 1, "got pointer_count %u\n", pointer_count );
+    ok( entry_count == 1, "got entry_count %u\n", entry_count );
+    check_pointer_info( &pen_info[0].pointerInfo, &pointer_info[0] );
+    memset( touch_info, 0xa5, sizeof(touch_info) );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_TOUCH, 0, 0, sizeof(POINTER_TOUCH_INFO), &entry_count, &pointer_count, touch_info );
+    ok( ret, "NtUserGetPointerInfoList failed, error %lu\n", GetLastError() );
+    ok( pointer_count == 1, "got pointer_count %u\n", pointer_count );
+    ok( entry_count == 1, "got entry_count %u\n", entry_count );
+    check_pointer_info( &touch_info[0].pointerInfo, &pointer_info[0] );
+
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO) - 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_PEN, 0, 0, sizeof(POINTER_PEN_INFO) - 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_TOUCH, 0, 0, sizeof(POINTER_TOUCH_INFO) - 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_TOUCHPAD, 0, 0, sizeof(POINTER_TOUCH_INFO) - 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_POINTER, 0, 0, sizeof(POINTER_INFO) + 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_PEN, 0, 0, sizeof(POINTER_PEN_INFO) + 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_TOUCH, 0, 0, sizeof(POINTER_TOUCH_INFO) + 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    entry_count = pointer_count = 2;
+    ret = NtUserGetPointerInfoList( 1, PT_TOUCHPAD, 0, 0, sizeof(POINTER_TOUCH_INFO) + 1, &entry_count, &pointer_count, pointer_info );
+    ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+
+    for (size = 0; size < 0xfff; ++size)
+    {
+        char buffer[0x1000];
+        entry_count = pointer_count = 2;
+        ret = NtUserGetPointerInfoList( 1, PT_MOUSE, 0, 0, size, &entry_count, &pointer_count, buffer );
+        ok( !ret, "NtUserGetPointerInfoList succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    }
+
+done:
+    DestroyWindow( hwnd );
+
+    ret = UnregisterClassW( L"test", GetModuleHandleW(NULL) );
+    ok( ret, "UnregisterClassW failed: %lu\n", GetLastError() );
+}
+
+static void test_NtUserEnableMouseInPointer_process( const char *arg )
+{
+    DWORD enable = strtoul( arg, 0, 10 );
+    BOOL ret;
+
+    ret = NtUserIsMouseInPointerEnabled();
+    ok( !ret, "NtUserIsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
+
+    ret = NtUserEnableMouseInPointer( enable );
+    todo_wine
+    ok( ret, "NtUserEnableMouseInPointer failed, error %lu\n", GetLastError() );
+    ret = NtUserIsMouseInPointerEnabled();
+    todo_wine_if(enable)
+    ok( ret == enable, "NtUserIsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserEnableMouseInPointer( !enable );
+    ok( !ret, "NtUserEnableMouseInPointer succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError() );
+    ret = NtUserIsMouseInPointerEnabled();
+    todo_wine_if(enable)
+    ok( ret == enable, "NtUserIsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
+
+    ret = NtUserEnableMouseInPointer( enable );
+    todo_wine
+    ok( ret, "NtUserEnableMouseInPointer failed, error %lu\n", GetLastError() );
+    ret = NtUserIsMouseInPointerEnabled();
+    todo_wine_if(enable)
+    ok( ret == enable, "NtUserIsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
+
+    test_NtUserGetPointerInfoList( enable );
+}
+
+static void test_NtUserEnableMouseInPointer( char **argv, BOOL enable )
+{
+    STARTUPINFOA startup = {.cb = sizeof(STARTUPINFOA)};
+    PROCESS_INFORMATION info = {0};
+    char cmdline[MAX_PATH * 2];
+    BOOL ret;
+
+    sprintf( cmdline, "%s %s NtUserEnableMouseInPointer %u", argv[0], argv[1], enable );
+    ret = CreateProcessA( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info );
+    ok( ret, "CreateProcessA failed, error %lu\n", GetLastError() );
+    if (!ret) return;
+
+    wait_child_process( info.hProcess );
+    CloseHandle( info.hThread );
+    CloseHandle( info.hProcess );
+}
+
 struct lparam_hook_test
 {
     const char *name;
@@ -864,6 +1381,19 @@ static const struct lparam_hook_test *current_hook_test;
 static LPARAM callwnd_hook_lparam, callwnd_hook_lparam2, retwnd_hook_lparam, retwnd_hook_lparam2;
 static LPARAM wndproc_lparam;
 static char lparam_buffer[521];
+
+static void check_zero_memory( const char *mem, size_t size )
+{
+    size_t i;
+    for (i = 0; i < size; i++)
+    {
+        if (mem[i])
+        {
+            ok( 0, "non-zero byte %x at offset %Iu\n", mem[i], i );
+            return;
+        }
+    }
+}
 
 static void check_params( const struct lparam_hook_test *test, UINT message,
                          WPARAM wparam, LPARAM lparam, BOOL is_ret )
@@ -911,8 +1441,14 @@ static void check_params( const struct lparam_hook_test *test, UINT message,
         }
         break;
 
+    case CB_GETLBTEXT:
+    case LB_GETTEXT:
+        check_zero_memory( (const char *)lparam, 2048 );
+        break;
+
     default:
-        if (test->check_size) {
+        if (test->check_size)
+        {
             const void *expected;
             if (is_ret && test->check_lparam)
                 expected = test->check_lparam;
@@ -929,7 +1465,7 @@ static void check_params( const struct lparam_hook_test *test, UINT message,
 
 static void poison_lparam( const struct lparam_hook_test *test, LPARAM lparam )
 {
-    /* message copy is never transfered back in hooks */
+    /* message copy is never transferred back in hooks */
     if (test->lparam_size && lparam != (LPARAM)lparam_buffer)
         memset( (void *)lparam, 0xc0, test->lparam_size );
 }
@@ -1521,9 +2057,19 @@ START_TEST(win32u)
         return;
     }
 
+    if (argc > 3 && !strcmp( argv[2], "NtUserEnableMouseInPointer" ))
+    {
+        winetest_push_context( "enable %s", argv[3] );
+        test_NtUserEnableMouseInPointer_process( argv[3] );
+        winetest_pop_context();
+        return;
+    }
+
     test_NtUserEnumDisplayDevices();
     test_window_props();
     test_class();
+    test_NtUserCreateInputContext();
+    test_NtUserBuildHimcList();
     test_NtUserBuildHwndList();
     test_cursoricon();
     test_message_call();
@@ -1536,4 +2082,7 @@ START_TEST(win32u)
 
     test_NtUserCloseWindowStation();
     test_NtUserDisplayConfigGetDeviceInfo();
+
+    test_NtUserEnableMouseInPointer( argv, FALSE );
+    test_NtUserEnableMouseInPointer( argv, TRUE );
 }

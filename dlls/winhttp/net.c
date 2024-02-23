@@ -20,12 +20,12 @@
 #include <assert.h>
 #include <stdarg.h>
 
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
 #include "ws2tcpip.h"
 #include "winhttp.h"
 #include "schannel.h"
+#include "winternl.h"
 
 #include "wine/debug.h"
 #include "winhttp_private.h"
@@ -56,15 +56,16 @@ BOOL netconn_wait_overlapped_result( struct netconn *conn, WSAOVERLAPPED *ovr, D
     OVERLAPPED *completion_ovr;
     ULONG_PTR key;
 
-    if (!GetQueuedCompletionStatus( conn->port, len, &key, &completion_ovr, INFINITE ))
+    while (1)
     {
-        WARN( "GetQueuedCompletionStatus failed, err %lu.\n", GetLastError() );
-        return FALSE;
-    }
-    if ((key != conn->socket && conn->socket != -1) || completion_ovr != (OVERLAPPED *)ovr)
-    {
-        ERR( "Unexpected completion key %Ix, overlapped %p.\n", key, completion_ovr );
-        return FALSE;
+        if (!GetQueuedCompletionStatus( conn->port, len, &key, &completion_ovr, INFINITE ))
+        {
+            WARN( "GetQueuedCompletionStatus failed, err %lu.\n", GetLastError() );
+            return FALSE;
+        }
+        if (completion_ovr == (OVERLAPPED *)ovr && (key == conn->socket || conn->socket == -1))
+            break;
+        ERR( "Unexpected completion key %Ix, completion ovr %p, ovr %p.\n", key, completion_ovr, ovr );
     }
     return TRUE;
 }
@@ -147,7 +148,7 @@ static DWORD netconn_verify_cert( PCCERT_CONTEXT cert, WCHAR *server, DWORD secu
              */
             memcpy(&chainCopy, chain, sizeof(chainCopy));
             chainCopy.TrustStatus.dwErrorStatus = 0;
-            sslExtraPolicyPara.u.cbSize = sizeof(sslExtraPolicyPara);
+            sslExtraPolicyPara.cbSize = sizeof(sslExtraPolicyPara);
             sslExtraPolicyPara.dwAuthType = AUTHTYPE_SERVER;
             sslExtraPolicyPara.pwszServerName = server;
             sslExtraPolicyPara.fdwChecks = security_flags;
@@ -224,6 +225,8 @@ DWORD netconn_create( struct hostdata *host, const struct sockaddr_storage *sock
         free( conn );
         return ret;
     }
+    if (!SetFileCompletionNotificationModes( (HANDLE)(UINT_PTR)conn->socket, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS ))
+        ERR( "SetFileCompletionNotificationModes failed.\n" );
 
     switch (conn->sockaddr.ss_family)
     {

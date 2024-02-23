@@ -33,7 +33,6 @@
 #include "wininet.h"
 #include "strsafe.h"
 #include "initguid.h"
-#include <wine/heap.h>
 
 DEFINE_GUID(CLSID_CUri, 0xDF2FCE13, 0x25EC, 0x45BB, 0x9D,0x4C, 0xCE,0xCD,0x47,0xC2,0x43,0x0C);
 
@@ -7740,7 +7739,7 @@ static inline LPWSTR a2w(LPCSTR str) {
 
     if(str) {
         DWORD len = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
-        ret = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
+        ret = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_UTF8, 0, str, -1, ret, len);
     }
 
@@ -7750,7 +7749,7 @@ static inline LPWSTR a2w(LPCSTR str) {
 static inline DWORD strcmp_aw(LPCSTR strA, LPCWSTR strB) {
     LPWSTR strAW = a2w(strA);
     DWORD ret = lstrcmpW(strAW, strB);
-    heap_free(strAW);
+    free(strAW);
     return ret;
 }
 
@@ -7826,7 +7825,7 @@ static void change_property(IUriBuilder *builder, const uri_builder_property *pr
         trace("Unsupported operation for %d on uri_builder_tests[%ld].\n", prop->property, test_index);
     }
 
-    heap_free(valueW);
+    free(valueW);
 }
 
 /*
@@ -7888,7 +7887,7 @@ static void test_CreateUri_InvalidUri(void) {
                 hr, E_INVALIDARG, i);
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -7964,7 +7963,7 @@ static void test_IUri_GetPropertyBSTR(void) {
 
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -8018,7 +8017,7 @@ static void test_IUri_GetPropertyDWORD(void) {
 
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -8280,7 +8279,7 @@ static void test_IUri_GetStrProperties(void) {
 
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -8369,7 +8368,7 @@ static void test_IUri_GetDwordProperties(void) {
 
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -8416,7 +8415,7 @@ static void test_IUri_GetPropertyLength(void) {
                 /* Value may be unicode encoded */
                 expectedValueW = a2w(prop.value);
                 expectedLen = lstrlenW(expectedValueW);
-                heap_free(expectedValueW);
+                free(expectedValueW);
 
                 /* This won't be necessary once GetPropertyLength is implemented. */
                 receivedLen = -1;
@@ -8436,7 +8435,7 @@ static void test_IUri_GetPropertyLength(void) {
 
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -8509,7 +8508,7 @@ static void test_IUri_GetProperties(void) {
 
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -8562,7 +8561,7 @@ static void test_IUri_HasProperty(void) {
 
         if(uri) IUri_Release(uri);
 
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -8855,8 +8854,8 @@ static void test_IUri_IsEqual(void) {
         if(uriA) IUri_Release(uriA);
         if(uriB) IUri_Release(uriB);
 
-        heap_free(uriA_W);
-        heap_free(uriB_W);
+        free(uriA_W);
+        free(uriB_W);
     }
 }
 
@@ -8927,8 +8926,8 @@ static void test_CreateUriWithFragment(void) {
         }
 
         if(uri) IUri_Release(uri);
-        heap_free(uriW);
-        heap_free(fragW);
+        free(uriW);
+        free(fragW);
     }
 }
 
@@ -10142,7 +10141,7 @@ static void test_IUriBuilder(void) {
         }
         if(builder) IUriBuilder_Release(builder);
         if(uri) IUri_Release(uri);
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -10469,7 +10468,7 @@ static void test_IUriBuilder_RemoveProperties(void) {
             if(builder) IUriBuilder_Release(builder);
         }
         if(uri) IUri_Release(uri);
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -10676,10 +10675,10 @@ static void test_CoInternetCombineIUri(void) {
                 if(result) IUri_Release(result);
             }
             if(relative) IUri_Release(relative);
-            heap_free(relativeW);
+            free(relativeW);
         }
         if(base) IUri_Release(base);
-        heap_free(baseW);
+        free(baseW);
     }
 }
 
@@ -10963,10 +10962,10 @@ static void test_CoInternetCombineUrlEx(void) {
                 }
             }
             if(result) IUri_Release(result);
-            heap_free(relativeW);
+            free(relativeW);
         }
         if(base) IUri_Release(base);
-        heap_free(baseW);
+        free(baseW);
     }
 }
 
@@ -11067,13 +11066,13 @@ static void test_CoInternetParseIUri_InvalidArgs(void) {
 
     /* a long url that causes a crash on Wine */
     len = INTERNET_MAX_URL_LENGTH*2;
-    longurl = heap_alloc((len+1)*sizeof(WCHAR));
+    longurl = malloc((len + 1) * sizeof(WCHAR));
     memcpy(longurl, http_urlW, sizeof(http_urlW));
     for(i = ARRAY_SIZE(http_urlW)-1; i < len; i++)
         longurl[i] = 'x';
     longurl[len] = 0;
 
-    copy = heap_alloc((len+1)*sizeof(WCHAR));
+    copy = malloc((len + 1) * sizeof(WCHAR));
     memcpy(copy, longurl, (len+1)*sizeof(WCHAR));
 
     hr = pCreateUri(longurl, 0, 0, &uri);
@@ -11088,8 +11087,8 @@ static void test_CoInternetParseIUri_InvalidArgs(void) {
         ok(result == len, "Error: Expected 'result' to be %ld, but was %ld instead.\n",
             len, result);
     }
-    heap_free(longurl);
-    heap_free(copy);
+    free(longurl);
+    free(copy);
     if(uri) IUri_Release(uri);
 }
 
@@ -11129,7 +11128,7 @@ static void test_CoInternetParseIUri(void) {
             }
         }
         if(uri) IUri_Release(uri);
-        heap_free(uriW);
+        free(uriW);
     }
 }
 
@@ -11355,8 +11354,8 @@ static void test_CreateURLMoniker(void)
         IMoniker_Release(mon);
 
         IUri_Release(uri);
-        heap_free(url);
-        heap_free(base_url);
+        free(url);
+        free(base_url);
         if(base_uri)
             IUri_Release(base_uri);
         if(base_mon)
@@ -11433,14 +11432,14 @@ static void test_IPersistStream(void)
         ok(hr == S_OK, "%d) Seek failed 0x%08lx, expected S_OK.\n", i, hr);
         hr = IPersistStream_GetSizeMax(persist_stream, &max_size);
         ok(hr == S_OK, "%d) GetSizeMax failed 0x%08lx, expected S_OK.\n", i, hr);
-        ok(U(size).LowPart+2 == U(max_size).LowPart,
+        ok(size.LowPart+2 == max_size.LowPart,
                 "%d) Written data size is %ld, max_size %ld.\n",
-                i, U(size).LowPart, U(max_size).LowPart);
+                i, size.LowPart, max_size.LowPart);
 
         hr = IStream_Read(stream, (void*)dw_data, sizeof(DWORD), NULL);
         ok(hr == S_OK, "%d) Read failed 0x%08lx, expected S_OK.\n", i, hr);
-        ok(dw_data[0]-2 == U(size).LowPart, "%d) Structure size is %ld, expected %ld\n",
-                i, dw_data[0]-2, U(size).LowPart);
+        ok(dw_data[0]-2 == size.LowPart, "%d) Structure size is %ld, expected %ld\n",
+                i, dw_data[0]-2, size.LowPart);
         hr = IStream_Read(stream, (void*)dw_data, 6*sizeof(DWORD), NULL);
         ok(hr == S_OK, "%d) Read failed 0x%08lx, expected S_OK.\n", i, hr);
         ok(dw_data[0] == 0, "%d) Incorrect value %lx, expected 0 (unknown).\n", i, dw_data[0]);
@@ -11568,8 +11567,8 @@ static void test_IPersistStream(void)
         ok(hr == S_OK, "%d) Seek failed 0x%08lx, expected S_OK.\n", i, hr);
         hr = IStream_Read(stream, (void*)dw_data, 3*sizeof(DWORD), NULL);
         ok(hr == S_OK, "%d) Read failed 0x%08lx, expected S_OK.\n", i, hr);
-        ok(dw_data[0]-2 == U(size).LowPart, "%d) Structure size is %ld, expected %ld\n",
-                i, dw_data[0]-2, U(size).LowPart);
+        ok(dw_data[0]-2 == size.LowPart, "%d) Structure size is %ld, expected %ld\n",
+                i, dw_data[0]-2, size.LowPart);
         ok(dw_data[1] == MSHCTX_LOCAL, "%d) Incorrect value %ld, expected MSHCTX_LOCAL.\n",
                 i, dw_data[1]);
         ok(dw_data[2] == dw_data[0]-8, "%d) Incorrect value %ld, expected %ld (PersistStream size).\n",
@@ -11578,9 +11577,9 @@ static void test_IPersistStream(void)
                 (test->dword_props[Uri_PROPERTY_SCHEME-Uri_PROPERTY_DWORD_START].value == URL_SCHEME_HTTP
                  || test->dword_props[Uri_PROPERTY_SCHEME-Uri_PROPERTY_DWORD_START].value == URL_SCHEME_FTP
                  || test->dword_props[Uri_PROPERTY_SCHEME-Uri_PROPERTY_DWORD_START].value == URL_SCHEME_HTTPS))
-            U(max_size).LowPart += 3*sizeof(DWORD);
-        ok(dw_data[2] == U(max_size).LowPart, "%d) Incorrect value %ld, expected %ld (PersistStream size).\n",
-                i, dw_data[2], U(max_size).LowPart);
+            max_size.LowPart += 3*sizeof(DWORD);
+        ok(dw_data[2] == max_size.LowPart, "%d) Incorrect value %ld, expected %ld (PersistStream size).\n",
+                i, dw_data[2], max_size.LowPart);
         IMarshal_Release(marshal);
         IUri_Release(uri);
 
@@ -11606,7 +11605,7 @@ static void test_IPersistStream(void)
         IMarshal_Release(marshal);
         IStream_Release(stream);
         IUri_Release(uri);
-        heap_free(uriW);
+        free(uriW);
     }
 }
 

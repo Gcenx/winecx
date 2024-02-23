@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
-
 #include <assert.h>
 #include <stdio.h>
 
@@ -41,6 +38,8 @@ static void test_dc_values(void)
     HDC hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
     COLORREF color;
     int extra, attr;
+    float limit;
+    BOOL ret;
 
     ok( hdc != NULL, "CreateDC failed\n" );
     color = SetBkColor( hdc, 0x12345678 );
@@ -93,6 +92,22 @@ static void test_dc_values(void)
     attr = GetDeviceCaps(ULongToHandle(0xdeadbeef), TECHNOLOGY);
     ok(!attr, "GetDeviceCaps rets %d\n", attr);
     ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %lu\n", GetLastError());
+
+    /* Miter limit */
+    limit = 123.0f;
+    ret = GetMiterLimit(hdc, &limit);
+    ok(ret, "Unexpected return value.\n");
+    ok(limit == 10.0f, "Unexpected default miter limit %f.\n", limit);
+
+    limit = 456.0;
+    ret = SetMiterLimit(hdc, 0.9f, &limit);
+    ok(!ret, "Unexpected return value.\n");
+    ok(limit == 456.0f, "Unexpected default miter limit %f.\n", limit);
+
+    limit = 0.0;
+    ret = SetMiterLimit(hdc, 1.0f, &limit);
+    ok(ret, "Unexpected return value.\n");
+    ok(limit == 10.0f, "Unexpected default miter limit %f.\n", limit);
 
     DeleteDC( hdc );
 }
@@ -616,7 +631,7 @@ static void test_CreateCompatibleDC(void)
     dm.dmSize = sizeof(dm);
     bRet = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm);
     ok(bRet, "EnumDisplaySettingsEx failed\n");
-    dm.u1.s1.dmScale = 200;
+    dm.dmScale = 200;
     dm.dmFields |= DM_SCALE;
     hdc = CreateDCA( "DISPLAY", NULL, NULL, &dm );
 
@@ -1268,42 +1283,40 @@ static void test_gamma(void)
     /* set one color ramp to zeros */
     memset(ramp[0], 0, sizeof(ramp[0]));
     ret = SetDeviceGammaRamp(hdc, &ramp);
-    ok(!ret, "SetDeviceGammaRamp succeeded\n");
+    ok(!ret || broken(ret /* win1909 */),
+       "SetDeviceGammaRamp(zeroes) succeeded\n");
 
     /* set one color ramp to a flat straight rising line */
     for (i = 0; i < 256; i++) ramp[0][i] = i;
     ret = SetDeviceGammaRamp(hdc, &ramp);
-    todo_wine ok(!ret, "SetDeviceGammaRamp succeeded\n");
+    todo_wine ok(!ret || broken(ret /* win1909 */),
+       "SetDeviceGammaRamp(low) succeeded\n");
 
     /* set one color ramp to a steep straight rising line */
     for (i = 0; i < 256; i++) ramp[0][i] = i * 256;
     ret = SetDeviceGammaRamp(hdc, &ramp);
-    ok(ret, "SetDeviceGammaRamp failed\n");
+    ok(ret, "SetDeviceGammaRamp(steep) failed\n");
 
     /* try a bright gamma ramp */
     ramp[0][0] = 0;
     ramp[0][1] = 0x7FFF;
     for (i = 2; i < 256; i++) ramp[0][i] = 0xFFFF;
     ret = SetDeviceGammaRamp(hdc, &ramp);
-    ok(!ret, "SetDeviceGammaRamp succeeded\n");
+    ok(!ret || broken(ret /* win1909 */),
+       "SetDeviceGammaRam(bright) succeeded\n");
 
     /* try ramps which are not uniform */
-    ramp[0][0] = 0;
-    for (i = 1; i < 256; i++) ramp[0][i] = ramp[0][i - 1] + 512;
+    for (i = 0; i < 256; i++) ramp[0][i] = 512 * i; /* wraps midway */
     ret = SetDeviceGammaRamp(hdc, &ramp);
-    ok(ret, "SetDeviceGammaRamp failed\n");
-    ramp[0][0] = 0;
-    for (i = 2; i < 256; i+=2)
-    {
-        ramp[0][i - 1] = ramp[0][i - 2];
-        ramp[0][i] = ramp[0][i - 2] + 512;
-    }
+    ok(ret, "SetDeviceGammaRamp(wrap) failed\n");
+    for (i = 0; i < 256; i += 2)
+         ramp[0][i] = ramp[0][i + 1] = 256 * i; /* stairs */
     ret = SetDeviceGammaRamp(hdc, &ramp);
-    ok(ret, "SetDeviceGammaRamp failed\n");
+    ok(ret, "SetDeviceGammaRamp(stairs) failed\n");
 
     /* cleanup: set old ramp again */
     ret = SetDeviceGammaRamp(hdc, &oldramp);
-    ok(ret, "SetDeviceGammaRamp failed\n");
+    ok(ret, "SetDeviceGammaRamp(old) failed\n");
 
 done:
     ReleaseDC(NULL, hdc);
@@ -1348,14 +1361,14 @@ static HDC create_printer_dc(int scale, BOOL reset)
     if (!pOpenPrinterA( buffer, &hprn, NULL )) goto done;
 
     pGetPrinterA( hprn, 2, NULL, 0, &len );
-    pbuf = HeapAlloc( GetProcessHeap(), 0, len );
+    pbuf = malloc( len );
     if (!pGetPrinterA( hprn, 2, (LPBYTE)pbuf, len, &len )) goto done;
 
     pGetPrinterDriverA( hprn, NULL, 3, NULL, 0, &len );
-    dbuf = HeapAlloc( GetProcessHeap(), 0, len );
+    dbuf = malloc( len );
     if (!pGetPrinterDriverA( hprn, NULL, 3, (LPBYTE)dbuf, len, &len )) goto done;
 
-    pbuf->pDevMode->u1.s1.dmScale = scale;
+    pbuf->pDevMode->dmScale = scale;
     pbuf->pDevMode->dmFields |= DM_SCALE;
 
     hdc = CreateDCA( dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, pbuf->pDevMode );
@@ -1365,8 +1378,8 @@ static HDC create_printer_dc(int scale, BOOL reset)
 
     if (reset) ResetDCA( hdc, pbuf->pDevMode );
 done:
-    HeapFree( GetProcessHeap(), 0, dbuf );
-    HeapFree( GetProcessHeap(), 0, pbuf );
+    free( dbuf );
+    free( pbuf );
     if (hprn) pClosePrinter( hprn );
     if (winspool) FreeLibrary( winspool );
     if (!hdc) skip( "could not create a DC for the default printer\n" );
@@ -1602,7 +1615,7 @@ static void test_clip_box(void)
 
     EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &scale_mode);
     scale_mode.dmFields |= DM_SCALE;
-    scale_mode.u1.s1.dmScale = 200;
+    scale_mode.dmScale = 200;
 
     SetRect(&screen_rect, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
             GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN),

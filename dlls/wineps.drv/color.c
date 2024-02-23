@@ -24,34 +24,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
 
-/**********************************************************************
- *	     PSDRV_CopyColor
- *
- * Copies col2 into col1. Return FALSE on error.
- */
-BOOL PSDRV_CopyColor(PSCOLOR *col1, PSCOLOR *col2)
-{
-
-    switch(col2->type) {
-    case PSCOLOR_GRAY:
-        col1->value.gray.i = col2->value.gray.i;
-	break;
-
-    case PSCOLOR_RGB:
-        col1->value.rgb.r = col2->value.rgb.r;
-	col1->value.rgb.g = col2->value.rgb.g;
-	col1->value.rgb.b = col2->value.rgb.b;
-	break;
-
-    default:
-        ERR("Unknown colour type %d\n", col1->type);
-	return FALSE;
-    }
-
-    col1->type = col2->type;
-    return TRUE;
-}
-
 PSRGB rgb_to_grayscale_scale( void )
 {
     static const PSRGB scale = {0.3, 0.59, 0.11};
@@ -95,7 +67,7 @@ void PSDRV_CreateColor( print_ctx *ctx, PSCOLOR *pscolor, COLORREF wincolor )
 /***********************************************************************
  *           PSDRV_SetBkColor
  */
-COLORREF CDECL PSDRV_SetBkColor( print_ctx *ctx, COLORREF color )
+COLORREF PSDRV_SetBkColor( print_ctx *ctx, COLORREF color )
 {
     PSDRV_CreateColor(ctx, &ctx->bkColor, color);
     return color;
@@ -105,7 +77,7 @@ COLORREF CDECL PSDRV_SetBkColor( print_ctx *ctx, COLORREF color )
 /***********************************************************************
  *           PSDRV_SetTextColor
  */
-COLORREF CDECL PSDRV_SetTextColor( print_ctx *ctx, COLORREF color )
+COLORREF PSDRV_SetTextColor( print_ctx *ctx, COLORREF color )
 {
     PSDRV_CreateColor(ctx, &ctx->font.color, color);
     ctx->font.set = FALSE;

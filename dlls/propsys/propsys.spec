@@ -41,7 +41,7 @@
 @ stub InitPropVariantFromResource
 @ stub InitPropVariantFromStrRet
 @ stub InitPropVariantFromStringAsVector
-@ stub InitPropVariantFromStringVector
+@ stdcall InitPropVariantFromStringVector(ptr long ptr)
 @ stub InitPropVariantFromUInt16Vector
 @ stub InitPropVariantFromUInt32Vector
 @ stub InitPropVariantFromUInt64Vector
@@ -145,7 +145,7 @@
 @ stdcall PropVariantToUInt32(ptr ptr)
 @ stub PropVariantToUInt32Vector
 @ stub PropVariantToUInt32VectorAlloc
-@ stub PropVariantToUInt32WithDefault
+@ stdcall PropVariantToUInt32WithDefault(ptr long)
 @ stdcall PropVariantToUInt64(ptr ptr)
 @ stub PropVariantToUInt64Vector
 @ stub PropVariantToUInt64VectorAlloc
@@ -190,7 +190,7 @@
 @ stub VariantToInt64WithDefault
 @ stub VariantToPropVariant
 @ stub VariantToStrRet
-@ stub VariantToString
+@ stdcall VariantToString(ptr ptr long)
 @ stub VariantToStringAlloc
 @ stub VariantToStringArray
 @ stub VariantToStringArrayAlloc

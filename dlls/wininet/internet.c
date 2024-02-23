@@ -637,6 +637,7 @@ static LONG INTERNET_LoadProxySettings( proxyinfo_t *lpwpi )
                 if (!(szProxy = malloc( len )))
                 {
                     RegCloseKey( key );
+                    FreeProxyInfo( lpwpi );
                     return ERROR_OUTOFMEMORY;
                 }
                 RegQueryValueExW( key, L"ProxyOverride", NULL, &type, (BYTE*)szProxy, &len );
@@ -661,6 +662,7 @@ static LONG INTERNET_LoadProxySettings( proxyinfo_t *lpwpi )
             if (!(envproxyW = malloc( wcslen(envproxy) * sizeof(WCHAR) )))
             {
                 RegCloseKey( key );
+                FreeProxyInfo( lpwpi );
                 return ERROR_OUTOFMEMORY;
             }
             lstrcpyW( envproxyW, envproxy );
@@ -957,6 +959,7 @@ static const object_vtbl_t APPINFOVtbl = {
     APPINFO_SetOption,
     NULL,
     NULL,
+    NULL,
     NULL
 };
 
@@ -1215,12 +1218,15 @@ BOOL WINAPI InternetGetConnectedStateExW(LPDWORD lpdwStatus, LPWSTR lpszConnecti
 
     /* Must be zero */
     if(dwReserved)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
+    }
 
     for (;;)
     {
         ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER |
-                      GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_GATEWAYS;
+                      GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_GATEWAYS;
         ULONG errcode = GetAdaptersAddresses(AF_UNSPEC, flags, NULL, buf, &size);
 
         if (errcode == ERROR_SUCCESS)
@@ -1295,8 +1301,12 @@ BOOL WINAPI InternetGetConnectedStateExA(LPDWORD lpdwStatus, LPSTR lpszConnectio
     rc = InternetGetConnectedStateExW(lpdwStatus,lpwszConnectionName, dwNameLen,
                                       dwReserved);
     if (rc && lpwszConnectionName)
+    {
         WideCharToMultiByte(CP_ACP,0,lpwszConnectionName,-1,lpszConnectionName,
                             dwNameLen, NULL, NULL);
+        /* Yes, blindly truncate double-byte characters */
+        lpszConnectionName[dwNameLen - 1] = '\0';
+    }
 
     free(lpwszConnectionName);
     return rc;
@@ -2155,14 +2165,36 @@ INTERNET_STATUS_CALLBACK WINAPI InternetSetStatusCallbackW(
 
 /***********************************************************************
  *           InternetSetFilePointer (WININET.@)
+ *
+ * Sets read position for an open internet file.
+ *
+ * RETURNS
+ *    Current position of the file on success
+ *    INVALID_SET_FILE_POINTER on failure
  */
 DWORD WINAPI InternetSetFilePointer(HINTERNET hFile, LONG lDistanceToMove,
     PVOID pReserved, DWORD dwMoveContext, DWORD_PTR dwContext)
 {
-    FIXME("(%p %ld %p %ld %Ix): stub\n", hFile, lDistanceToMove, pReserved, dwMoveContext, dwContext);
+    object_header_t *hdr;
+    DWORD res;
 
-    SetLastError(ERROR_INTERNET_INVALID_OPERATION);
-    return INVALID_SET_FILE_POINTER;
+    TRACE("(%p %ld %p %ld %Ix)\n", hFile, lDistanceToMove, pReserved, dwMoveContext, dwContext);
+
+    hdr = get_handle_object(hFile);
+    if(!hdr) {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return INVALID_SET_FILE_POINTER;
+    }
+
+    if(hdr->vtbl->SetFilePointer) {
+        res = hdr->vtbl->SetFilePointer(hdr, lDistanceToMove, dwMoveContext);
+    }else {
+        SetLastError(ERROR_INVALID_HANDLE);
+        res = INVALID_SET_FILE_POINTER;
+    }
+
+    WININET_Release(hdr);
+    return res;
 }
 
 /***********************************************************************
@@ -2408,6 +2440,8 @@ static WCHAR *detect_proxy_autoconfig_url_dhcp(void)
             TRACE("returning %s\n", debugstr_w(ret));
             break;
         }
+        free( buf );
+        buf = NULL;
     }
 
 done:

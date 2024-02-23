@@ -28,22 +28,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(msg);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
-union packed_structs
-{
-    struct packed_CREATESTRUCTW cs;
-    struct packed_DRAWITEMSTRUCT dis;
-    struct packed_MEASUREITEMSTRUCT mis;
-    struct packed_DELETEITEMSTRUCT dls;
-    struct packed_COMPAREITEMSTRUCT cis;
-    struct packed_WINDOWPOS wp;
-    struct packed_COPYDATASTRUCT cds;
-    struct packed_HELPINFO hi;
-    struct packed_NCCALCSIZE_PARAMS ncp;
-    struct packed_MSG msg;
-    struct packed_MDINEXTMENU mnm;
-    struct packed_MDICREATESTRUCTW mcs;
-};
-
 static inline void *get_buffer( void *static_buffer, size_t size, size_t need )
 {
     if (size >= need) return static_buffer;
@@ -754,8 +738,7 @@ static size_t string_size( const void *str, BOOL ansi )
  *
  * Unpack a message received from win32u.
  */
-void unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
-                     void *buffer, size_t size, BOOL ansi )
+void unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam, void *buffer, BOOL ansi )
 {
     switch(message)
     {
@@ -832,7 +815,7 @@ BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size )
         buffer = (char *)params + offset;
 
         unpack_message( params->hwnd, params->msg, &params->wparam, &params->lparam,
-                        buffer, packed_size, params->ansi );
+                        buffer, params->ansi );
     }
 
     result = dispatch_win_proc_params( params );
@@ -876,7 +859,7 @@ BOOL WINAPI User32CallSendAsyncCallback( const struct send_async_params *params,
  *
  *   ECMA-234, Win32
  */
-LRESULT WINAPI CallWindowProcA( WNDPROC func, HWND hwnd, UINT msg, WPARAM wParam,  LPARAM lParam )
+LRESULT WINAPI DECLSPEC_HOTPATCH CallWindowProcA( WNDPROC func, HWND hwnd, UINT msg, WPARAM wParam,  LPARAM lParam )
 {
     struct win_proc_params params;
 

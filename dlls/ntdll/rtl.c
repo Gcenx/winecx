@@ -26,8 +26,6 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #define WIN32_NO_STATUS
 #include "winsock2.h"
 #include "windef.h"
@@ -41,6 +39,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 WINE_DECLARE_DEBUG_CHANNEL(debugstr);
+
+#define htons(x) RtlUshortByteSwap(x)
+#define ntohs(x) RtlUshortByteSwap(x)
 
 /* CRC polynomial 0xedb88320 */
 static const DWORD CRC_table[256] =
@@ -684,7 +685,7 @@ __ASM_FASTCALL_FUNC(RtlUshortByteSwap, 4,
 /*************************************************************************
  * RtlUniform   [NTDLL.@]
  *
- * Generates an uniform random number
+ * Generates a uniform random number
  *
  * PARAMS
  *  seed [O] The seed of the Random function
@@ -693,12 +694,7 @@ __ASM_FASTCALL_FUNC(RtlUshortByteSwap, 4,
  *  It returns a random number uniformly distributed over [0..MAXLONG-1].
  *
  * NOTES
- *  Generates an uniform random number using D.H. Lehmer's 1948 algorithm.
- *  In our case the algorithm is:
- *
- *|  result = (*seed * 0x7fffffed + 0x7fffffc3) % MAXLONG;
- *|
- *|  *seed = result;
+ *  Generates a uniform random number using a linear congruential generator.
  *
  * DIFFERENCES
  *  The native documentation states that the random number is
@@ -706,27 +702,10 @@ __ASM_FASTCALL_FUNC(RtlUshortByteSwap, 4,
  *  function and our function return a random number uniformly
  *  distributed over [0..MAXLONG-1].
  */
-ULONG WINAPI RtlUniform (PULONG seed)
+ULONG WINAPI RtlUniform( ULONG *seed )
 {
-    ULONG result;
-
-   /*
-    * Instead of the algorithm stated above, we use the algorithm
-    * below, which is totally equivalent (see the tests), but does
-    * not use a division and therefore is faster.
-    */
-    result = *seed * 0xffffffed + 0x7fffffc3;
-    if (result == 0xffffffff || result == 0x7ffffffe) {
-	result = (result + 2) & MAXLONG;
-    } else if (result == 0x7fffffff) {
-	result = 0;
-    } else if ((result & 0x80000000) == 0) {
-	result = result + (~result & 1);
-    } else {
-	result = (result + (result & 1)) & MAXLONG;
-    } /* if */
-    *seed = result;
-    return result;
+    /* See the tests for details. */
+    return (*seed = ((ULONGLONG)*seed * 0x7fffffed + 0x7fffffc3) % 0x7fffffff);
 }
 
 
@@ -1589,7 +1568,7 @@ PVOID WINAPI RtlDecodePointer( PVOID ptr )
 VOID WINAPI RtlInitializeSListHead(PSLIST_HEADER list)
 {
 #ifdef _WIN64
-    list->s.Alignment = list->s.Region = 0;
+    list->Alignment = list->Region = 0;
     list->Header16.HeaderType = 1;  /* we use the 16-byte header */
 #else
     list->Alignment = 0;
@@ -1604,7 +1583,7 @@ WORD WINAPI RtlQueryDepthSList(PSLIST_HEADER list)
 #ifdef _WIN64
     return list->Header16.Depth;
 #else
-    return list->s.Depth;
+    return list->Depth;
 #endif
 }
 
@@ -1616,7 +1595,7 @@ PSLIST_ENTRY WINAPI RtlFirstEntrySList(const SLIST_HEADER* list)
 #ifdef _WIN64
     return (SLIST_ENTRY *)((ULONG_PTR)list->Header16.NextEntry << 4);
 #else
-    return list->s.Next.Next;
+    return list->Next.Next;
 #endif
 }
 
@@ -1629,24 +1608,24 @@ PSLIST_ENTRY WINAPI RtlInterlockedFlushSList(PSLIST_HEADER list)
 
 #ifdef _WIN64
     if (!list->Header16.NextEntry) return NULL;
-    new.s.Alignment = new.s.Region = 0;
+    new.Alignment = new.Region = 0;
     new.Header16.HeaderType = 1;  /* we use the 16-byte header */
     do
     {
         old = *list;
         new.Header16.Sequence = old.Header16.Sequence + 1;
-    } while (!InterlockedCompareExchange128((__int64 *)list, new.s.Region, new.s.Alignment, (__int64 *)&old));
+    } while (!InterlockedCompareExchange128((__int64 *)list, new.Region, new.Alignment, (__int64 *)&old));
     return (SLIST_ENTRY *)((ULONG_PTR)old.Header16.NextEntry << 4);
 #else
-    if (!list->s.Next.Next) return NULL;
+    if (!list->Next.Next) return NULL;
     new.Alignment = 0;
     do
     {
         old = *list;
-        new.s.Sequence = old.s.Sequence + 1;
+        new.Sequence = old.Sequence + 1;
     } while (InterlockedCompareExchange64((__int64 *)&list->Alignment, new.Alignment,
                                           old.Alignment) != old.Alignment);
-    return old.s.Next.Next;
+    return old.Next.Next;
 #endif
 }
 
@@ -1665,19 +1644,19 @@ PSLIST_ENTRY WINAPI RtlInterlockedPushEntrySList(PSLIST_HEADER list, PSLIST_ENTR
         entry->Next = (SLIST_ENTRY *)((ULONG_PTR)old.Header16.NextEntry << 4);
         new.Header16.Depth = old.Header16.Depth + 1;
         new.Header16.Sequence = old.Header16.Sequence + 1;
-    } while (!InterlockedCompareExchange128((__int64 *)list, new.s.Region, new.s.Alignment, (__int64 *)&old));
+    } while (!InterlockedCompareExchange128((__int64 *)list, new.Region, new.Alignment, (__int64 *)&old));
     return (SLIST_ENTRY *)((ULONG_PTR)old.Header16.NextEntry << 4);
 #else
-    new.s.Next.Next = entry;
+    new.Next.Next = entry;
     do
     {
         old = *list;
-        entry->Next = old.s.Next.Next;
-        new.s.Depth = old.s.Depth + 1;
-        new.s.Sequence = old.s.Sequence + 1;
+        entry->Next = old.Next.Next;
+        new.Depth = old.Depth + 1;
+        new.Sequence = old.Sequence + 1;
     } while (InterlockedCompareExchange64((__int64 *)&list->Alignment, new.Alignment,
                                           old.Alignment) != old.Alignment);
-    return old.s.Next.Next;
+    return old.Next.Next;
 #endif
 }
 
@@ -1705,18 +1684,18 @@ PSLIST_ENTRY WINAPI RtlInterlockedPopEntrySList(PSLIST_HEADER list)
         {
         }
         __ENDTRY
-    } while (!InterlockedCompareExchange128((__int64 *)list, new.s.Region, new.s.Alignment, (__int64 *)&old));
+    } while (!InterlockedCompareExchange128((__int64 *)list, new.Region, new.Alignment, (__int64 *)&old));
 #else
     do
     {
         old = *list;
-        if (!(entry = old.s.Next.Next)) return NULL;
+        if (!(entry = old.Next.Next)) return NULL;
         /* entry could be deleted by another thread */
         __TRY
         {
-            new.s.Next.Next = entry->Next;
-            new.s.Depth = old.s.Depth - 1;
-            new.s.Sequence = old.s.Sequence + 1;
+            new.Next.Next = entry->Next;
+            new.Depth = old.Depth - 1;
+            new.Sequence = old.Sequence + 1;
         }
         __EXCEPT_PAGE_FAULT
         {
@@ -1744,19 +1723,19 @@ PSLIST_ENTRY WINAPI RtlInterlockedPushListSListEx(PSLIST_HEADER list, PSLIST_ENT
         new.Header16.Depth = old.Header16.Depth + count;
         new.Header16.Sequence = old.Header16.Sequence + 1;
         last->Next = (SLIST_ENTRY *)((ULONG_PTR)old.Header16.NextEntry << 4);
-    } while (!InterlockedCompareExchange128((__int64 *)list, new.s.Region, new.s.Alignment, (__int64 *)&old));
+    } while (!InterlockedCompareExchange128((__int64 *)list, new.Region, new.Alignment, (__int64 *)&old));
     return (SLIST_ENTRY *)((ULONG_PTR)old.Header16.NextEntry << 4);
 #else
-    new.s.Next.Next = first;
+    new.Next.Next = first;
     do
     {
         old = *list;
-        new.s.Depth = old.s.Depth + count;
-        new.s.Sequence = old.s.Sequence + 1;
-        last->Next = old.s.Next.Next;
+        new.Depth = old.Depth + count;
+        new.Sequence = old.Sequence + 1;
+        last->Next = old.Next.Next;
     } while (InterlockedCompareExchange64((__int64 *)&list->Alignment, new.Alignment,
                                           old.Alignment) != old.Alignment);
-    return old.s.Next.Next;
+    return old.Next.Next;
 #endif
 }
 
@@ -1778,7 +1757,7 @@ NTSTATUS WINAPI RtlGetCompressionWorkSpaceSize(USHORT format, PULONG compress_wo
 {
     FIXME("0x%04x, %p, %p: semi-stub\n", format, compress_workspace, decompress_workspace);
 
-    switch (format & ~COMPRESSION_ENGINE_MAXIMUM)
+    switch (format & COMPRESSION_FORMAT_MASK)
     {
         case COMPRESSION_FORMAT_LZNT1:
             if (compress_workspace)
@@ -1842,7 +1821,7 @@ NTSTATUS WINAPI RtlCompressBuffer(USHORT format, PUCHAR uncompressed, ULONG unco
     FIXME("0x%04x, %p, %lu, %p, %lu, %lu, %p, %p: semi-stub\n", format, uncompressed,
           uncompressed_size, compressed, compressed_size, chunk_size, final_size, workspace);
 
-    switch (format & ~COMPRESSION_ENGINE_MAXIMUM)
+    switch (format & COMPRESSION_FORMAT_MASK)
     {
         case COMPRESSION_FORMAT_LZNT1:
             return lznt1_compress(uncompressed, uncompressed_size, compressed,
@@ -2045,7 +2024,7 @@ NTSTATUS WINAPI RtlDecompressFragment(USHORT format, PUCHAR uncompressed, ULONG 
     TRACE("0x%04x, %p, %lu, %p, %lu, %lu, %p, %p\n", format, uncompressed,
           uncompressed_size, compressed, compressed_size, offset, final_size, workspace);
 
-    switch (format & ~COMPRESSION_ENGINE_MAXIMUM)
+    switch (format & COMPRESSION_FORMAT_MASK)
     {
         case COMPRESSION_FORMAT_LZNT1:
             return lznt1_decompress(uncompressed, uncompressed_size, compressed,
@@ -2094,9 +2073,9 @@ NTSTATUS WINAPI RtlSetThreadErrorMode( DWORD mode, LPDWORD oldmode )
         return STATUS_INVALID_PARAMETER_1;
 
     if (oldmode)
-        *oldmode = NtCurrentTeb()->HardErrorDisabled;
+        *oldmode = NtCurrentTeb()->HardErrorMode;
 
-    NtCurrentTeb()->HardErrorDisabled = mode;
+    NtCurrentTeb()->HardErrorMode = mode;
     return STATUS_SUCCESS;
 }
 
@@ -2113,7 +2092,7 @@ NTSTATUS WINAPI RtlSetThreadErrorMode( DWORD mode, LPDWORD oldmode )
  */
 DWORD WINAPI RtlGetThreadErrorMode( void )
 {
-    return NtCurrentTeb()->HardErrorDisabled;
+    return NtCurrentTeb()->HardErrorMode;
 }
 
 /******************************************************************************
@@ -2150,7 +2129,33 @@ void WINAPI RtlGetCurrentProcessorNumberEx(PROCESSOR_NUMBER *processor)
  */
 BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
 {
+#ifdef __aarch64__
+    static const ULONGLONG arm64_features =
+        (1ull << PF_COMPARE_EXCHANGE_DOUBLE) |
+        (1ull << PF_NX_ENABLED) |
+        (1ull << PF_ARM_VFP_32_REGISTERS_AVAILABLE) |
+        (1ull << PF_ARM_NEON_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_SECOND_LEVEL_ADDRESS_TRANSLATION) |
+        (1ull << PF_FASTFAIL_AVAILABLE) |
+        (1ull << PF_ARM_DIVIDE_INSTRUCTION_AVAILABLE) |
+        (1ull << PF_ARM_64BIT_LOADSTORE_ATOMIC) |
+        (1ull << PF_ARM_EXTERNAL_CACHE_AVAILABLE) |
+        (1ull << PF_ARM_FMAC_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_V8_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_V81_ATOMIC_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_V82_DP_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_V83_JSCVT_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_V83_LRCPC_INSTRUCTIONS_AVAILABLE);
+
+    return (feature < PROCESSOR_FEATURE_MAX && (arm64_features & (1ull << feature)) &&
+            user_shared_data->ProcessorFeatures[feature]);
+#elif defined _WIN64
     return feature < PROCESSOR_FEATURE_MAX && user_shared_data->ProcessorFeatures[feature];
+#else
+    return NtWow64IsProcessorFeaturePresent( feature );
+#endif
 }
 
 /***********************************************************************

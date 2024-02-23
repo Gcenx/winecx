@@ -27,12 +27,14 @@
 
 #define IDT_CHANGEFILETYPE 500
 #define IDT_CLOSEDIALOG    501
+#define IDT_SHOWDIALOG     502
 
 typedef enum {
     IFDEVENT_TEST_NONE = 0,
     IFDEVENT_TEST1     = 0x1,
     IFDEVENT_TEST2     = 0x2,
-    IFDEVENT_TEST3     = 0x3
+    IFDEVENT_TEST3     = 0x3,
+    IFDEVENT_TEST4     = 0x4,
 } FileDialogEventsTest;
 
 static HRESULT (WINAPI *pSHCreateShellItem)(LPCITEMIDLIST,IShellFolder*,LPCITEMIDLIST,IShellItem**);
@@ -148,7 +150,7 @@ static ULONG WINAPI IFileDialogEvents_fnRelease(IFileDialogEvents *iface)
     LONG ref = InterlockedDecrement(&This->ref);
 
     if(!ref)
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
 
     return ref;
 }
@@ -193,6 +195,15 @@ static LRESULT CALLBACK test_customize_dlgproc(HWND hwnd, UINT message, WPARAM w
             br = PostMessageW(hwnd, WM_COMMAND, IDCANCEL, 0);
             ok(br, "Failed\n");
             return TRUE;
+        case IDT_SHOWDIALOG:
+        {
+            HRESULT hr;
+            KillTimer(hwnd, IDT_SHOWDIALOG);
+            hr = IFileDialog_Show(pfd, NULL);
+            ok(hr == E_UNEXPECTED, "got 0x%08lx.\n", hr);
+            SetTimer(hwnd, IDT_CLOSEDIALOG, 100, 0);
+            return TRUE;
+        }
         }
     }
 
@@ -248,6 +259,9 @@ static HRESULT WINAPI IFileDialogEvents_fnOnFolderChange(IFileDialogEvents *ifac
             break;
         case IFDEVENT_TEST3:
             SetTimer(dlg_hwnd, IDT_CHANGEFILETYPE, 100, 0);
+            break;
+        case IFDEVENT_TEST4:
+            SetTimer(dlg_hwnd, IDT_SHOWDIALOG, 100, 0);
             break;
         default:
             ok(FALSE, "Should not happen (%d)\n", This->events_test);
@@ -311,7 +325,7 @@ static IFileDialogEvents *IFileDialogEvents_Constructor(void)
 {
     IFileDialogEventsImpl *This;
 
-    This = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IFileDialogEventsImpl));
+    This = calloc(1, sizeof(IFileDialogEventsImpl));
     This->IFileDialogEvents_iface.lpVtbl = &vt_IFileDialogEvents;
     This->ref = 1;
 
@@ -1480,6 +1494,7 @@ static void test_filename(void)
     static const WCHAR filename_dotextW[] = {'w','i','n','e','t','e','s','t','.',0};
     static const WCHAR filename_dotanddefW[] = {'w','i','n','e','t','e','s','t','.','.','w','t','e',0};
     static const WCHAR filename_defextW[] = {'w','i','n','e','t','e','s','t','.','w','t','e',0};
+    static const WCHAR filename_mixedcaseW[] = {'w','i','n','e','t','e','s','t','.','W','T','E',0};
     static const WCHAR filename_ext1W[] = {'w','i','n','e','t','e','s','t','.','w','t','1',0};
     static const WCHAR filename_ext2W[] = {'w','i','n','e','t','e','s','t','.','w','t','2',0};
     static const WCHAR filename_ext1anddefW[] =
@@ -1516,6 +1531,8 @@ static void test_filename(void)
     test_filename_savedlg(filename_noextW, defextW, filterspec, 3, filename_ext1W);
     /* Default extension, filterspec with "complex" extension */
     test_filename_savedlg(filename_noextW, defextW, filterspec2, 1, filename_ext2W);
+    /* Default extension, filterspec with extension that differs in case from the specified filename */
+    test_filename_savedlg(filename_mixedcaseW, defextW, filterspec, 0, filename_mixedcaseW);
 
     GetCurrentDirectoryW(MAX_PATH, buf);
     ok(!!pSHCreateItemFromParsingName, "SHCreateItemFromParsingName is missing.\n");
@@ -2460,6 +2477,71 @@ static void test_overwrite(void)
     IShellItem_Release(psi_current);
 }
 
+static void test_customize_remove_from_empty_combobox(void)
+{
+    IFileDialog *pfod;
+    IFileDialogCustomize *pfdc;
+    UINT i;
+    HRESULT hr;
+    hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
+                          &IID_IFileDialog, (void**)&pfod);
+    ok(hr == S_OK, "got 0x%08lx.\n", hr);
+
+    hr = IFileDialog_QueryInterface(pfod, &IID_IFileDialogCustomize, (void**)&pfdc);
+    ok(hr == S_OK, "got 0x%08lx.\n", hr);
+    if(FAILED(hr))
+    {
+        skip("Skipping IFileDialogCustomize tests.\n");
+        IFileDialog_Release(pfod);
+        return;
+    }
+
+    i = 107;
+    hr = IFileDialogCustomize_AddComboBox(pfdc, i);
+    ok(hr == S_OK, "got 0x%08lx.\n", hr);
+
+    hr = IFileDialogCustomize_RemoveAllControlItems(pfdc, i);
+    ok(hr == E_NOTIMPL, "got 0x%08lx.\n", hr);
+
+    hr = IFileDialogCustomize_SetSelectedControlItem(pfdc, i, 1000);
+    ok(hr == E_INVALIDARG, "got 0x%08lx.\n", hr);
+
+    hr = IFileDialogCustomize_RemoveControlItem(pfdc, i, 0);
+    ok(hr == E_INVALIDARG, "got 0x%08lx.\n", hr);
+
+    IFileDialogCustomize_Release(pfdc);
+    IFileDialog_Release(pfod);
+}
+
+static void test_double_show(void)
+{
+    IFileDialogEventsImpl *pfdeimpl;
+    IFileDialogEvents *pfde;
+    IFileDialog *pfd;
+    DWORD cookie;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
+                          &IID_IFileDialog, (void**)&pfd);
+    ok(hr == S_OK, "got 0x%08lx.\n", hr);
+
+    pfde = IFileDialogEvents_Constructor();
+    pfdeimpl = impl_from_IFileDialogEvents(pfde);
+    pfdeimpl->events_test = IFDEVENT_TEST4;
+
+    hr = IFileDialog_Advise(pfd, pfde, &cookie);
+    ok(hr == S_OK, "got 0x%08lx.\n", hr);
+
+    hr = IFileDialog_Show(pfd, NULL);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), "got 0x%08lx.\n", hr);
+
+    hr = IFileDialog_Unadvise(pfd, cookie);
+    ok(hr == S_OK, "got 0x%08lx.\n", hr);
+
+    IFileDialogEvents_Release(pfde);
+    IFileDialog_Release(pfd);
+}
+
 START_TEST(itemdlg)
 {
     OleInitialize(NULL);
@@ -2467,6 +2549,16 @@ START_TEST(itemdlg)
 
     if(test_instantiation())
     {
+        DWORD result_tmpdir;
+        BOOL result_set_dir;
+        WCHAR tmpdir[MAX_PATH];
+
+        /* Windows refuses to open a dialog for C:\Users\Public\Documents, so change to tmp */
+        result_tmpdir = GetTempPathW(MAX_PATH, tmpdir);
+        ok(result_tmpdir != 0, "got %ld\n", result_tmpdir);
+        result_set_dir = SetCurrentDirectoryW(tmpdir);
+        ok(result_set_dir, "failed to set dir\n");
+
         test_basics();
         test_advise();
         test_events();
@@ -2474,6 +2566,8 @@ START_TEST(itemdlg)
         test_customize();
         test_persistent_state();
         test_overwrite();
+        test_customize_remove_from_empty_combobox();
+        test_double_show();
     }
     else
         skip("Skipping all Item Dialog tests.\n");

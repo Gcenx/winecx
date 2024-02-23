@@ -19,7 +19,6 @@
 #include <stdarg.h>
 #include <FACT.h>
 
-#define NONAMELESSUNION
 #define COBJMACROS
 #include "objbase.h"
 
@@ -36,7 +35,7 @@
 #include "wine/debug.h"
 #include "wine/rbtree.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(xact3);
+WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 
 #if XACT3_VER < 0x0300
 #define IID_IXACT3Engine IID_IXACTEngine
@@ -53,7 +52,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(xact3);
 #define IXACT3WaveBankVtbl IXACTWaveBankVtbl
 #endif
 
-#define XACTNOTIFICATIONTYPE_MAX 18  /* XACTNOTIFICATIONTYPE_WAVEBANKSTREAMING_INVALIDCONTENT + 1 */
+#define XACTNOTIFICATIONTYPE_MAX 19  /* XACTNOTIFICATIONTYPE_WAVEBANKSTREAMING_INVALIDCONTENT + 1 */
 
 struct wrapper_lookup
 {
@@ -316,7 +315,7 @@ static HRESULT WINAPI IXACT3CueImpl_GetProperties(IXACT3Cue *iface,
 }
 #endif
 
-#if XACT3_VER >= 0x0300
+#if XACT3_VER >= 0x0305
 static HRESULT WINAPI IXACT3CueImpl_SetOutputVoices(IXACT3Cue *iface,
         const XAUDIO2_VOICE_SENDS *pSendList)
 {
@@ -356,7 +355,7 @@ static const IXACT3CueVtbl XACT3Cue_Vtbl =
 #if XACT3_VER >= 0x0205
     IXACT3CueImpl_GetProperties,
 #endif
-#if XACT3_VER >= 0x0300
+#if XACT3_VER >= 0x0305
     IXACT3CueImpl_SetOutputVoices,
     IXACT3CueImpl_SetOutputVoiceMatrix
 #endif
@@ -1170,7 +1169,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateSoundBank(IXACT3Engine *iface,
     UINT ret;
     HRESULT hr;
 
-    TRACE("(%p)->(%p, %lu, 0x%lx, 0x%lx, %p): stub!\n", This, pvBuffer, dwSize, dwFlags,
+    TRACE("(%p)->(%p, %lu, 0x%lx, 0x%lx, %p)\n", This, pvBuffer, dwSize, dwFlags,
             dwAllocAttributes, ppSoundBank);
 
     ret = FACTAudioEngine_CreateSoundBank(This->fact_engine, pvBuffer, dwSize,

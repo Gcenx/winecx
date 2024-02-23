@@ -114,7 +114,7 @@ static LPDLGTEMPLATEA convert_dialog( const char *p, DWORD size )
         }
         else copy_string( &out, &p, end - out );
 
-        if (*p & 0x80)  /* window */
+        if ((BYTE)*p == 0xff)  /* window */
         {
             *out++ = 0xffff;
             *out++ = get_word( &p );
@@ -249,8 +249,8 @@ static UINT_PTR CALLBACK call_hook_proc( WNDPROC16 hook, HWND hwnd, UINT msg, WP
             CREATESTRUCT16 cs;
 
             CREATESTRUCT32Ato16( cs32, &cs );
-            cs.lpszName  = MapLS( cs32->lpszName );
-            cs.lpszClass = MapLS( cs32->lpszClass );
+            cs.lpszName  = MapLS( (void *)cs32->lpszName );
+            cs.lpszClass = MapLS( (void *)cs32->lpszClass );
             lp = MapLS( &cs );
             ret = call_hook16( hook, hwnd, msg, wp, lp );
             UnMapLS( lp );
@@ -664,7 +664,7 @@ BOOL16 WINAPI GetSaveFileName16( SEGPTR ofn ) /* [in/out] address of structure w
     ofn32.nFileOffset       = lpofn->nFileOffset;
     ofn32.nFileExtension    = lpofn->nFileExtension;
     ofn32.lpstrDefExt       = MapSL( lpofn->lpstrDefExt );
-    ofn32.lCustData         = lpofn->lCustData;
+    ofn32.lCustData         = ofn; /* See WM_INITDIALOG in the hook proc */
     ofn32.lpfnHook          = dummy_hook;  /* this is to force old 3.1 dialog style */
 
     if (lpofn->Flags & OFN_ENABLETEMPLATE)

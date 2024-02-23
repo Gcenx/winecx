@@ -23,8 +23,6 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 
@@ -99,7 +97,8 @@ static struct counter *create_counter( void )
 
 static void destroy_counter( struct counter *counter )
 {
-    counter->magic = 0;
+    /* Ensure compiler doesn't optimize out the assignment with 0. */
+    SecureZeroMemory( &counter->magic, sizeof( counter->magic ) );
     free( counter->path );
     free( counter );
 }
@@ -132,7 +131,8 @@ static struct query *create_query( void )
 
 static void destroy_query( struct query *query )
 {
-    query->magic = 0;
+    /* Ensure compiler doesn't optimize out the assignment with 0. */
+    SecureZeroMemory( &query->magic, sizeof( query->magic ) );
     free( query );
 }
 
@@ -302,18 +302,18 @@ static PDH_STATUS format_value( struct counter *counter, DWORD format, union val
     factor = counter->scale ? counter->scale : counter->defaultscale;
     if (format & PDH_FMT_LONG)
     {
-        if (format & PDH_FMT_1000) value->u.longValue = raw2->longvalue * 1000;
-        else value->u.longValue = raw2->longvalue * pow( 10, factor );
+        if (format & PDH_FMT_1000) value->longValue = raw2->longvalue * 1000;
+        else value->longValue = raw2->longvalue * pow( 10, factor );
     }
     else if (format & PDH_FMT_LARGE)
     {
-        if (format & PDH_FMT_1000) value->u.largeValue = raw2->largevalue * 1000;
-        else value->u.largeValue = raw2->largevalue * pow( 10, factor );
+        if (format & PDH_FMT_1000) value->largeValue = raw2->largevalue * 1000;
+        else value->largeValue = raw2->largevalue * pow( 10, factor );
     }
     else if (format & PDH_FMT_DOUBLE)
     {
-        if (format & PDH_FMT_1000) value->u.doubleValue = raw2->doublevalue * 1000;
-        else value->u.doubleValue = raw2->doublevalue * pow( 10, factor );
+        if (format & PDH_FMT_1000) value->doubleValue = raw2->doublevalue * 1000;
+        else value->doubleValue = raw2->doublevalue * pow( 10, factor );
     }
     else
     {
@@ -1060,6 +1060,23 @@ PDH_STATUS WINAPI PdhVbAddCounter( PDH_HQUERY query, LPCSTR path, PDH_HCOUNTER *
     if (!path) return PDH_INVALID_ARGUMENT;
 
     return PDH_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ *              PdhVbGetDoubleCounterValue   (PDH.@)
+ */
+double WINAPI PdhVbGetDoubleCounterValue( PDH_HCOUNTER handle, PDH_STATUS *counter_status )
+{
+    PDH_FMT_COUNTERVALUE value;
+    PDH_STATUS status;
+
+    TRACE( "%p %p\n", handle, counter_status );
+
+    memset( &value, 0, sizeof(value) );
+    status = PdhGetFormattedCounterValue( handle, PDH_FMT_DOUBLE, NULL, &value );
+
+    if (counter_status) *counter_status = status;
+    return value.doubleValue;
 }
 
 /***********************************************************************

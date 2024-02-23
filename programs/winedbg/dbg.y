@@ -53,13 +53,13 @@ static void parser(const char*);
 %token tABORT tECHO
 %token tCLASS tMAPS tSTACK tSEGMENTS tSYMBOL tREGS tALLREGS tWND tLOCAL tEXCEPTION
 %token tPROCESS tTHREAD tEOL tEOF
-%token tFRAME tSHARE tMODULE tCOND tDISPLAY tUNDISPLAY tDISASSEMBLE
+%token tFRAME tSHARE tMODULE tCOND tDISPLAY tUNDISPLAY tDISASSEMBLE tSYSTEM
 %token tSTEPI tNEXTI tFINISH tSHOW tDIR tWHATIS tSOURCE
 %token <string> tPATH tIDENTIFIER tSTRING tINTVAR
 %token <integer> tNUM tFORMAT
 %token <type> tTYPEDEF
 %token tSYMBOLFILE tRUN tATTACH tDETACH tKILL tMAINTENANCE tTYPE tMINIDUMP
-%token tNOPROCESS
+%token tNOPROCESS tWOW
 
 /* can be prefixed by module name */
 %token <string> tVOID tCHAR tWCHAR tSHORT tINT tLONG tFLOAT tDOUBLE tUNSIGNED tSIGNED
@@ -248,10 +248,8 @@ break_command:
     ;
 
 watch_command:
-      tWATCH '*' expr_lvalue    { break_add_watch_from_lvalue(&$3, TRUE); }
-    | tWATCH identifier         { break_add_watch_from_id($2, TRUE); }
-    | tRWATCH '*' expr_lvalue   { break_add_watch_from_lvalue(&$3, FALSE); }
-    | tRWATCH identifier        { break_add_watch_from_id($2, FALSE); }
+      tWATCH expr_lvalue        { break_add_watch(&$2, TRUE); }
+    | tRWATCH expr_lvalue       { break_add_watch(&$2, FALSE); }
     ;
 
 
@@ -269,8 +267,9 @@ display_command:
 
 info_command:
       tINFO tBREAK              { break_info(); }
-    | tINFO tSHARE     		{ info_win32_module(0); }
-    | tINFO tSHARE expr_rvalue  { info_win32_module($3); }
+    | tINFO tSHARE              { info_win32_module(0, FALSE); }
+    | tINFO tWOW tSHARE         { info_win32_module(0, TRUE); }
+    | tINFO tSHARE expr_rvalue  { info_win32_module($3, FALSE); }
     | tINFO tREGS               { dbg_curr_process->be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 0); }
     | tINFO tALLREGS            { dbg_curr_process->be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 1); }
     | tINFO tSEGMENTS expr_rvalue { info_win32_segments($3 >> 3, 1); }
@@ -293,6 +292,7 @@ info_command:
     | tINFO tMAPS               { info_win32_virtual(dbg_curr_pid); }
     | tINFO tMAPS expr_rvalue   { info_win32_virtual($3); }
     | tINFO tEXCEPTION          { info_win32_exception(); }
+    | tINFO tSYSTEM             { info_win32_system(); }
     ;
 
 maintenance_command:

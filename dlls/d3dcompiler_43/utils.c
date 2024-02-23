@@ -116,9 +116,15 @@ const char *debug_d3dcompiler_d3d_blob_part(D3D_BLOB_PART part)
         WINE_D3DCOMPILER_TO_STR(D3D_BLOB_LEGACY_SHADER);
         WINE_D3DCOMPILER_TO_STR(D3D_BLOB_XNA_PREPASS_SHADER);
         WINE_D3DCOMPILER_TO_STR(D3D_BLOB_XNA_SHADER);
+        WINE_D3DCOMPILER_TO_STR(D3D_BLOB_PDB);
+        WINE_D3DCOMPILER_TO_STR(D3D_BLOB_PRIVATE_DATA);
+        WINE_D3DCOMPILER_TO_STR(D3D_BLOB_ROOT_SIGNATURE);
+        WINE_D3DCOMPILER_TO_STR(D3D_BLOB_DEBUG_NAME);
+
         WINE_D3DCOMPILER_TO_STR(D3D_BLOB_TEST_ALTERNATE_SHADER);
         WINE_D3DCOMPILER_TO_STR(D3D_BLOB_TEST_COMPILE_DETAILS);
         WINE_D3DCOMPILER_TO_STR(D3D_BLOB_TEST_COMPILE_PERF);
+        WINE_D3DCOMPILER_TO_STR(D3D_BLOB_TEST_COMPILE_REPORT);
         default:
             FIXME("Unrecognized D3D_BLOB_PART %#x\n", part);
             return "unrecognized";
@@ -520,202 +526,6 @@ void skip_u32_unknown(const char **ptr, unsigned int count)
     }
 }
 
-static void write_u32_unknown(char **ptr, uint32_t u32)
-{
-    FIXME("Writing unknown u32 0x%08x.\n", u32);
-    write_u32(ptr, u32);
-}
-
-HRESULT dxbc_add_section(struct dxbc *dxbc, DWORD tag, const char *data, size_t data_size)
-{
-    TRACE("dxbc %p, tag %s, size %#Ix.\n", dxbc, debugstr_an((const char *)&tag, 4), data_size);
-
-    if (dxbc->count >= dxbc->size)
-    {
-        struct dxbc_section *new_sections;
-        DWORD new_size = dxbc->size << 1;
-
-        new_sections = HeapReAlloc(GetProcessHeap(), 0, dxbc->sections, new_size * sizeof(*dxbc->sections));
-        if (!new_sections)
-        {
-            ERR("Failed to allocate dxbc section memory\n");
-            return E_OUTOFMEMORY;
-        }
-
-        dxbc->sections = new_sections;
-        dxbc->size = new_size;
-    }
-
-    dxbc->sections[dxbc->count].tag = tag;
-    dxbc->sections[dxbc->count].data_size = data_size;
-    dxbc->sections[dxbc->count].data = data;
-    ++dxbc->count;
-
-    return S_OK;
-}
-
-HRESULT dxbc_init(struct dxbc *dxbc, unsigned int size)
-{
-    TRACE("dxbc %p, size %u.\n", dxbc, size);
-
-    /* use a good starting value for the size if none specified */
-    if (!size) size = 2;
-
-    dxbc->sections = HeapAlloc(GetProcessHeap(), 0, size * sizeof(*dxbc->sections));
-    if (!dxbc->sections)
-    {
-        ERR("Failed to allocate dxbc section memory\n");
-        return E_OUTOFMEMORY;
-    }
-
-    dxbc->size = size;
-    dxbc->count = 0;
-
-    return S_OK;
-}
-
-HRESULT dxbc_parse(const char *data, SIZE_T data_size, struct dxbc *dxbc)
-{
-    uint32_t tag, total_size, chunk_count;
-    const char *ptr = data;
-    unsigned int i;
-    HRESULT hr;
-
-    if (!data)
-    {
-        WARN("No data supplied.\n");
-        return E_FAIL;
-    }
-
-    tag = read_u32(&ptr);
-    TRACE("tag: %s.\n", debugstr_an((const char *)&tag, 4));
-
-    if (tag != TAG_DXBC)
-    {
-        WARN("Wrong tag.\n");
-        return E_FAIL;
-    }
-
-    /* checksum? */
-    skip_u32_unknown(&ptr, 4);
-
-    skip_u32_unknown(&ptr, 1);
-
-    total_size = read_u32(&ptr);
-    TRACE("total size: %#x\n", total_size);
-
-    if (data_size != total_size)
-    {
-        WARN("Wrong size supplied.\n");
-        return D3DERR_INVALIDCALL;
-    }
-
-    chunk_count = read_u32(&ptr);
-    TRACE("chunk count: %#x\n", chunk_count);
-
-    hr = dxbc_init(dxbc, chunk_count);
-    if (FAILED(hr))
-    {
-        WARN("Failed to init dxbc\n");
-        return hr;
-    }
-
-    for (i = 0; i < chunk_count; ++i)
-    {
-        uint32_t chunk_tag, chunk_size;
-        const char *chunk_ptr;
-        uint32_t chunk_offset;
-
-        chunk_offset = read_u32(&ptr);
-        TRACE("chunk %u at offset %#x\n", i, chunk_offset);
-
-        chunk_ptr = data + chunk_offset;
-
-        chunk_tag = read_u32(&chunk_ptr);
-        chunk_size = read_u32(&chunk_ptr);
-
-        hr = dxbc_add_section(dxbc, chunk_tag, chunk_ptr, chunk_size);
-        if (FAILED(hr))
-        {
-            WARN("Failed to add section to dxbc\n");
-            return hr;
-        }
-    }
-
-    return hr;
-}
-
-void dxbc_destroy(struct dxbc *dxbc)
-{
-    TRACE("dxbc %p.\n", dxbc);
-
-    HeapFree(GetProcessHeap(), 0, dxbc->sections);
-}
-
-HRESULT dxbc_write_blob(struct dxbc *dxbc, ID3DBlob **blob)
-{
-    DWORD size = 32, offset = size + 4 * dxbc->count;
-    ID3DBlob *object;
-    HRESULT hr;
-    char *ptr;
-    unsigned int i;
-
-    TRACE("dxbc %p, blob %p.\n", dxbc, blob);
-
-    for (i = 0; i < dxbc->count; ++i)
-    {
-        size += 12 + dxbc->sections[i].data_size;
-    }
-
-    hr = D3DCreateBlob(size, &object);
-    if (FAILED(hr))
-    {
-        WARN("Failed to create blob\n");
-        return hr;
-    }
-
-    ptr = ID3D10Blob_GetBufferPointer(object);
-
-    write_u32(&ptr, TAG_DXBC);
-
-    /* signature(?) */
-    write_u32_unknown(&ptr, 0);
-    write_u32_unknown(&ptr, 0);
-    write_u32_unknown(&ptr, 0);
-    write_u32_unknown(&ptr, 0);
-
-    /* seems to be always 1 */
-    write_u32_unknown(&ptr, 1);
-
-    /* DXBC size */
-    write_u32(&ptr, size);
-
-    /* chunk count */
-    write_u32(&ptr, dxbc->count);
-
-    /* write the chunk offsets */
-    for (i = 0; i < dxbc->count; ++i)
-    {
-        write_u32(&ptr, offset);
-        offset += 8 + dxbc->sections[i].data_size;
-    }
-
-    /* write the chunks */
-    for (i = 0; i < dxbc->count; ++i)
-    {
-        write_u32(&ptr, dxbc->sections[i].tag);
-        write_u32(&ptr, dxbc->sections[i].data_size);
-        memcpy(ptr, dxbc->sections[i].data, dxbc->sections[i].data_size);
-        ptr += dxbc->sections[i].data_size;
-    }
-
-    TRACE("Created ID3DBlob %p\n", object);
-
-    *blob = object;
-
-    return S_OK;
-}
-
 void compilation_message(struct compilation_messages *msg, const char *fmt, va_list args)
 {
     char* buffer;
@@ -723,7 +533,7 @@ void compilation_message(struct compilation_messages *msg, const char *fmt, va_l
 
     if (msg->capacity == 0)
     {
-        msg->string = d3dcompiler_alloc(MESSAGEBUFFER_INITIAL_SIZE);
+        msg->string = calloc(1, MESSAGEBUFFER_INITIAL_SIZE);
         if (msg->string == NULL)
         {
             ERR("Error allocating memory for parser messages\n");
@@ -740,7 +550,7 @@ void compilation_message(struct compilation_messages *msg, const char *fmt, va_l
         if (rc < 0 || rc >= msg->capacity - msg->size)
         {
             size = msg->capacity * 2;
-            buffer = d3dcompiler_realloc(msg->string, size);
+            buffer = realloc(msg->string, size);
             if (buffer == NULL)
             {
                 ERR("Error reallocating memory for parser messages\n");

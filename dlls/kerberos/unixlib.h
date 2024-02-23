@@ -89,7 +89,7 @@ struct query_context_attributes_params
 
 struct query_ticket_cache_params
 {
-    KERB_QUERY_TKT_CACHE_RESPONSE *resp;
+    KERB_QUERY_TKT_CACHE_EX_RESPONSE *resp;
     ULONG *out_size;
 };
 
@@ -137,6 +137,7 @@ enum unix_funcs
     unix_seal_message,
     unix_unseal_message,
     unix_verify_signature,
+    unix_funcs_count,
 };
 
 #define KRB5_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )

@@ -35,11 +35,11 @@ msgstr "Negado"
 msgid "Permissions for %1"
 msgstr "Permissões para %1"
 
-#: dlls/appwiz.cpl/appwiz.rc:58
+#: dlls/appwiz.cpl/appwiz.rc:59
 msgid "Install/Uninstall"
 msgstr "Instalar/Desinstalar"
 
-#: dlls/appwiz.cpl/appwiz.rc:61
+#: dlls/appwiz.cpl/appwiz.rc:62
 msgid ""
 "To install a new program from a floppy disk, CD-ROM drive, or your hard "
 "drive, click Install."
@@ -47,11 +47,11 @@ msgstr ""
 "Para instalar um programa novo a partir de um disquete, CD-ROM ou do seu "
 "disco rígido, clique em Instalar."
 
-#: dlls/appwiz.cpl/appwiz.rc:62
+#: dlls/appwiz.cpl/appwiz.rc:63
 msgid "&Install..."
 msgstr "&Instalar..."
 
-#: dlls/appwiz.cpl/appwiz.rc:65
+#: dlls/appwiz.cpl/appwiz.rc:66
 msgid ""
 "The following software can be automatically removed. To remove a program or "
 "to modify its installed components, select it from the list and click Modify/"
@@ -61,27 +61,27 @@ msgstr ""
 "programa ou modificar seus componentes instalados, selecione-o na lista e "
 "clique em Adicionar/Remover."
 
-#: dlls/appwiz.cpl/appwiz.rc:67
+#: dlls/appwiz.cpl/appwiz.rc:68
 msgid "&Support Information"
 msgstr "Informação de &Suporte"
 
-#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:136
+#: dlls/appwiz.cpl/appwiz.rc:69 programs/regedit/regedit.rc:136
 #: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "&Modificar..."
 
-#: dlls/appwiz.cpl/appwiz.rc:69 dlls/appwiz.cpl/appwiz.rc:45
+#: dlls/appwiz.cpl/appwiz.rc:70 dlls/appwiz.cpl/appwiz.rc:45
 #: dlls/cryptui/cryptui.rc:351 dlls/msacm32/msacm32.rc:40
-#: programs/winecfg/winecfg.rc:199 programs/winecfg/winecfg.rc:236
+#: programs/winecfg/winecfg.rc:205 programs/winecfg/winecfg.rc:242
 #: programs/wordpad/wordpad.rc:256
 msgid "&Remove"
 msgstr "&Remover"
 
-#: dlls/appwiz.cpl/appwiz.rc:75
+#: dlls/appwiz.cpl/appwiz.rc:76
 msgid "Support Information"
 msgstr "Informação de Suporte"
 
-#: dlls/appwiz.cpl/appwiz.rc:78 dlls/avifil32/avifil32.rc:54
+#: dlls/appwiz.cpl/appwiz.rc:79 dlls/avifil32/avifil32.rc:54
 #: dlls/comctl32/comctl32.rc:71 dlls/comctl32/comctl32.rc:55
 #: dlls/comdlg32/comdlg32.rc:233 dlls/comdlg32/comdlg32.rc:263
 #: dlls/comdlg32/comdlg32.rc:307 dlls/comdlg32/comdlg32.rc:390
@@ -97,69 +97,69 @@ msgstr "Informação de Suporte"
 #: dlls/shell32/shell32.rc:274 dlls/shell32/shell32.rc:298
 #: dlls/shell32/shell32.rc:320 dlls/shell32/shell32.rc:339
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
-#: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
-#: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/net/net.rc:47 programs/notepad/notepad.rc:124
-#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
-#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
-#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
-#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
-#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:301
-#: programs/regedit/regedit.rc:312 programs/regedit/regedit.rc:325
-#: programs/regedit/regedit.rc:341 programs/regedit/regedit.rc:354
-#: programs/regedit/regedit.rc:367 programs/taskmgr/taskmgr.rc:442
-#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
-#: programs/winecfg/winecfg.rc:223 programs/winefile/winefile.rc:127
-#: programs/winefile/winefile.rc:150 programs/winefile/winefile.rc:180
-#: programs/winemine/winemine.rc:73 programs/winemine/winemine.rc:84
-#: programs/winemine/winemine.rc:98 programs/wordpad/wordpad.rc:215
-#: programs/wordpad/wordpad.rc:226 programs/wordpad/wordpad.rc:244
-#: programs/wordpad/wordpad.rc:257
+#: dlls/user32/user32.rc:94 dlls/user32/user32.rc:109 dlls/user32/user32.rc:73
+#: dlls/wininet/wininet.rc:62 dlls/wininet/wininet.rc:82
+#: dlls/winspool.drv/winspool.rc:42 programs/net/net.rc:48
+#: programs/notepad/notepad.rc:124 programs/oleview/oleview.rc:161
+#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
+#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
+#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
+#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
+#: programs/regedit/regedit.rc:301 programs/regedit/regedit.rc:312
+#: programs/regedit/regedit.rc:325 programs/regedit/regedit.rc:341
+#: programs/regedit/regedit.rc:354 programs/regedit/regedit.rc:367
+#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
+#: programs/winecfg/winecfg.rc:219 programs/winecfg/winecfg.rc:229
+#: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
+#: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
+#: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
+#: programs/wordpad/wordpad.rc:215 programs/wordpad/wordpad.rc:226
+#: programs/wordpad/wordpad.rc:244 programs/wordpad/wordpad.rc:257
 msgid "OK"
 msgstr "OK"
 
-#: dlls/appwiz.cpl/appwiz.rc:79
+#: dlls/appwiz.cpl/appwiz.rc:80
 msgid "The following information can be used to get technical support for %s:"
 msgstr ""
 "A informação seguinte pode ser usada para obter suporte técnico para %s:"
 
-#: dlls/appwiz.cpl/appwiz.rc:80
+#: dlls/appwiz.cpl/appwiz.rc:81
 msgid "Publisher:"
 msgstr "Editor:"
 
-#: dlls/appwiz.cpl/appwiz.rc:81 programs/winefile/winefile.rc:165
+#: dlls/appwiz.cpl/appwiz.rc:82 programs/winefile/winefile.rc:165
 msgid "Version:"
 msgstr "Versão:"
 
-#: dlls/appwiz.cpl/appwiz.rc:82
+#: dlls/appwiz.cpl/appwiz.rc:83
 msgid "Contact:"
 msgstr "Contato:"
 
-#: dlls/appwiz.cpl/appwiz.rc:83
+#: dlls/appwiz.cpl/appwiz.rc:84
 msgid "Support Information:"
 msgstr "Informação de Suporte:"
 
-#: dlls/appwiz.cpl/appwiz.rc:84
+#: dlls/appwiz.cpl/appwiz.rc:85
 msgid "Support Telephone:"
 msgstr "Telefone de Suporte:"
 
-#: dlls/appwiz.cpl/appwiz.rc:85
+#: dlls/appwiz.cpl/appwiz.rc:86
 msgid "Readme:"
 msgstr "Leia-me:"
 
-#: dlls/appwiz.cpl/appwiz.rc:86
+#: dlls/appwiz.cpl/appwiz.rc:87
 msgid "Product Updates:"
 msgstr "Atualizações de Produto:"
 
-#: dlls/appwiz.cpl/appwiz.rc:87
+#: dlls/appwiz.cpl/appwiz.rc:88
 msgid "Comments:"
 msgstr "Comentários:"
 
-#: dlls/appwiz.cpl/appwiz.rc:100
+#: dlls/appwiz.cpl/appwiz.rc:101
 msgid "Wine Gecko Installer"
 msgstr "Instalador Wine Gecko"
 
-#: dlls/appwiz.cpl/appwiz.rc:103
+#: dlls/appwiz.cpl/appwiz.rc:104
 msgid ""
 "Wine could not find a Gecko package which is needed for applications "
 "embedding HTML to work correctly. Wine can automatically download and "
@@ -177,11 +177,11 @@ msgstr ""
 "<a href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</a> "
 "para mais detalhes."
 
-#: dlls/appwiz.cpl/appwiz.rc:109 dlls/appwiz.cpl/appwiz.rc:124
+#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
 msgid "&Install"
 msgstr "&Instalar"
 
-#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
+#: dlls/appwiz.cpl/appwiz.rc:111 dlls/appwiz.cpl/appwiz.rc:126
 #: dlls/avifil32/avifil32.rc:55 dlls/browseui/browseui.rc:45
 #: dlls/comctl32/comctl32.rc:72 dlls/comctl32/comctl32.rc:87
 #: dlls/comctl32/comctl32.rc:56 dlls/comdlg32/comdlg32.rc:172
@@ -203,32 +203,32 @@ msgstr "&Instalar"
 #: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:275
 #: dlls/shell32/shell32.rc:299 dlls/shell32/shell32.rc:310
 #: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
-#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
-#: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:125
-#: programs/notepad/notepad.rc:138 programs/oleview/oleview.rc:162
-#: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
-#: programs/progman/progman.rc:125 programs/progman/progman.rc:143
-#: programs/progman/progman.rc:159 programs/progman/progman.rc:181
-#: programs/progman/progman.rc:200 programs/progman/progman.rc:217
-#: programs/regedit/regedit.rc:302 programs/regedit/regedit.rc:313
-#: programs/regedit/regedit.rc:326 programs/regedit/regedit.rc:342
-#: programs/regedit/regedit.rc:355 programs/regedit/regedit.rc:368
-#: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
-#: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
-#: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
-#: programs/winefile/winefile.rc:151 programs/winefile/winefile.rc:181
-#: programs/winemine/winemine.rc:99 programs/wordpad/wordpad.rc:216
-#: programs/wordpad/wordpad.rc:227 programs/wordpad/wordpad.rc:245
-#: programs/wordpad/wordpad.rc:258
+#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:95 dlls/user32/user32.rc:110
+#: dlls/user32/user32.rc:74 dlls/wininet/wininet.rc:63
+#: dlls/wininet/wininet.rc:83 dlls/winspool.drv/winspool.rc:43
+#: programs/notepad/notepad.rc:125 programs/notepad/notepad.rc:138
+#: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
+#: programs/progman/progman.rc:107 programs/progman/progman.rc:125
+#: programs/progman/progman.rc:143 programs/progman/progman.rc:159
+#: programs/progman/progman.rc:181 programs/progman/progman.rc:200
+#: programs/progman/progman.rc:217 programs/regedit/regedit.rc:302
+#: programs/regedit/regedit.rc:313 programs/regedit/regedit.rc:326
+#: programs/regedit/regedit.rc:342 programs/regedit/regedit.rc:355
+#: programs/regedit/regedit.rc:368 programs/taskmgr/taskmgr.rc:443
+#: programs/taskmgr/taskmgr.rc:518 programs/wineboot/wineboot.rc:34
+#: programs/winecfg/winecfg.rc:220 programs/winecfg/winecfg.rc:230
+#: programs/winefile/winefile.rc:128 programs/winefile/winefile.rc:151
+#: programs/winefile/winefile.rc:181 programs/winemine/winemine.rc:99
+#: programs/wordpad/wordpad.rc:216 programs/wordpad/wordpad.rc:227
+#: programs/wordpad/wordpad.rc:245 programs/wordpad/wordpad.rc:258
 msgid "Cancel"
 msgstr "Cancelar"
 
-#: dlls/appwiz.cpl/appwiz.rc:115
+#: dlls/appwiz.cpl/appwiz.rc:116
 msgid "Wine Mono Installer"
 msgstr "Instalador Wine Mono"
 
-#: dlls/appwiz.cpl/appwiz.rc:118
+#: dlls/appwiz.cpl/appwiz.rc:119
 msgid ""
 "Wine could not find a wine-mono package which is needed for .NET "
 "applications to work correctly. Wine can automatically download and install "
@@ -309,21 +309,25 @@ msgstr "Todos os arquivos (*.*)"
 msgid "&Modify/Remove"
 msgstr "&Modificar/Remover"
 
-#: dlls/appwiz.cpl/appwiz.rc:51
+#: dlls/appwiz.cpl/appwiz.rc:52
 msgid "Downloading..."
 msgstr "Fazendo o download..."
 
-#: dlls/appwiz.cpl/appwiz.rc:52
+#: dlls/appwiz.cpl/appwiz.rc:53
 msgid "Installing..."
 msgstr "Instalando..."
 
-#: dlls/appwiz.cpl/appwiz.rc:53
+#: dlls/appwiz.cpl/appwiz.rc:54
 msgid ""
 "Unexpected checksum of downloaded file. Aborting installation of corrupted "
 "file."
 msgstr ""
 "Inesperada soma de verificação do arquivo descarregado. Abortando instalação "
 "do arquivo corrompido."
+
+#: dlls/appwiz.cpl/appwiz.rc:47
+msgid "Please wait until the current uninstall/modify process is complete."
+msgstr ""
 
 #: dlls/avifil32/avifil32.rc:42
 msgid "Compress options"
@@ -410,7 +414,8 @@ msgid "&Apply"
 msgstr "&Aplicar"
 
 #: dlls/comctl32/comctl32.rc:74 dlls/comctl32/comctl32.rc:88
-#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:88
+#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:99
+#: dlls/user32/user32.rc:81
 msgid "Help"
 msgstr "Ajuda"
 
@@ -436,9 +441,9 @@ msgstr "Personalizar barra de ferramentas"
 
 #: dlls/comctl32/comctl32.rc:100 dlls/comctl32/comctl32.rc:57
 #: dlls/cryptui/cryptui.rc:356 dlls/ieframe/ieframe.rc:43
-#: programs/oleview/oleview.rc:83 programs/oleview/oleview.rc:187
-#: programs/oleview/oleview.rc:200 programs/oleview/oleview.rc:212
-#: programs/taskmgr/taskmgr.rc:139
+#: dlls/user32/user32.rc:80 programs/oleview/oleview.rc:83
+#: programs/oleview/oleview.rc:187 programs/oleview/oleview.rc:200
+#: programs/oleview/oleview.rc:212 programs/taskmgr/taskmgr.rc:139
 msgid "&Close"
 msgstr "&Fechar"
 
@@ -500,16 +505,17 @@ msgid "None"
 msgstr "Nenhuma"
 
 #: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:307
-#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:79
+#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:90 dlls/user32/user32.rc:78
 msgid "&Yes"
 msgstr "&Sim"
 
 #: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:309
-#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:80
+#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:91 dlls/user32/user32.rc:79
 msgid "&No"
 msgstr "&Não"
 
-#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:82
+#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:93
+#: dlls/user32/user32.rc:76
 msgid "&Retry"
 msgstr "&Repetir"
 
@@ -523,7 +529,7 @@ msgstr "Detalhes"
 
 #: dlls/comctl32/comctl32.rc:31 dlls/cryptui/cryptui.rc:235
 #: programs/regedit/regedit.rc:291 programs/taskmgr/taskmgr.rc:434
-#: programs/winedbg/winedbg.rc:61 programs/winedbg/winedbg.rc:76
+#: programs/winedbg/winedbg.rc:59 programs/winedbg/winedbg.rc:71
 #: programs/wordpad/wordpad.rc:180
 msgid "Close"
 msgstr "Fechar"
@@ -685,7 +691,7 @@ msgid "Font St&yle:"
 msgstr "&Estilo da Fonte:"
 
 #: dlls/comdlg32/comdlg32.rc:260 dlls/comdlg32/comdlg32.rc:439
-#: programs/winecfg/winecfg.rc:292
+#: programs/winecfg/winecfg.rc:300
 msgid "&Size:"
 msgstr "Taman&ho:"
 
@@ -701,7 +707,7 @@ msgstr "&Riscado"
 msgid "&Underline"
 msgstr "&Sublinhado"
 
-#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:290
+#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:298
 msgid "&Color:"
 msgstr "&Cor:"
 
@@ -877,7 +883,7 @@ msgstr "Número de &cópias:"
 msgid "C&ollate"
 msgstr "&Agrupar"
 
-#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:298
+#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:306
 msgid "Si&ze:"
 msgstr "Ta&manho:"
 
@@ -2386,7 +2392,7 @@ msgid "&File name:"
 msgstr "Nome do &arquivo:"
 
 #: dlls/cryptui/cryptui.rc:301 dlls/cryptui/cryptui.rc:323
-#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:311
+#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:319
 msgid "B&rowse..."
 msgstr "&Navegar..."
 
@@ -3722,11 +3728,23 @@ msgstr "Elevada"
 msgid "High"
 msgstr "Alta"
 
+#: dlls/ir50_32/ir50_32.rc:28
+#, fuzzy
+#| msgid "Index"
+msgid "Indeo5"
+msgstr "Índice"
+
+#: dlls/ir50_32/ir50_32.rc:29
+#, fuzzy
+#| msgid "Wine Video 1 video codec"
+msgid "Indeo Video Interactive version 5 video codec"
+msgstr "Codec de vídeo Wine Video 1"
+
 #: dlls/joy.cpl/joy.rc:37
 msgid "Joysticks"
 msgstr "Controles"
 
-#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:212
+#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:218
 msgid "&Disable"
 msgstr "&Desativar"
 
@@ -3957,15 +3975,15 @@ msgstr "Compilação condicional está desligada"
 msgid "Expected '@'"
 msgstr "Esperado '@'"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:84
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript erro de compilação"
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:85
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript erro de execução"
 
-#: dlls/jscript/jscript.rc:84 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:86 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Erro de execução desconhecido"
 
@@ -4022,34 +4040,40 @@ msgid "Syntax error in regular expression"
 msgstr "Erro de sintaxe na expressão regular"
 
 #: dlls/jscript/jscript.rc:66
+#, fuzzy
+#| msgid "Expected identifier"
+msgid "Unexpected quantifier"
+msgstr "Identificador esperado"
+
+#: dlls/jscript/jscript.rc:67
 msgid "Exception thrown and not caught"
 msgstr "Exceção lancada e não capturada"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "URI to be encoded contains invalid characters"
 msgstr "URI a ser codificado contém caracteres inválidos"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 msgid "URI to be decoded is incorrect"
 msgstr "URI a ser decodificado está incorreto"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "Number of fraction digits is out of range"
 msgstr "Número de dígitos fracionários fora do limite"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "Precision is out of range"
 msgstr "Precisão fora do limite"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Array length must be a finite positive integer"
 msgstr "Tamanho do vetor tem que ser um inteiro finito positivo"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Array object expected"
 msgstr "Objeto tipo vetor esperado"
 
-#: dlls/jscript/jscript.rc:73
+#: dlls/jscript/jscript.rc:74
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
@@ -4057,44 +4081,50 @@ msgstr ""
 "atributo 'gravável' no descritor de propriedades não pode ser setado para "
 "'verdade' neste objeto"
 
-#: dlls/jscript/jscript.rc:74
+#: dlls/jscript/jscript.rc:75
 msgid "Cyclic __proto__ value"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:75
+#: dlls/jscript/jscript.rc:76
 #, fuzzy
 #| msgid "Cannot define property '|': object is not extensible"
 msgid "Cannot create property for a non-extensible object"
 msgstr "Não posso definir propriedade '|': objeto não é extensível"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:77
 msgid "Cannot define property '|': object is not extensible"
 msgstr "Não posso definir propriedade '|': objeto não é extensível"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:78
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "Não pode redefinir propriedade não configurável '|'"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot modify non-writable property '|'"
 msgstr "Não pode modificar propriedade não gravável '|'"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:80
 #, fuzzy
 #| msgid "'this' is not a Map object"
 msgid "'this' is not a | object"
 msgstr "'this' não é um objeto Map"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:81
+#, fuzzy
+#| msgid "'this' is not a Map object"
+msgid "'key' is not an object"
+msgstr "'this' não é um objeto Map"
+
+#: dlls/jscript/jscript.rc:82
 msgid "Property cannot have both accessors and a value"
 msgstr "Propriedade não pode ter ambos acessores e valor"
 
-#: include/wine/wine_common_ver.rc:133
+#: include/wine/wine_common_ver.rc:138
 msgid "Wine kernel DLL"
 msgstr "Biblioteca de kernel Wine"
 
-#: include/wine/wine_common_ver.rc:138 dlls/winemac.drv/winemac.rc:32
-#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
+#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
 
@@ -8106,7 +8136,7 @@ msgstr "Toda a rede"
 msgid "Sound Selection"
 msgstr "Seleção de som"
 
-#: dlls/msacm32/msacm32.rc:39 programs/winedbg/winedbg.rc:77
+#: dlls/msacm32/msacm32.rc:39 programs/winedbg/winedbg.rc:72
 msgid "&Save As..."
 msgstr "&Salvar como..."
 
@@ -8126,7 +8156,7 @@ msgstr "Hiperlink"
 msgid "Hyperlink Information"
 msgstr "Informação do Hiperlink"
 
-#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:243
+#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:249
 msgid "&Type:"
 msgstr "&Tipo:"
 
@@ -9522,8 +9552,8 @@ msgctxt "unit: bits"
 msgid "b"
 msgstr "b"
 
-#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:49
-#: programs/winecfg/winecfg.rc:182
+#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:52
+#: programs/winecfg/winecfg.rc:188
 msgctxt "unit: dots/inch"
 msgid "dpi"
 msgstr "ppp"
@@ -10040,7 +10070,7 @@ msgstr "&Abrir:"
 
 #: dlls/shell32/shell32.rc:341 programs/progman/progman.rc:182
 #: programs/progman/progman.rc:201 programs/progman/progman.rc:218
-#: programs/winecfg/winecfg.rc:241 programs/winefile/winefile.rc:129
+#: programs/winecfg/winecfg.rc:247 programs/winefile/winefile.rc:129
 msgid "&Browse..."
 msgstr "&Procurar..."
 
@@ -10126,7 +10156,7 @@ msgstr "Localização original"
 msgid "Date deleted"
 msgstr "Data de exclusão"
 
-#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:100
+#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:106
 #: programs/winefile/winefile.rc:99
 msgctxt "display name"
 msgid "Desktop"
@@ -12572,23 +12602,23 @@ msgstr "&Fechar\tCtrl+F4"
 msgid "Nex&t\tCtrl+F6"
 msgstr "&Próximo\tCtrl+F6"
 
-#: dlls/user32/user32.rc:81
+#: dlls/user32/user32.rc:92 dlls/user32/user32.rc:75
 msgid "&Abort"
 msgstr "&Abortar"
 
-#: dlls/user32/user32.rc:85
+#: dlls/user32/user32.rc:96 dlls/user32/user32.rc:77
 msgid "&Ignore"
 msgstr "&Ignorar"
 
-#: dlls/user32/user32.rc:86
+#: dlls/user32/user32.rc:97 dlls/user32/user32.rc:82
 msgid "&Try Again"
 msgstr "&Tente Novamente"
 
-#: dlls/user32/user32.rc:87
+#: dlls/user32/user32.rc:98 dlls/user32/user32.rc:83
 msgid "&Continue"
 msgstr "&Continuar"
 
-#: dlls/user32/user32.rc:94
+#: dlls/user32/user32.rc:105
 msgid "Select Window"
 msgstr "Selecionar Janela"
 
@@ -12756,6 +12786,12 @@ msgstr "&Tamanho do papel:"
 msgid "Duplex:"
 msgstr "Frente e verso:"
 
+#: dlls/wineps.drv/wineps.rc:45
+#, fuzzy
+#| msgid "&Tray:"
+msgid "Paper &Tray:"
+msgstr "&Bandeja:"
+
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
 msgstr "Domínio"
@@ -12764,7 +12800,7 @@ msgstr "Domínio"
 msgid "Authentication Required"
 msgstr "Autenticação Requerida"
 
-#: dlls/wininet/wininet.rc:72
+#: dlls/wininet/wininet.rc:72 programs/klist/klist.rc:35
 msgid "Server"
 msgstr "Servidor"
 
@@ -13850,7 +13886,7 @@ msgid "Digi&tal"
 msgstr "Digi&tal"
 
 #: programs/clock/clock.rc:35 programs/notepad/notepad.rc:53
-#: programs/winecfg/winecfg.rc:305 programs/winefile/winefile.rc:63
+#: programs/winecfg/winecfg.rc:313 programs/winefile/winefile.rc:63
 #: programs/wordpad/wordpad.rc:84
 msgid "&Font..."
 msgstr "&Fonte..."
@@ -14884,6 +14920,39 @@ msgstr "Iniciar"
 msgid "&Run..."
 msgstr "E&xecutar..."
 
+#: programs/explorer/explorer.rc:36
+#, fuzzy
+#| msgid "E&xit Windows"
+msgid "E&xit desktop"
+msgstr "&Sair do Windows"
+
+#: programs/explorer/explorer.rc:37
+#, fuzzy
+#| msgid "Are you sure you want to delete these values?"
+msgid ""
+"Are you sure you want to close all programs and exit the virtual desktop?"
+msgstr "Tem certeza que deseja excluir estes valores?"
+
+#: programs/findstr/findstr.rc:28
+#, fuzzy
+#| msgid "Use c&onnection string"
+msgid "Usage: findstr /options string\n"
+msgstr "Usar string de conexão"
+
+#: programs/findstr/findstr.rc:29
+#, fuzzy
+#| msgid "Invalid command line.\n"
+msgid "FINDSTR: Bad command line\n"
+msgstr "Linha de comando inválida.\n"
+
+#: programs/findstr/findstr.rc:30
+msgid "FINDSTR: Cannot open %s\n"
+msgstr ""
+
+#: programs/findstr/findstr.rc:31
+msgid "FINDSTR: /%c ignored\n"
+msgstr ""
+
 #: programs/fsutil/fsutil.mc:28
 msgid ""
 "- Supported Commands -\n"
@@ -15002,6 +15071,55 @@ msgstr "Endereço IPv6"
 msgid "Primary DNS suffix"
 msgstr "Sufixo de DNS Primário"
 
+#: programs/klist/klist.rc:28
+msgid "Usage: klist <tickets | tgt | purge | get [service principal name]>\n"
+msgstr ""
+
+#: programs/klist/klist.rc:29
+#, fuzzy
+#| msgid "Unknown error"
+msgid "Unknown error\n"
+msgstr "Erro desconhecido"
+
+#: programs/klist/klist.rc:30
+#, fuzzy
+#| msgid "Start Menu"
+msgid "Start Time"
+msgstr "Menu Iniciar"
+
+#: programs/klist/klist.rc:31
+#, fuzzy
+#| msgctxt "maximum 31 characters"
+#| msgid "FLE Standard Time"
+msgid "End Time"
+msgstr "Hora padrão FLE"
+
+#: programs/klist/klist.rc:32
+#, fuzzy
+#| msgid "Enter new time: "
+msgid "Renew Time"
+msgstr "Entre nova hora: "
+
+#: programs/klist/klist.rc:33
+msgid "Ticket Flags"
+msgstr ""
+
+#: programs/klist/klist.rc:34
+msgid "Cached Tickets"
+msgstr ""
+
+#: programs/klist/klist.rc:36
+#, fuzzy
+#| msgid "Encryption Type"
+msgid "KerbTicket Encryption Type"
+msgstr "Tipo de encriptação"
+
+#: programs/klist/klist.rc:37
+#, fuzzy
+#| msgid "Current Connections"
+msgid "Current LogonId is"
+msgstr "Conexões Atuais"
+
 #: programs/msinfo32/msinfo32.rc:28
 msgid "System Information"
 msgstr "Informação do Sistema"
@@ -15094,11 +15212,11 @@ msgstr "O serviço %1 parou com sucesso.\n"
 msgid "The %1 service failed to stop.\n"
 msgstr "Falha ao parar o serviço %1.\n"
 
-#: programs/net/net.rc:44
+#: programs/net/net.rc:45
 msgid "There are no entries in the list.\n"
 msgstr "Não há entradas na lista.\n"
 
-#: programs/net/net.rc:45
+#: programs/net/net.rc:46
 msgid ""
 "\n"
 "Status  Local   Remote\n"
@@ -15108,33 +15226,37 @@ msgstr ""
 "Estado  Local   Remoto\n"
 "---------------------------------------------------------------\n"
 
-#: programs/net/net.rc:46
+#: programs/net/net.rc:47
 msgid "%1      %2      %3      Open resources: %4!u!\n"
 msgstr "%1      %2      %3      Recursos disponíveis: %4!u!\n"
 
-#: programs/net/net.rc:48
+#: programs/net/net.rc:49
 msgid "Paused"
 msgstr "Pausado"
 
-#: programs/net/net.rc:49
+#: programs/net/net.rc:50
 msgid "Disconnected"
 msgstr "Desconectado"
 
-#: programs/net/net.rc:50
+#: programs/net/net.rc:51
 msgid "A network error occurred"
 msgstr "Ocorreu um erro na rede"
 
-#: programs/net/net.rc:51
+#: programs/net/net.rc:52
 msgid "Connection is being made"
 msgstr "A conexão está sendo estabelecida"
 
-#: programs/net/net.rc:52
+#: programs/net/net.rc:53
 msgid "Reconnecting"
 msgstr "Reconectando"
 
 #: programs/net/net.rc:43
 msgid "The following services are running:\n"
 msgstr "Os seguintes serviços estão rodando:\n"
+
+#: programs/net/net.rc:44
+msgid "A command was used with conflicting switches.\n"
+msgstr ""
 
 #: programs/netstat/netstat.rc:30
 msgid "Active Connections"
@@ -17381,7 +17503,39 @@ msgstr "regsvr32: Falha ao desinstalar DLL '%1'\n"
 msgid "regsvr32: Successfully uninstalled DLL '%1'\n"
 msgstr "regsvr32: DLL '%1' desinstalada com sucesso\n"
 
-#: programs/start/start.rc:57
+#: programs/start/start.rc:56
+#, fuzzy
+#| msgid ""
+#| "Start a program, or open a document in the program normally used for "
+#| "files\n"
+#| "with that suffix.\n"
+#| "Usage:\n"
+#| "start [options] program_filename [...]\n"
+#| "start [options] document_filename\n"
+#| "\n"
+#| "Options:\n"
+#| "\"title\"        Specifies the title of the child windows.\n"
+#| "/d directory   Start the program in the specified directory.\n"
+#| "/b             Don't create a new console for the program.\n"
+#| "/i             Start the program with fresh environment variables.\n"
+#| "/min           Start the program minimized.\n"
+#| "/max           Start the program maximized.\n"
+#| "/low           Start the program in the idle priority class.\n"
+#| "/normal        Start the program in the normal priority class.\n"
+#| "/high          Start the program in the high priority class.\n"
+#| "/realtime      Start the program in the realtime priority class.\n"
+#| "/abovenormal   Start the program in the abovenormal priority class.\n"
+#| "/belownormal   Start the program in the belownormal priority class.\n"
+#| "/node n        Start the program on the specified NUMA node.\n"
+#| "/affinity mask Start the program with the specified affinity mask.\n"
+#| "/wait          Wait for the started program to finish, then exit with "
+#| "its\n"
+#| "exit code.\n"
+#| "/unix          Use a Unix filename and start the file like Windows\n"
+#| "Explorer.\n"
+#| "/exec          Exec the specified file (for internal Wine usage).\n"
+#| "/ProgIDOpen    Open a document using the specified progID.\n"
+#| "/?             Display this help and exit.\n"
 msgid ""
 "Start a program, or open a document in the program normally used for files\n"
 "with that suffix.\n"
@@ -17404,9 +17558,10 @@ msgid ""
 "/belownormal   Start the program in the belownormal priority class.\n"
 "/node n        Start the program on the specified NUMA node.\n"
 "/affinity mask Start the program with the specified affinity mask.\n"
-"/wait          Wait for the started program to finish, then exit with its\n"
-"exit code.\n"
-"/unix          Use a Unix filename and start the file like Windows\n"
+"/machine arch  Force using a specific architecture (x86,arm,amd64,arm64).\n"
+"/wait          Wait for the program to finish, then exit with its exit "
+"code.\n"
+"/unix          Use a Unix filename and start the file like Windows "
 "Explorer.\n"
 "/exec          Exec the specified file (for internal Wine usage).\n"
 "/ProgIDOpen    Open a document using the specified progID.\n"
@@ -17441,7 +17596,7 @@ msgstr ""
 "/ProgIDOpen    Abre um documento usando o progID especificado.\n"
 "/?             Exibe essa ajuda e retorna.\n"
 
-#: programs/start/start.rc:59
+#: programs/start/start.rc:58
 msgid ""
 "Application could not be started, or no application associated with the "
 "specified file.\n"
@@ -17451,7 +17606,7 @@ msgstr ""
 "arquivo especificado.\n"
 "ShellExecuteEx falhou"
 
-#: programs/start/start.rc:61
+#: programs/start/start.rc:60
 msgid "Could not translate the specified Unix filename to a DOS filename."
 msgstr ""
 "Não foi possível traduzir o nome de arquivo Unix para um nome de arquivo DOS."
@@ -17516,6 +17671,71 @@ msgstr "Erro: Incapaz de finalizar o processo \"%1\".\n"
 #: programs/taskkill/taskkill.rc:43
 msgid "Error: Process self-termination is not permitted.\n"
 msgstr "Erro: Auto finalização do processo não é permitida.\n"
+
+#: programs/taskkill/taskkill.rc:44
+#, fuzzy
+#| msgid "Process with PID %1!u! was forcibly terminated.\n"
+msgid ""
+"The process with PID %1!u! (child process of PID %2!u!) has been "
+"terminated.\n"
+msgstr "Processo com PID %1!u! foi finalizado à força.\n"
+
+#: programs/taskkill/taskkill.rc:45
+msgid ""
+"Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
+msgstr ""
+
+#: include/wine/wine_common_ver.rc:138
+#, fuzzy
+#| msgid "page tab list"
+msgid "Wine tasklist"
+msgstr "lista de guias de página"
+
+#: programs/tasklist/tasklist.rc:29
+msgid "Usage: tasklist [/?]\n"
+msgstr ""
+
+#: programs/tasklist/tasklist.rc:30 programs/taskmgr/taskmgr.rc:272
+msgid "Image Name"
+msgstr "Nome da Imagem"
+
+#: programs/tasklist/tasklist.rc:31 programs/taskmgr/taskmgr.rc:273
+msgid "PID"
+msgstr "PID"
+
+#: programs/tasklist/tasklist.rc:32
+#, fuzzy
+#| msgid "Session ID"
+msgid "Session Name"
+msgstr "ID da Sessão"
+
+#: programs/tasklist/tasklist.rc:33
+#, fuzzy
+#| msgid "Session ID"
+msgid "Session#"
+msgstr "ID da Sessão"
+
+#: programs/tasklist/tasklist.rc:34 programs/taskmgr/taskmgr.rc:276
+msgid "Mem Usage"
+msgstr "Uso de Memória"
+
+#: programs/tasklist/tasklist.rc:35
+#, fuzzy
+#| msgid "OK"
+msgid "K"
+msgstr "OK"
+
+#: programs/tasklist/tasklist.rc:36
+#, fuzzy
+#| msgid "reg: Invalid syntax. "
+msgid "ERROR: Invalid syntax\n"
+msgstr "reg: Sintaxe inválida. "
+
+#: programs/tasklist/tasklist.rc:37
+#, fuzzy
+#| msgid "The filename cannot be resolved.\n"
+msgid "ERROR: The search filter cannot be recognized.\n"
+msgstr "O nome de arquivo não pode ser resolvido.\n"
 
 #: programs/taskmgr/taskmgr.rc:37 programs/taskmgr/taskmgr.rc:108
 msgid "&New Task (Run...)"
@@ -18185,14 +18405,6 @@ msgstr "Processos: %d"
 msgid "Mem Usage: %1!u!kB / %2!u!kB"
 msgstr "Uso da memória: %1!u!kB / %2!u!kB"
 
-#: programs/taskmgr/taskmgr.rc:272
-msgid "Image Name"
-msgstr "Nome da Imagem"
-
-#: programs/taskmgr/taskmgr.rc:273
-msgid "PID"
-msgstr "PID"
-
 #: programs/taskmgr/taskmgr.rc:274
 msgid "CPU"
 msgstr "CPU"
@@ -18200,10 +18412,6 @@ msgstr "CPU"
 #: programs/taskmgr/taskmgr.rc:275
 msgid "CPU Time"
 msgstr "Tempo de CPU"
-
-#: programs/taskmgr/taskmgr.rc:276
-msgid "Mem Usage"
-msgstr "Uso de Memória"
 
 #: programs/taskmgr/taskmgr.rc:277
 msgid "Mem Delta"
@@ -18437,7 +18645,7 @@ msgid "The Wine configuration in %s is being updated, please wait..."
 msgstr ""
 "A configuração do Wine em %s está sendo atualizada, por favor, aguarde..."
 
-#: programs/winecfg/winecfg.rc:140
+#: programs/winecfg/winecfg.rc:146
 msgid ""
 "This program is free software; you can redistribute it and/or modify it "
 "under the terms of the GNU Lesser General Public License as published by the "
@@ -18449,23 +18657,23 @@ msgstr ""
 "Software Foundation; tanto na versão 2.1 desta licença ou (à sua escolha) "
 "qualquer versão posterior."
 
-#: programs/winecfg/winecfg.rc:142
+#: programs/winecfg/winecfg.rc:148
 msgid "Windows registration information"
 msgstr "Informações de registro do Windows"
 
-#: programs/winecfg/winecfg.rc:143
+#: programs/winecfg/winecfg.rc:149
 msgid "&Owner:"
 msgstr "&Proprietário:"
 
-#: programs/winecfg/winecfg.rc:145
+#: programs/winecfg/winecfg.rc:151
 msgid "Organi&zation:"
 msgstr "&Organização:"
 
-#: programs/winecfg/winecfg.rc:153
+#: programs/winecfg/winecfg.rc:159
 msgid "Application settings"
 msgstr "Configurações de Aplicativo"
 
-#: programs/winecfg/winecfg.rc:154
+#: programs/winecfg/winecfg.rc:160
 msgid ""
 "Wine can mimic different Windows versions for each application. This tab is "
 "linked to the Libraries and Graphics tabs to allow you to change system-wide "
@@ -18475,55 +18683,55 @@ msgstr ""
 "aba é ligada às abas Bibliotecas e Gráficos para permitir alterar "
 "configurações globais ou por aplicativo também nessas abas."
 
-#: programs/winecfg/winecfg.rc:158
+#: programs/winecfg/winecfg.rc:164
 msgid "Add appli&cation..."
 msgstr "Adicionar apli&cativo..."
 
-#: programs/winecfg/winecfg.rc:159
+#: programs/winecfg/winecfg.rc:165
 msgid "&Remove application"
 msgstr "&Remover aplicativo"
 
-#: programs/winecfg/winecfg.rc:160
+#: programs/winecfg/winecfg.rc:166
 msgid "&Windows Version:"
 msgstr "Versão do &Windows:"
 
-#: programs/winecfg/winecfg.rc:168
+#: programs/winecfg/winecfg.rc:174
 msgid "Window settings"
 msgstr "Configurações de Janela"
 
-#: programs/winecfg/winecfg.rc:169
+#: programs/winecfg/winecfg.rc:175
 msgid "Automatically capture the &mouse in full-screen windows"
 msgstr "Capturar o &mouse automaticamente em janelas em tela cheia"
 
-#: programs/winecfg/winecfg.rc:170
+#: programs/winecfg/winecfg.rc:176
 msgid "Allow the window manager to &decorate the windows"
 msgstr "Permitir que o gerenciador de janelas &decore as janelas"
 
-#: programs/winecfg/winecfg.rc:171
+#: programs/winecfg/winecfg.rc:177
 msgid "Allow the &window manager to control the windows"
 msgstr "Permitir que o gerenciador de janelas &controle as janelas"
 
-#: programs/winecfg/winecfg.rc:172
+#: programs/winecfg/winecfg.rc:178
 msgid "&Emulate a virtual desktop"
 msgstr "&Emular uma área de trabalho virtual"
 
-#: programs/winecfg/winecfg.rc:174
+#: programs/winecfg/winecfg.rc:180
 msgid "Desktop &size:"
 msgstr "Tamanho da Tela:"
 
-#: programs/winecfg/winecfg.rc:179
+#: programs/winecfg/winecfg.rc:185
 msgid "Screen resolution"
 msgstr "Resolução da Tela"
 
-#: programs/winecfg/winecfg.rc:183
+#: programs/winecfg/winecfg.rc:189
 msgid "This is a sample text using 10 point Tahoma"
 msgstr "Este é um texto exemplo usando Tahoma 10 pontos"
 
-#: programs/winecfg/winecfg.rc:190
+#: programs/winecfg/winecfg.rc:196
 msgid "DLL overrides"
 msgstr "Substituições de DLL"
 
-#: programs/winecfg/winecfg.rc:191
+#: programs/winecfg/winecfg.rc:197
 msgid ""
 "Dynamic Link Libraries can be specified individually to be either builtin "
 "(provided by Wine) or native (taken from Windows or provided by the "
@@ -18533,55 +18741,55 @@ msgstr ""
 "embutidas (fornecidas pelo Wine) ou nativas (tiradas do Windows ou "
 "fornecidas pelo aplicativo)."
 
-#: programs/winecfg/winecfg.rc:193
+#: programs/winecfg/winecfg.rc:199
 msgid "&New override for library:"
 msgstr "&Nova substituição para a biblioteca:"
 
-#: programs/winecfg/winecfg.rc:195
+#: programs/winecfg/winecfg.rc:201
 msgid "A&dd"
 msgstr "&Adicionar"
 
-#: programs/winecfg/winecfg.rc:196
+#: programs/winecfg/winecfg.rc:202
 msgid "Existing &overrides:"
 msgstr "Substituições e&xistentes:"
 
-#: programs/winecfg/winecfg.rc:198
+#: programs/winecfg/winecfg.rc:204
 msgid "&Edit..."
 msgstr "&Editar..."
 
-#: programs/winecfg/winecfg.rc:204
+#: programs/winecfg/winecfg.rc:210
 msgid "Edit Override"
 msgstr "Editar Substituição"
 
-#: programs/winecfg/winecfg.rc:207
+#: programs/winecfg/winecfg.rc:213
 msgid "Load order"
 msgstr "Ordem de Carregamento"
 
-#: programs/winecfg/winecfg.rc:208
+#: programs/winecfg/winecfg.rc:214
 msgid "&Builtin (Wine)"
 msgstr "&Embutida (Wine)"
 
-#: programs/winecfg/winecfg.rc:209
+#: programs/winecfg/winecfg.rc:215
 msgid "&Native (Windows)"
 msgstr "&Nativa (Windows)"
 
-#: programs/winecfg/winecfg.rc:210
+#: programs/winecfg/winecfg.rc:216
 msgid "Buil&tin then Native"
 msgstr "E&mbutida depois Nativa"
 
-#: programs/winecfg/winecfg.rc:211
+#: programs/winecfg/winecfg.rc:217
 msgid "Nati&ve then Builtin"
 msgstr "Nati&va depois Embutida"
 
-#: programs/winecfg/winecfg.rc:219
+#: programs/winecfg/winecfg.rc:225
 msgid "Select Drive Letter"
 msgstr "Selecione a Letra"
 
-#: programs/winecfg/winecfg.rc:231
+#: programs/winecfg/winecfg.rc:237
 msgid "Drive configuration"
 msgstr "Configuração de unidades"
 
-#: programs/winecfg/winecfg.rc:232
+#: programs/winecfg/winecfg.rc:238
 msgid ""
 "Failed to connect to the mount manager; the drive configuration cannot be "
 "edited."
@@ -18589,107 +18797,115 @@ msgstr ""
 "Falha de conexão com o gerenciador de montagem; a configuração da unidade "
 "não pôde ser alterada."
 
-#: programs/winecfg/winecfg.rc:235
+#: programs/winecfg/winecfg.rc:241
 msgid "A&dd..."
 msgstr "&Adicionar..."
 
-#: programs/winecfg/winecfg.rc:239
+#: programs/winecfg/winecfg.rc:245
 msgid "&Path:"
 msgstr "&Caminho:"
 
-#: programs/winecfg/winecfg.rc:246 programs/winecfg/winecfg.rc:37
+#: programs/winecfg/winecfg.rc:252 programs/winecfg/winecfg.rc:37
 msgid "Show Advan&ced"
 msgstr "M&ostrar Avançado"
 
-#: programs/winecfg/winecfg.rc:247
+#: programs/winecfg/winecfg.rc:253
 msgid "De&vice:"
 msgstr "Dispositi&vo:"
 
-#: programs/winecfg/winecfg.rc:249
+#: programs/winecfg/winecfg.rc:255
 msgid "Bro&wse..."
 msgstr "Nave&gar..."
 
-#: programs/winecfg/winecfg.rc:251
+#: programs/winecfg/winecfg.rc:257
 msgid "&Label:"
 msgstr "&Rótulo:"
 
-#: programs/winecfg/winecfg.rc:253
+#: programs/winecfg/winecfg.rc:259
 msgid "S&erial:"
 msgstr "&Serial:"
 
-#: programs/winecfg/winecfg.rc:256
+#: programs/winecfg/winecfg.rc:262
 msgid "&Show dot files"
 msgstr "Mostrar arquivos com &ponto"
 
-#: programs/winecfg/winecfg.rc:263
+#: programs/winecfg/winecfg.rc:269
 msgid "Driver diagnostics"
 msgstr "Diagnósticos de driver"
 
-#: programs/winecfg/winecfg.rc:265
+#: programs/winecfg/winecfg.rc:271
 msgid "Defaults"
 msgstr "Dispositivos Padrões"
 
-#: programs/winecfg/winecfg.rc:266
+#: programs/winecfg/winecfg.rc:272
 msgid "Output device:"
 msgstr "Saída:"
 
-#: programs/winecfg/winecfg.rc:267
+#: programs/winecfg/winecfg.rc:273
 msgid "Voice output device:"
 msgstr "Saída de voz:"
 
-#: programs/winecfg/winecfg.rc:268
+#: programs/winecfg/winecfg.rc:274
 msgid "Input device:"
 msgstr "Entrada:"
 
-#: programs/winecfg/winecfg.rc:269
+#: programs/winecfg/winecfg.rc:275
 msgid "Voice input device:"
 msgstr "Entrada de voz:"
 
-#: programs/winecfg/winecfg.rc:274
+#: programs/winecfg/winecfg.rc:280
 msgid "&Test Sound"
 msgstr "&Testar Som"
 
-#: programs/winecfg/winecfg.rc:275 programs/winecfg/winecfg.rc:89
+#: programs/winecfg/winecfg.rc:281 programs/winecfg/winecfg.rc:89
 msgid "Speaker configuration"
 msgstr "Configuração dos alto-falantes"
 
-#: programs/winecfg/winecfg.rc:278
+#: programs/winecfg/winecfg.rc:284
 msgid "Speakers:"
 msgstr "Alto-falantes:"
 
-#: programs/winecfg/winecfg.rc:286
+#: programs/winecfg/winecfg.rc:292
 msgid "Appearance"
 msgstr "Aparência"
 
-#: programs/winecfg/winecfg.rc:287
+#: programs/winecfg/winecfg.rc:293
 msgid "&Theme:"
 msgstr "&Tema:"
 
-#: programs/winecfg/winecfg.rc:289
+#: programs/winecfg/winecfg.rc:295
+#, fuzzy
+#| msgid "&Theme:"
+msgid "&WinRT theme:"
+msgstr "&Tema:"
+
+#: programs/winecfg/winecfg.rc:297
 msgid "&Install theme..."
 msgstr "&Instalar tema..."
 
-#: programs/winecfg/winecfg.rc:294
+#: programs/winecfg/winecfg.rc:302
 msgid "It&em:"
 msgstr "It&em:"
 
-#: programs/winecfg/winecfg.rc:296
+#: programs/winecfg/winecfg.rc:304
 msgid "C&olor:"
 msgstr "C&or:"
 
-#: programs/winecfg/winecfg.rc:302
+#: programs/winecfg/winecfg.rc:310
 msgid "MIME types"
 msgstr "Tipos MIME"
 
-#: programs/winecfg/winecfg.rc:303
-msgid "Manage file &associations"
+#: programs/winecfg/winecfg.rc:311
+#, fuzzy
+#| msgid "Manage file &associations"
+msgid "Manage file and protocol &associations"
 msgstr "Gerenciar &associação de arquivos"
 
-#: programs/winecfg/winecfg.rc:306
+#: programs/winecfg/winecfg.rc:314
 msgid "Folders"
 msgstr "Pastas"
 
-#: programs/winecfg/winecfg.rc:309
+#: programs/winecfg/winecfg.rc:317
 msgid "&Link to:"
 msgstr "&Atalho para:"
 
@@ -18784,6 +19000,16 @@ msgstr "Estéreo"
 #: programs/winecfg/winecfg.rc:93
 msgid "Mono"
 msgstr "Mono"
+
+#: programs/winecfg/winecfg.rc:98
+#, fuzzy
+#| msgid "Right"
+msgid "Light"
+msgstr "Direita"
+
+#: programs/winecfg/winecfg.rc:99
+msgid "Dark"
+msgstr ""
 
 #: programs/winecfg/winecfg.rc:53
 msgid ""
@@ -18899,127 +19125,127 @@ msgstr ""
 "\n"
 "Lembre-se de clicar em 'Adicionar' na aba Unidades para criar uma!\n"
 
-#: programs/winecfg/winecfg.rc:98
+#: programs/winecfg/winecfg.rc:104
 msgid "Controls Background"
 msgstr "Fundo do Botão"
 
-#: programs/winecfg/winecfg.rc:99
+#: programs/winecfg/winecfg.rc:105
 msgid "Controls Text"
 msgstr "Texto do Botão"
 
-#: programs/winecfg/winecfg.rc:101
+#: programs/winecfg/winecfg.rc:107
 msgid "Menu Background"
 msgstr "Fundo do Menu"
 
-#: programs/winecfg/winecfg.rc:102
+#: programs/winecfg/winecfg.rc:108
 msgid "Menu Text"
 msgstr "Texto do Menu"
 
-#: programs/winecfg/winecfg.rc:103
+#: programs/winecfg/winecfg.rc:109
 msgid "Scrollbar"
 msgstr "Barra de Rolagem"
 
-#: programs/winecfg/winecfg.rc:104
+#: programs/winecfg/winecfg.rc:110
 msgid "Selection Background"
 msgstr "Fundo de Seleção"
 
-#: programs/winecfg/winecfg.rc:105
+#: programs/winecfg/winecfg.rc:111
 msgid "Selection Text"
 msgstr "Texto de Seleção"
 
-#: programs/winecfg/winecfg.rc:106
+#: programs/winecfg/winecfg.rc:112
 msgid "Tooltip Background"
 msgstr "Fundo da Dica"
 
-#: programs/winecfg/winecfg.rc:107
+#: programs/winecfg/winecfg.rc:113
 msgid "Tooltip Text"
 msgstr "Texto da Dica"
 
-#: programs/winecfg/winecfg.rc:108
+#: programs/winecfg/winecfg.rc:114
 msgid "Window Background"
 msgstr "Fundo da Janela"
 
-#: programs/winecfg/winecfg.rc:109
+#: programs/winecfg/winecfg.rc:115
 msgid "Window Text"
 msgstr "Texto da Janela"
 
-#: programs/winecfg/winecfg.rc:110
+#: programs/winecfg/winecfg.rc:116
 msgid "Active Title Bar"
 msgstr "Barra de Título Ativa"
 
-#: programs/winecfg/winecfg.rc:111
+#: programs/winecfg/winecfg.rc:117
 msgid "Active Title Text"
 msgstr "Texto de Título Ativo"
 
-#: programs/winecfg/winecfg.rc:112
+#: programs/winecfg/winecfg.rc:118
 msgid "Inactive Title Bar"
 msgstr "Barra de Título Inativa"
 
-#: programs/winecfg/winecfg.rc:113
+#: programs/winecfg/winecfg.rc:119
 msgid "Inactive Title Text"
 msgstr "Texto de Título Inativo"
 
-#: programs/winecfg/winecfg.rc:114
+#: programs/winecfg/winecfg.rc:120
 msgid "Message Box Text"
 msgstr "Texto da Caixa de Mensagens"
 
-#: programs/winecfg/winecfg.rc:115
+#: programs/winecfg/winecfg.rc:121
 msgid "Application Workspace"
 msgstr "Área do Aplicativo"
 
-#: programs/winecfg/winecfg.rc:116
+#: programs/winecfg/winecfg.rc:122
 msgid "Window Frame"
 msgstr "Corpo da Janela"
 
-#: programs/winecfg/winecfg.rc:117
+#: programs/winecfg/winecfg.rc:123
 msgid "Active Border"
 msgstr "Borda Ativa"
 
-#: programs/winecfg/winecfg.rc:118
+#: programs/winecfg/winecfg.rc:124
 msgid "Inactive Border"
 msgstr "Borda Inativa"
 
-#: programs/winecfg/winecfg.rc:119
+#: programs/winecfg/winecfg.rc:125
 msgid "Controls Shadow"
 msgstr "Sombra dos Botões"
 
-#: programs/winecfg/winecfg.rc:120
+#: programs/winecfg/winecfg.rc:126
 msgid "Gray Text"
 msgstr "Texto Inativo"
 
-#: programs/winecfg/winecfg.rc:121
+#: programs/winecfg/winecfg.rc:127
 msgid "Controls Highlight"
 msgstr "Realce do Botão"
 
-#: programs/winecfg/winecfg.rc:122
+#: programs/winecfg/winecfg.rc:128
 msgid "Controls Dark Shadow"
 msgstr "Sombra Escura do Botão"
 
-#: programs/winecfg/winecfg.rc:123
+#: programs/winecfg/winecfg.rc:129
 msgid "Controls Light"
 msgstr "Luz do Botão"
 
-#: programs/winecfg/winecfg.rc:124
+#: programs/winecfg/winecfg.rc:130
 msgid "Controls Alternate Background"
 msgstr "Fundo Alternativo do Botão"
 
-#: programs/winecfg/winecfg.rc:125
+#: programs/winecfg/winecfg.rc:131
 msgid "Hot Tracked Item"
 msgstr "Elemento Ativo"
 
-#: programs/winecfg/winecfg.rc:126
+#: programs/winecfg/winecfg.rc:132
 msgid "Active Title Bar Gradient"
 msgstr "Gradiente da Barra Ativa"
 
-#: programs/winecfg/winecfg.rc:127
+#: programs/winecfg/winecfg.rc:133
 msgid "Inactive Title Bar Gradient"
 msgstr "Gradiente da Barra Inativa"
 
-#: programs/winecfg/winecfg.rc:128
+#: programs/winecfg/winecfg.rc:134
 msgid "Menu Highlight"
 msgstr "Realce de Menu"
 
-#: programs/winecfg/winecfg.rc:129
+#: programs/winecfg/winecfg.rc:135
 msgid "Menu Bar"
 msgstr "Barra de Menu"
 
@@ -19043,30 +19269,42 @@ msgstr ""
 "O programa %s encontrou um problema sério e precisa ser fechado. Pedimos "
 "desculpa pela inconveniência."
 
-#: programs/winedbg/winedbg.rc:59
+#: programs/winedbg/winedbg.rc:57
+#, fuzzy
+#| msgid ""
+#| "This can be caused by a problem in the program or a deficiency in Wine. "
+#| "You may want to check <a href=\"http://www.codeweavers.com/compatibility/"
+#| "\">http://www.codeweavers.com/compatibility/</a> for tips about running "
+#| "this application."
 msgid ""
 "This can be caused by a problem in the program or a deficiency in Wine. You "
-"may want to check <a href=\"http://www.codeweavers.com/compatibility/"
-"\">http://www.codeweavers.com/compatibility/</a> for tips about running this "
-"application."
+"may want to check <a href=\"https://www.codeweavers.com/compatibility/"
+"\">https://www.codeweavers.com/compatibility/</a> for tips about running "
+"this application."
 msgstr ""
 "Isto pode ter sido causado por um problema no programa ou no Wine. Você pode "
 "visitar o <a href=\"http://www.codeweavers.com/compatibility/\">http://www."
 "codeweavers.com/compatibility/</a> para dicas de como rodar este aplicativo."
 
-#: programs/winedbg/winedbg.rc:62
+#: programs/winedbg/winedbg.rc:60
 msgid "Show &Details"
 msgstr "Mostrar &Detalhes"
 
-#: programs/winedbg/winedbg.rc:67
+#: programs/winedbg/winedbg.rc:65
 msgid "Program Error Details"
 msgstr "Detalhes do Erro do Programa"
 
-#: programs/winedbg/winedbg.rc:74
+#: programs/winedbg/winedbg.rc:69
+#, fuzzy
+#| msgid ""
+#| "If this problem is not present under Windows and has not been reported "
+#| "yet, you can save the detailed information to a file using the \"Save As"
+#| "\" button, then <a href=\"http://www.codeweavers.com/support/tickets/"
+#| "enter/\">file a bug report</a> and attach that file to the report."
 msgid ""
 "If this problem is not present under Windows and has not been reported yet, "
 "you can save the detailed information to a file using the \"Save As\" "
-"button, then <a href=\"http://www.codeweavers.com/support/tickets/enter/"
+"button, then <a href=\"https://www.codeweavers.com/support/tickets/enter/"
 "\">file a bug report</a> and attach that file to the report."
 msgstr ""
 "Se este problema não está presente no Windows e não foi reportado ainda, "

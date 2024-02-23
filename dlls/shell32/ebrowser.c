@@ -21,8 +21,6 @@
 #include <stdarg.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "winerror.h"
 #include "windef.h"
 #include "winbase.h"
@@ -112,7 +110,7 @@ static void events_unadvise_all(ExplorerBrowserImpl *This)
         TRACE("Removing %p\n", client);
         list_remove(&client->entry);
         IExplorerBrowserEvents_Release(client->pebe);
-        heap_free(client);
+        free(client);
     }
 }
 
@@ -184,7 +182,7 @@ static void travellog_remove_entry(ExplorerBrowserImpl *This, travellog_entry *e
 
     list_remove(&entry->entry);
     ILFree(entry->pidl);
-    heap_free(entry);
+    free(entry);
     This->travellog_count--;
 }
 
@@ -216,7 +214,7 @@ static void travellog_add_entry(ExplorerBrowserImpl *This, LPITEMIDLIST pidl)
     }
 
     /* Create and add the new entry */
-    new = heap_alloc(sizeof(*new));
+    new = malloc(sizeof(*new));
     new->pidl = ILClone(pidl);
     list_add_tail(&This->travellog, &new->entry);
     This->travellog_cursor = new;
@@ -340,24 +338,6 @@ static void size_panes(ExplorerBrowserImpl *This)
                TRUE);
 }
 
-static HRESULT change_viewmode(ExplorerBrowserImpl *This, UINT viewmode)
-{
-    IFolderView *pfv;
-    HRESULT hr;
-
-    if(!This->psv)
-        return E_FAIL;
-
-    hr = IShellView_QueryInterface(This->psv, &IID_IFolderView, (void*)&pfv);
-    if(SUCCEEDED(hr))
-    {
-        hr = IFolderView_SetCurrentViewMode(pfv, This->fs.ViewMode);
-        IFolderView_Release(pfv);
-    }
-
-    return hr;
-}
-
 static HRESULT create_new_shellview(ExplorerBrowserImpl *This, IShellItem *psi)
 {
     IShellBrowser *psb = &This->IShellBrowser_iface;
@@ -380,6 +360,7 @@ static HRESULT create_new_shellview(ExplorerBrowserImpl *This, IShellItem *psi)
                 This->hwnd_sv = NULL;
             }
 
+            This->fs.fFlags |= FWF_USESEARCHFOLDER | FWF_FULLROWSELECT | FWF_NOCLIENTEDGE;
             hr = IShellView_CreateViewWindow(psv, This->psv, &This->fs, psb, &This->sv_rc, &hwnd_new);
             if(SUCCEEDED(hr))
             {
@@ -846,7 +827,7 @@ static ULONG WINAPI IExplorerBrowser_fnRelease(IExplorerBrowser *iface)
 
         IObjectWithSite_SetSite(&This->IObjectWithSite_iface, NULL);
 
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -988,17 +969,32 @@ static HRESULT WINAPI IExplorerBrowser_fnSetEmptyText(IExplorerBrowser *iface,
 static HRESULT WINAPI IExplorerBrowser_fnSetFolderSettings(IExplorerBrowser *iface,
                                                            const FOLDERSETTINGS *pfs)
 {
-    ExplorerBrowserImpl *This = impl_from_IExplorerBrowser(iface);
-    TRACE("%p (%p)\n", This, pfs);
+    ExplorerBrowserImpl *browser = impl_from_IExplorerBrowser(iface);
+    IFolderView2 *view;
+    HRESULT hr;
 
-    if(!pfs)
+    TRACE("explorer browser %p, settings %p.\n", iface, pfs);
+
+    if (!pfs)
         return E_INVALIDARG;
 
-    This->fs.ViewMode = pfs->ViewMode;
-    This->fs.fFlags = pfs->fFlags | FWF_NOCLIENTEDGE;
+    if (pfs->ViewMode)
+        browser->fs.ViewMode = pfs->ViewMode;
+    browser->fs.fFlags = pfs->fFlags;
 
-    /* Change the settings of the current view, if any. */
-    return change_viewmode(This, This->fs.ViewMode);
+    if (!browser->psv)
+        return E_INVALIDARG;
+
+    hr = IShellView_QueryInterface(browser->psv, &IID_IFolderView2, (void **)&view);
+    if (SUCCEEDED(hr))
+    {
+        hr = IFolderView2_SetCurrentViewMode(view, browser->fs.ViewMode);
+        if (SUCCEEDED(hr))
+            if (SUCCEEDED(hr))
+                hr = IFolderView2_SetCurrentFolderFlags(view, ~FWF_NONE, browser->fs.fFlags);
+        IFolderView2_Release(view);
+    }
+    return hr;
 }
 
 static HRESULT WINAPI IExplorerBrowser_fnAdvise(IExplorerBrowser *iface,
@@ -1009,7 +1005,7 @@ static HRESULT WINAPI IExplorerBrowser_fnAdvise(IExplorerBrowser *iface,
     event_client *client;
     TRACE("%p (%p, %p)\n", This, psbe, pdwCookie);
 
-    client = heap_alloc(sizeof(*client));
+    client = malloc(sizeof(*client));
     client->pebe = psbe;
     client->cookie = ++This->events_next_cookie;
 
@@ -1034,7 +1030,7 @@ static HRESULT WINAPI IExplorerBrowser_fnUnadvise(IExplorerBrowser *iface,
         {
             list_remove(&client->entry);
             IExplorerBrowserEvents_Release(client->pebe);
-            heap_free(client);
+            free(client);
             return S_OK;
         }
     }
@@ -1559,7 +1555,7 @@ static HRESULT WINAPI ICommDlgBrowser3_fnOnDefaultCommand(ICommDlgBrowser3 *ifac
         IDataObject_Release(pdo);
         if(SUCCEEDED(hr))
         {
-            LPIDA pida = GlobalLock(medium.u.hGlobal);
+            LPIDA pida = GlobalLock(medium.hGlobal);
             LPCITEMIDLIST pidl_child = (LPCITEMIDLIST) ((LPBYTE)pida+pida->aoffset[1]);
 
             /* Handle folders by browsing to them. */
@@ -1568,8 +1564,8 @@ static HRESULT WINAPI ICommDlgBrowser3_fnOnDefaultCommand(ICommDlgBrowser3 *ifac
                 IExplorerBrowser_BrowseToIDList(&This->IExplorerBrowser_iface, pidl_child, SBSP_RELATIVE);
                 ret = S_OK;
             }
-            GlobalUnlock(medium.u.hGlobal);
-            GlobalFree(medium.u.hGlobal);
+            GlobalUnlock(medium.hGlobal);
+            GlobalFree(medium.hGlobal);
         }
         else
             ERR("Failed to get data from IDataObject.\n");
@@ -2071,7 +2067,7 @@ HRESULT WINAPI ExplorerBrowser_Constructor(IUnknown *pUnkOuter, REFIID riid, voi
     if(pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
-    eb = heap_alloc_zero(sizeof(*eb));
+    eb = calloc(1, sizeof(*eb));
     eb->ref = 1;
     eb->IExplorerBrowser_iface.lpVtbl = &vt_IExplorerBrowser;
     eb->IShellBrowser_iface.lpVtbl    = &vt_IShellBrowser;

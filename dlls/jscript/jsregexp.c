@@ -361,17 +361,22 @@ static HRESULT create_match_array(script_ctx_t *ctx, jsstr_t *input_str,
         return hres;
 
     for(i=0; i < result->paren_count; i++) {
-        if(result->parens[i].index != -1)
-            str = jsstr_substr(input_str, result->parens[i].index, result->parens[i].length);
-        else
-            str = jsstr_empty();
-        if(!str) {
-            hres = E_OUTOFMEMORY;
-            break;
+        jsval_t val;
+
+        if(result->parens[i].index != -1) {
+            if(!(str = jsstr_substr(input_str, result->parens[i].index, result->parens[i].length))) {
+                hres = E_OUTOFMEMORY;
+                break;
+            }
+            val = jsval_string(str);
+        }else if(ctx->version < SCRIPTLANGUAGEVERSION_ES5) {
+            val = jsval_string(jsstr_empty());
+        }else {
+            val = jsval_undefined();
         }
 
-        hres = jsdisp_propput_idx(array, i+1, jsval_string(str));
-        jsstr_release(str);
+        hres = jsdisp_propput_idx(array, i+1, val);
+        jsval_release(val);
         if(FAILED(hres))
             break;
     }
@@ -385,7 +390,7 @@ static HRESULT create_match_array(script_ctx_t *ctx, jsstr_t *input_str,
         if(FAILED(hres))
             break;
 
-        hres = jsdisp_propput_name(array, L"input", jsval_string(jsstr_addref(input_str)));
+        hres = jsdisp_propput_name(array, L"input", jsval_string(input_str));
         if(FAILED(hres))
             break;
 
@@ -644,7 +649,7 @@ HRESULT create_regexp(script_ctx_t *ctx, jsstr_t *src, DWORD flags, jsdisp_t **r
     if(!regexp->jsregexp) {
         WARN("regexp_new failed\n");
         jsdisp_release(&regexp->dispex);
-        return E_FAIL;
+        return DISP_E_EXCEPTION;
     }
 
     *ret = &regexp->dispex;
@@ -661,17 +666,14 @@ HRESULT create_regexp_var(script_ctx_t *ctx, jsval_t src_arg, jsval_t *flags_arg
     if(is_object_instance(src_arg)) {
         jsdisp_t *obj;
 
-        obj = iface_to_jsdisp(get_object(src_arg));
+        obj = to_jsdisp(get_object(src_arg));
         if(obj) {
             if(is_class(obj, JSCLASS_REGEXP)) {
                 RegExpInstance *regexp = regexp_from_jsdisp(obj);
 
                 hres = create_regexp(ctx, regexp->str, regexp->jsregexp->flags, ret);
-                jsdisp_release(obj);
                 return hres;
             }
-
-            jsdisp_release(obj);
         }
     }
 
@@ -761,8 +763,10 @@ HRESULT regexp_string_match(script_ctx_t *ctx, jsdisp_t *re, jsstr_t *jsstr, jsv
     }
 
     hres = create_array(ctx, match_cnt, &array);
-    if(FAILED(hres))
+    if(FAILED(hres)) {
+        free(match_result);
         return hres;
+    }
 
     for(i=0; i < match_cnt; i++) {
         jsstr_t *tmp_str;
@@ -906,21 +910,16 @@ static HRESULT RegExpConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags, 
     case DISPATCH_METHOD:
         if(argc) {
             if(is_object_instance(argv[0])) {
-                jsdisp_t *jsdisp = iface_to_jsdisp(get_object(argv[0]));
+                jsdisp_t *jsdisp = to_jsdisp(get_object(argv[0]));
                 if(jsdisp) {
                     if(is_class(jsdisp, JSCLASS_REGEXP)) {
-                        if(argc > 1 && !is_undefined(argv[1])) {
-                            jsdisp_release(jsdisp);
+                        if(argc > 1 && !is_undefined(argv[1]))
                             return JS_E_REGEXP_SYNTAX;
-                        }
 
                         if(r)
-                            *r = jsval_obj(jsdisp);
-                        else
-                            jsdisp_release(jsdisp);
+                            *r = jsval_obj(jsdisp_addref(jsdisp));
                         return S_OK;
                     }
-                    jsdisp_release(jsdisp);
                 }
             }
         }

@@ -87,7 +87,7 @@ static void test_query_dos_deviceA(void)
         for (;;) {
             if (!*p) break;
             ret2 = QueryDosDeviceA( p, buffer2, sizeof(buffer2) );
-            /* Win10+ exposes security device which requires extra priviledges to be queried. So skip it */
+            /* Win10+ exposes the security device which requires extra privileges to be queried. So skip it */
             ok(ret2 || broken( !strcmp( p, "MSSECFLTSYS" ) && GetLastError() == ERROR_ACCESS_DENIED ),
                "QueryDosDeviceA failed to return current mapping for %s, last error %lu\n", p, GetLastError());
             p += strlen(p) + 1;
@@ -1565,8 +1565,7 @@ static void test_GetVolumeInformationByHandle(void)
             attr_info->MaximumComponentNameLength, filename_len);
     ok(!wcscmp( fsname, attr_info->FileSystemName ), "expected fsname %s, got %s\n",
             debugstr_w( attr_info->FileSystemName ), debugstr_w( fsname ));
-    ok(wcslen( fsname ) == attr_info->FileSystemNameLength / sizeof(WCHAR),
-            "expected fsname length %Iu, got %Iu\n", attr_info->FileSystemNameLength / sizeof(WCHAR), wcslen( fsname ));
+    ok(wcslen( fsname ) == attr_info->FileSystemNameLength / sizeof(WCHAR), "got %Iu\n", wcslen( fsname ));
 
     SetLastError(0xdeadbeef);
     ret = pGetVolumeInformationByHandleW( file, NULL, 0, NULL, &filename_len, &flags, fsname, 2 );
@@ -1580,8 +1579,7 @@ static void test_GetVolumeInformationByHandle(void)
             volume_info->VolumeSerialNumber, serial);
     ok(!wcscmp( label, volume_info->VolumeLabel ), "expected label %s, got %s\n",
             debugstr_w( volume_info->VolumeLabel ), debugstr_w( label ));
-    ok(wcslen( label ) == volume_info->VolumeLabelLength / sizeof(WCHAR),
-            "expected label length %Iu, got %Iu\n", volume_info->VolumeLabelLength / sizeof(WCHAR), wcslen( label ));
+    ok(wcslen( label ) == volume_info->VolumeLabelLength / sizeof(WCHAR), "got %Iu\n", wcslen( label ));
 
     CloseHandle( file );
 
@@ -1606,8 +1604,7 @@ static void test_GetVolumeInformationByHandle(void)
             volume_info->VolumeSerialNumber, serial);
     ok(!wcscmp( label, volume_info->VolumeLabel ), "expected label %s, got %s\n",
             debugstr_w( volume_info->VolumeLabel ), debugstr_w( label ));
-    ok(wcslen( label ) == volume_info->VolumeLabelLength / sizeof(WCHAR),
-            "expected label length %Iu, got %Iu\n", volume_info->VolumeLabelLength / sizeof(WCHAR), wcslen( label ));
+    ok(wcslen( label ) == volume_info->VolumeLabelLength / sizeof(WCHAR), "got %Iu\n", wcslen( label ));
 
     memset(buffer, 0, sizeof(buffer));
     status = NtQueryVolumeInformationFile( file, &io, buffer, sizeof(buffer), FileFsAttributeInformation );
@@ -1618,8 +1615,7 @@ static void test_GetVolumeInformationByHandle(void)
             attr_info->MaximumComponentNameLength, filename_len);
     ok(!wcscmp( fsname, attr_info->FileSystemName ), "expected fsname %s, got %s\n",
             debugstr_w( attr_info->FileSystemName ), debugstr_w( fsname ));
-    ok(wcslen( fsname ) == attr_info->FileSystemNameLength / sizeof(WCHAR),
-            "expected fsname length %Iu, got %Iu\n", attr_info->FileSystemNameLength / sizeof(WCHAR), wcslen( fsname ));
+    ok(wcslen( fsname ) == attr_info->FileSystemNameLength / sizeof(WCHAR), "got %Iu\n", wcslen( fsname ));
 
     CloseHandle( file );
 }

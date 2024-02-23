@@ -25,6 +25,7 @@
 #include "ntuser.h"
 #include "ddrawgdi.h"
 #include "winnls.h"
+#include "winppi.h"
 
 #include "wine/list.h"
 #include "wine/debug.h"
@@ -66,6 +67,47 @@ struct print
     WCHAR *output;
     enum print_flags flags;
     DEVMODEW *devmode;
+};
+
+BOOL WINAPI SeekPrinter( HANDLE, LARGE_INTEGER, LARGE_INTEGER*, DWORD, BOOL );
+
+enum
+{
+    EMRI_METAFILE = 1,
+    EMRI_ENGINE_FONT,
+    EMRI_DEVMODE,
+    EMRI_TYPE1_FONT,
+    EMRI_PRESTARTPAGE,
+    EMRI_DESIGNVECTOR,
+    EMRI_SUBSET_FONT,
+    EMRI_DELTA_FONT,
+    EMRI_FORM_METAFILE,
+    EMRI_BW_METAFILE,
+    EMRI_BW_FORM_METAFILE,
+    EMRI_METAFILE_DATA,
+    EMRI_METAFILE_EXT,
+    EMRI_BW_METAFILE_EXT,
+    EMRI_ENGINE_FONT_EXT,
+    EMRI_TYPE1_FONT_EXT,
+    EMRI_DESIGNVECTOR_EXT,
+    EMRI_SUBSET_FONT_EXT,
+    EMRI_DELTA_FONT_EXT,
+    EMRI_PS_JOB_DATA,
+    EMRI_EMBED_FONT_EXT,
+    EMRI_HEADER = 65536
+};
+
+struct spool_handle
+{
+    HANDLE spool;
+
+    int devmodes_no;
+    int devmodes_size;
+    struct
+    {
+        int page;
+        DEVMODEW *devmode;
+    } *devmodes;
 };
 
 DC_ATTR *get_dc_attr( HDC hdc )
@@ -235,6 +277,12 @@ static BOOL print_copy_devmode( struct print *print, const DEVMODEW *devmode )
 HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
                       const DEVMODEW *devmode )
 {
+    PRINTER_DEFAULTSW prn_defaults =
+    {
+        .pDatatype = NULL,
+        .pDevMode = (DEVMODEW *)devmode,
+        .DesiredAccess = PRINTER_ACCESS_USE
+    };
     UNICODE_STRING device_str, output_str;
     driver_entry_point entry_point = NULL;
     const WCHAR *display = NULL, *p;
@@ -280,7 +328,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    else if (!OpenPrinterW( (WCHAR *)device, &hspool, NULL ))
+    else if (!OpenPrinterW( (WCHAR *)device, &hspool, &prn_defaults ))
     {
         return 0;
     }
@@ -518,7 +566,18 @@ HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
     print = get_dc_print( dc_attr );
     if (print && print->flags & CALL_END_PAGE) return 0;
     if (!NtGdiResetDC( hdc, devmode, NULL, NULL, NULL )) return 0;
-    if (print && !print_copy_devmode( print, devmode )) return 0;
+    if (print)
+    {
+        PRINTER_DEFAULTSW prn_defaults =
+        {
+            .pDatatype = NULL,
+            .pDevMode = (DEVMODEW *)devmode,
+            .DesiredAccess = PRINTER_ACCESS_USE
+        };
+
+        if (!print_copy_devmode( print, devmode )) return 0;
+        ResetPrinterW( print->printer, &prn_defaults );
+    }
     return hdc;
 }
 
@@ -1043,6 +1102,7 @@ BOOL WINAPI SetBrushOrgEx( HDC hdc, INT x, INT y, POINT *oldorg )
 {
     DC_ATTR *dc_attr;
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetBrushOrgEx( dc_attr, x, y )) return FALSE;
     if (oldorg) *oldorg = dc_attr->brush_org;
     dc_attr->brush_org.x = x;
     dc_attr->brush_org.y = y;
@@ -1365,7 +1425,8 @@ BOOL WINAPI SetMiterLimit( HDC hdc, FLOAT limit, FLOAT *old_limit )
 {
     DC_ATTR *dc_attr;
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
-    /* FIXME: record EMFs */
+    if (dc_attr->emf && !EMFDC_SetMiterLimit( dc_attr, limit )) return 0;
+    if (limit < 1.0f) return FALSE;
     if (old_limit) *old_limit = dc_attr->miter_limit;
     dc_attr->miter_limit = limit;
     return TRUE;
@@ -1533,7 +1594,7 @@ BOOL WINAPI AngleArc( HDC hdc, INT x, INT y, DWORD radius, FLOAT start_angle, FL
     if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_AngleArc( dc_attr, x, y, radius, start_angle, sweep_angle ))
         return FALSE;
-    return NtGdiAngleArc( hdc, x, y, radius, start_angle, sweep_angle );
+    return NtGdiAngleArc( hdc, x, y, radius, *(DWORD *)&start_angle, *(DWORD *)&sweep_angle );
 }
 
 /***********************************************************************
@@ -1967,7 +2028,22 @@ BOOL WINAPI GdiAlphaBlend( HDC hdc_dst, int x_dst, int y_dst, int width_dst, int
         return FALSE;
     return NtGdiAlphaBlend( hdc_dst, x_dst, y_dst, width_dst, height_dst,
                             hdc_src, x_src, y_src, width_src, height_src,
-                            blend_function, 0 /* FIXME */ );
+                            *(DWORD *)&blend_function, 0 /* FIXME */ );
+}
+
+/******************************************************************************
+ *           SetDIBits    (GDI32.@)
+ *
+ * Sets pixels in a bitmap using colors from DIB.
+ */
+INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
+		      UINT lines, const void *bits, const BITMAPINFO *info,
+		      UINT coloruse )
+{
+    /* Wine-specific: pass hbitmap to NtGdiSetDIBitsToDeviceInternal */
+    return NtGdiSetDIBitsToDeviceInternal( hdc, 0, 0, 0, 0, 0, 0,
+                                           startscan, lines, bits, info, coloruse,
+                                           0, 0, FALSE, hbitmap );
 }
 
 /***********************************************************************
@@ -2231,7 +2307,7 @@ INT WINAPI SetMetaRgn( HDC hdc )
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
-    if (dc_attr->emf) FIXME( "EMFs are not yet supported\n" );
+    if (dc_attr->emf && !EMFDC_SetMetaRgn( dc_attr )) return FALSE;
     return NtGdiSetMetaRgn( hdc );
 }
 
@@ -2368,8 +2444,8 @@ INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
         info.cbSize = sizeof(info);
     }
 
-    TRACE("DocName %s, Output %s, Datatype %s, fwType %#lx\n",
-          debugstr_w(info.lpszDocName), debugstr_w(info.lpszOutput),
+    TRACE("Size: %d, DocName %s, Output %s, Datatype %s, fwType %#lx\n",
+          info.cbSize, debugstr_w(info.lpszDocName), debugstr_w(info.lpszOutput),
           debugstr_w(info.lpszDatatype), info.fwType);
 
     if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
@@ -2385,22 +2461,22 @@ INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
         output = StartDocDlgW( print->printer, &info );
         if (output) info.lpszOutput = output;
 
-        if (!info.lpszDatatype || !wcsicmp(info.lpszDatatype, L"EMF"))
+        if (info.lpszDatatype && wcsicmp(info.lpszDatatype, L"EMF"))
+            FIXME("Ignoring DataType %s and forcing EMF\n", debugstr_w(info.lpszDatatype));
+
+        spool_info.pDocName = (WCHAR *)info.lpszDocName;
+        spool_info.pOutputFile = (WCHAR *)info.lpszOutput;
+        spool_info.pDatatype = (WCHAR *)L"NT EMF 1.003";
+        if ((ret = StartDocPrinterW( print->printer, 1, (BYTE *)&spool_info )))
         {
-            spool_info.pDocName = (WCHAR *)info.lpszDocName;
-            spool_info.pOutputFile = (WCHAR *)info.lpszOutput;
-            spool_info.pDatatype = (WCHAR *)L"NT EMF 1.003";
-            if ((ret = StartDocPrinterW( print->printer, 1, (BYTE *)&spool_info )))
+            if (!spool_start_doc( dc_attr, print->printer, &info ))
             {
-                if (!spool_start_doc( dc_attr, print->printer, &info ))
-                {
-                    AbortDoc( hdc );
-                    ret = 0;
-                }
-                HeapFree( GetProcessHeap(), 0, output );
-                print->flags |= CALL_START_PAGE;
-                return ret;
+                AbortDoc( hdc );
+                ret = 0;
             }
+            HeapFree( GetProcessHeap(), 0, output );
+            print->flags |= CALL_START_PAGE;
+            return ret;
         }
     }
 
@@ -2628,4 +2704,193 @@ ULONG WINAPI DdQueryDisplaySettingsUniqueness(void)
     static int warn_once;
     if (!warn_once++) FIXME( "stub\n" );
     return 0;
+}
+
+/*******************************************************************
+ *           GdiGetSpoolFileHandle    (GDI32.@)
+ */
+HANDLE WINAPI GdiGetSpoolFileHandle( WCHAR *printer_name,
+        DEVMODEW *devmode, WCHAR *doc_name )
+{
+    struct spool_handle *ret;
+    HANDLE spool;
+
+    TRACE( "%s %p %s\n", wine_dbgstr_w(printer_name), devmode, wine_dbgstr_w(doc_name) );
+
+    if (!devmode) return NULL;
+    if (!OpenPrinterW( doc_name, &spool, NULL )) return NULL;
+
+    ret = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret) );
+    if (!ret)
+    {
+        ClosePrinter( spool );
+        return NULL;
+    }
+    ret->spool = spool;
+
+    ret->devmodes = HeapAlloc( GetProcessHeap(), 0, sizeof(*ret->devmodes) * 8);
+    if (!ret->devmodes)
+    {
+        GdiDeleteSpoolFileHandle( ret );
+        return NULL;
+    }
+    ret->devmodes_size = 8;
+
+    ret->devmodes[0].devmode = HeapAlloc( GetProcessHeap(), 0,
+            devmode->dmSize + devmode->dmDriverExtra );
+    if (!ret->devmodes[0].devmode)
+    {
+        GdiDeleteSpoolFileHandle( ret );
+        return NULL;
+    }
+    memcpy( ret->devmodes[0].devmode, devmode, devmode->dmSize + devmode->dmDriverExtra );
+    ret->devmodes[0].page = 0;
+    ret->devmodes_no = 1;
+    return ret;
+}
+
+/*******************************************************************
+ *           GdiDeleteSpoolFileHandle    (GDI32.@)
+ */
+BOOL WINAPI GdiDeleteSpoolFileHandle( HANDLE h )
+{
+    struct spool_handle *sh = (struct spool_handle *)h;
+    int i;
+
+    TRACE( "%p\n", h );
+
+    if (!sh)
+        return FALSE;
+
+    ClosePrinter( sh->spool );
+    for (i = 0; i < sh->devmodes_no; i++)
+        HeapFree( GetProcessHeap(), 0, sh->devmodes[i].devmode );
+    HeapFree( GetProcessHeap(), 0, sh->devmodes );
+    HeapFree( GetProcessHeap(), 0, sh );
+    return TRUE;
+}
+
+static BOOL read_emfspool_record( struct spool_handle *sh )
+{
+    struct record_hdr
+    {
+        unsigned int ulID;
+        unsigned int cjSize;
+    } hdr;
+    LARGE_INTEGER pos;
+    BOOL ret;
+    DWORD r;
+
+    if (!sh->spool) return FALSE;
+
+    ret = ReadPrinter( sh->spool, &hdr, sizeof(hdr), &r );
+    if (!ret || r != sizeof(hdr))
+    {
+        ClosePrinter( sh->spool );
+        sh->spool = NULL;
+        return FALSE;
+    }
+    TRACE( "parsing record %u\n", hdr.ulID );
+
+    if (hdr.ulID == EMRI_HEADER)
+        hdr.cjSize -= sizeof(hdr);
+
+    switch (hdr.ulID)
+    {
+    case EMRI_DEVMODE:
+        /* remove unused devmode */
+        if (sh->devmodes_no - 2 >= 0 && sh->devmodes[sh->devmodes_no - 2].page ==
+                sh->devmodes[sh->devmodes_no - 1].page)
+        {
+            HeapFree( GetProcessHeap(), 0, sh->devmodes[sh->devmodes_no - 1].devmode );
+            sh->devmodes_no--;
+        }
+        else if (sh->devmodes_no == sh->devmodes_size)
+        {
+            void *alloc = HeapReAlloc( GetProcessHeap(), 0, sh->devmodes, sh->devmodes_size * 2 );
+
+            if (!alloc)
+            {
+                ClosePrinter( sh->spool );
+                sh->spool = NULL;
+                return FALSE;
+            }
+            sh->devmodes = alloc;
+            sh->devmodes_size *= 2;
+        }
+
+        sh->devmodes[sh->devmodes_no].devmode = HeapAlloc( GetProcessHeap(), 0, hdr.cjSize );
+        if (!sh->devmodes[sh->devmodes_no].devmode)
+        {
+            ClosePrinter( sh->spool );
+            sh->spool = NULL;
+            return FALSE;
+        }
+
+        ret = ReadPrinter( sh->spool, sh->devmodes[sh->devmodes_no].devmode, hdr.cjSize, &r );
+        if (!ret || r != hdr.cjSize)
+        {
+            ClosePrinter( sh->spool );
+            sh->spool = NULL;
+            return FALSE;
+        }
+        sh->devmodes[sh->devmodes_no].page = sh->devmodes[sh->devmodes_no - 1].page;
+        sh->devmodes_no++;
+        return TRUE;
+
+    case EMRI_METAFILE:
+    case EMRI_FORM_METAFILE:
+    case EMRI_BW_METAFILE:
+    case EMRI_BW_FORM_METAFILE:
+    case EMRI_METAFILE_EXT:
+    case EMRI_BW_METAFILE_EXT:
+        sh->devmodes[sh->devmodes_no - 1].page++;
+        /* fall through */
+    default:
+        pos.QuadPart = hdr.cjSize;
+        ret = SeekPrinter( sh->spool, pos, NULL, FILE_CURRENT, FALSE );
+        if (!ret)
+        {
+            ClosePrinter( sh->spool );
+            sh->spool = NULL;
+            return FALSE;
+        }
+        return TRUE;
+    }
+}
+
+/*******************************************************************
+ *           GdiGetDevmodeForPage    (GDI32.@)
+ */
+BOOL WINAPI GdiGetDevmodeForPage( HANDLE h, DWORD page, DEVMODEW **cur, DEVMODEW **prev )
+{
+    struct spool_handle *sh = (struct spool_handle *)h;
+    int i;
+
+    TRACE( "%p %ld %p %p\n", h, page, cur, prev );
+
+    if (!sh)
+        return FALSE;
+
+    i = 0;
+    while (1)
+    {
+        if (sh->devmodes[i].page >= page)
+        {
+            if (cur) *cur = sh->devmodes[i].devmode;
+            if (prev)
+            {
+                if (!i || sh->devmodes[i - 1].page != page - 1)
+                    *prev = sh->devmodes[i].devmode;
+                else
+                    *prev = sh->devmodes[i - 1].devmode;
+            }
+            return TRUE;
+        }
+
+        if (i + 1 < sh->devmodes_no)
+            i++;
+        else if (!read_emfspool_record( sh ))
+            return FALSE;
+    }
 }

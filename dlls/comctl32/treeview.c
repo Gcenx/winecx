@@ -47,8 +47,6 @@
 #include <limits.h>
 #include <stdlib.h>
 
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -1229,7 +1227,7 @@ TREEVIEW_DoSetItemT(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
 static LRESULT
 TREEVIEW_InsertItemT(TREEVIEW_INFO *infoPtr, const TVINSERTSTRUCTW *ptdi, BOOL isW)
 {
-    const TVITEMEXW *tvItem = &ptdi->u.itemex;
+    const TVITEMEXW *tvItem = &ptdi->itemex;
     HTREEITEM insertAfter;
     TREEVIEW_ITEM *newItem, *parentItem;
     BOOL bTextUpdated = FALSE;
@@ -3114,20 +3112,13 @@ TREEVIEW_Paint(TREEVIEW_INFO *infoPtr, HDC hdc_ref)
 static LRESULT
 TREEVIEW_PrintClient(TREEVIEW_INFO *infoPtr, HDC hdc, DWORD options)
 {
+    RECT rc;
+
     FIXME("Partial Stub: (hdc=%p options=%#lx)\n", hdc, options);
 
-    if ((options & PRF_CHECKVISIBLE) && !IsWindowVisible(infoPtr->hwnd))
-        return 0;
-
-    if (options & PRF_ERASEBKGND)
-        TREEVIEW_EraseBackground(infoPtr, hdc);
-
-    if (options & PRF_CLIENT)
-    {
-        RECT rc;
-        GetClientRect(infoPtr->hwnd, &rc);
-        TREEVIEW_Refresh(infoPtr, hdc, &rc);
-    }
+    TREEVIEW_EraseBackground(infoPtr, hdc);
+    GetClientRect(infoPtr->hwnd, &rc);
+    TREEVIEW_Refresh(infoPtr, hdc, &rc);
 
     return 0;
 }
@@ -4125,9 +4116,11 @@ TREEVIEW_EndEditLabelNow(TREEVIEW_INFO *infoPtr, BOOL bCancel)
 static LRESULT
 TREEVIEW_HandleTimer(TREEVIEW_INFO *infoPtr, WPARAM wParam)
 {
+    static unsigned int once;
+
     if (wParam != TV_EDIT_TIMER)
     {
-	ERR("got unknown timer\n");
+	if (!once++) ERR("got unknown timer %Id\n", wParam);
 	return 1;
     }
 
@@ -4673,7 +4666,7 @@ static INT TREEVIEW_ProcessLetterKeys(TREEVIEW_INFO *infoPtr, WPARAM charCode, L
     if (!charCode || !keyData) return 0;
 
     /* only allow the valid WM_CHARs through */
-    if (!isalnum(charCode) &&
+    if (!iswalnum(charCode) &&
         charCode != '.' && charCode != '`' && charCode != '!' &&
         charCode != '@' && charCode != '#' && charCode != '$' &&
         charCode != '%' && charCode != '^' && charCode != '&' &&

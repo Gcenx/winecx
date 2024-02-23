@@ -801,14 +801,14 @@ HRESULT WINAPI D3DXCreateTextureFromFileExA(struct IDirect3DDevice9 *device, con
         return D3DERR_INVALIDCALL;
 
     len = MultiByteToWideChar(CP_ACP, 0, srcfile, -1, NULL, 0);
-    widename = HeapAlloc(GetProcessHeap(), 0, len * sizeof(*widename));
+    widename = malloc(len * sizeof(*widename));
     MultiByteToWideChar(CP_ACP, 0, srcfile, -1, widename, len);
 
     hr = D3DXCreateTextureFromFileExW(device, widename, width, height, miplevels,
                                       usage, format, pool, filter, mipfilter,
                                       colorkey, srcinfo, palette, texture);
 
-    HeapFree(GetProcessHeap(), 0, widename);
+    free(widename);
     return hr;
 }
 
@@ -981,12 +981,12 @@ HRESULT WINAPI D3DXCreateVolumeTextureFromFileA(IDirect3DDevice9 *device,
     if (!filename) return D3DERR_INVALIDCALL;
 
     len = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
-    filenameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    filenameW = malloc(len * sizeof(WCHAR));
     if (!filenameW) return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, len);
 
     hr = map_view_of_file(filenameW, &data, &data_size);
-    HeapFree(GetProcessHeap(), 0, filenameW);
+    free(filenameW);
     if (FAILED(hr)) return D3DXERR_INVALIDDATA;
 
     hr = D3DXCreateVolumeTextureFromFileInMemoryEx(device, data, data_size, D3DX_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT,
@@ -1049,12 +1049,12 @@ HRESULT WINAPI D3DXCreateVolumeTextureFromFileExA(IDirect3DDevice9 *device,
     if (!filename) return D3DERR_INVALIDCALL;
 
     len = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
-    filenameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    filenameW = malloc(len * sizeof(WCHAR));
     if (!filenameW) return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, len);
 
     hr = map_view_of_file(filenameW, &data, &data_size);
-    HeapFree(GetProcessHeap(), 0, filenameW);
+    free(filenameW);
     if (FAILED(hr)) return D3DXERR_INVALIDDATA;
 
     hr = D3DXCreateVolumeTextureFromFileInMemoryEx(device, data, data_size, width, height, depth,
@@ -1288,7 +1288,7 @@ static inline void fill_texture(const struct pixel_format_desc *format, BYTE *po
         else if (format->type == FORMAT_ARGBF)
             v = *(DWORD *)&comp_value;
         else if (format->type == FORMAT_ARGB)
-            v = comp_value * ((1 << format->bits[c]) - 1) + 0.5f;
+            v = max(comp_value * ((1 << format->bits[c]) - 1) + 0.5f, 0);
         else
             FIXME("Unhandled format type %#x\n", format->type);
 
@@ -1380,12 +1380,6 @@ HRESULT WINAPI D3DXFillTexture(struct IDirect3DTexture9 *texture, LPD3DXFILL2D f
     }
 
     return D3D_OK;
-}
-
-HRESULT WINAPI D3DXFillTextureTX(struct IDirect3DTexture9 *texture, ID3DXTextureShader *texture_shader)
-{
-    FIXME("texture %p, texture_shader %p stub.\n", texture, texture_shader);
-    return E_NOTIMPL;
 }
 
 HRESULT WINAPI D3DXCreateCubeTextureFromFileInMemoryEx(IDirect3DDevice9 *device, const void *src_data,
@@ -1526,14 +1520,14 @@ HRESULT WINAPI D3DXCreateCubeTextureFromFileA(IDirect3DDevice9 *device,
     if (!src_filename) return D3DERR_INVALIDCALL;
 
     len = MultiByteToWideChar(CP_ACP, 0, src_filename, -1, NULL, 0);
-    filename = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    filename = malloc(len * sizeof(WCHAR));
     if (!filename) return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, src_filename, -1, filename, len);
 
     hr = map_view_of_file(filename, &data, &data_size);
     if (FAILED(hr))
     {
-        HeapFree(GetProcessHeap(), 0, filename);
+        free(filename);
         return D3DXERR_INVALIDDATA;
     }
 
@@ -1541,7 +1535,7 @@ HRESULT WINAPI D3DXCreateCubeTextureFromFileA(IDirect3DDevice9 *device,
         0, D3DFMT_UNKNOWN, D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, cube_texture);
 
     UnmapViewOfFile(data);
-    HeapFree(GetProcessHeap(), 0, filename);
+    free(filename);
     return hr;
 }
 
@@ -1584,14 +1578,14 @@ HRESULT WINAPI D3DXCreateCubeTextureFromFileExA(IDirect3DDevice9 *device, const 
     if (!src_filename) return D3DERR_INVALIDCALL;
 
     len = MultiByteToWideChar(CP_ACP, 0, src_filename, -1, NULL, 0);
-    filename = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    filename = malloc(len * sizeof(WCHAR));
     if (!filename) return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, src_filename, -1, filename, len);
 
     hr = map_view_of_file(filename, &data, &data_size);
     if (FAILED(hr))
     {
-        HeapFree(GetProcessHeap(), 0, filename);
+        free(filename);
         return D3DXERR_INVALIDDATA;
     }
 
@@ -1599,7 +1593,7 @@ HRESULT WINAPI D3DXCreateCubeTextureFromFileExA(IDirect3DDevice9 *device, const 
         usage, format, pool, filter, mip_filter, color_key, image_info, palette, cube_texture);
 
     UnmapViewOfFile(data);
-    HeapFree(GetProcessHeap(), 0, filename);
+    free(filename);
     return hr;
 }
 
@@ -1729,12 +1723,6 @@ HRESULT WINAPI D3DXFillCubeTexture(struct IDirect3DCubeTexture9 *texture, LPD3DX
     return D3D_OK;
 }
 
-HRESULT WINAPI D3DXFillCubeTextureTX(struct IDirect3DCubeTexture9 *texture, ID3DXTextureShader *texture_shader)
-{
-    FIXME("texture %p, texture_shader %p stub.\n", texture, texture_shader);
-    return E_NOTIMPL;
-}
-
 HRESULT WINAPI D3DXFillVolumeTexture(struct IDirect3DVolumeTexture9 *texture, LPD3DXFILL3D function, void *funcdata)
 {
     DWORD miplevels;
@@ -1821,7 +1809,7 @@ HRESULT WINAPI D3DXSaveTextureToFileA(const char *dst_filename, D3DXIMAGE_FILEFO
     if (!dst_filename) return D3DERR_INVALIDCALL;
 
     len = MultiByteToWideChar(CP_ACP, 0, dst_filename, -1, NULL, 0);
-    filename = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    filename = malloc(len * sizeof(WCHAR));
     if (!filename) return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, dst_filename, -1, filename, len);
 
@@ -1832,7 +1820,7 @@ HRESULT WINAPI D3DXSaveTextureToFileA(const char *dst_filename, D3DXIMAGE_FILEFO
         ID3DXBuffer_Release(buffer);
     }
 
-    HeapFree(GetProcessHeap(), 0, filename);
+    free(filename);
     return hr;
 }
 

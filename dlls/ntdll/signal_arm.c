@@ -24,8 +24,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -33,9 +31,10 @@
 #include "wine/exception.h"
 #include "ntdll_misc.h"
 #include "wine/debug.h"
-#include "winnt.h"
+#include "ntsyscalls.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(relay);
 WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
 typedef struct _SCOPE_TABLE
@@ -94,6 +93,15 @@ static inline BOOL is_valid_frame( ULONG_PTR frame )
 }
 
 
+/*******************************************************************
+ *         syscalls
+ */
+#define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name, args )
+ALL_SYSCALLS32
+DEFINE_SYSCALL_HELPER32()
+#undef SYSCALL_ENTRY
+
+
 /**************************************************************************
  *		__chkstk (NTDLL.@)
  *
@@ -105,7 +113,7 @@ __ASM_GLOBAL_FUNC( __chkstk, "lsl r4, r4, #2\n\t"
 /***********************************************************************
  *		RtlCaptureContext (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( RtlCaptureContext, 4,
+__ASM_GLOBAL_FUNC( RtlCaptureContext,
                     "str r1, [r0, #0x8]\n\t"   /* context->R1 */
                     "mov r1, #0x0200000\n\t"   /* CONTEXT_ARM */
                     "add r1, r1, #0x7\n\t"     /* CONTEXT_CONTROL|CONTEXT_INTEGER|CONTEXT_FLOATING_POINT */
@@ -165,7 +173,7 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
     {
         struct unwind_builtin_dll_params params = { type, dispatch, context };
 
-        status = NTDLL_UNIX_CALL( unwind_builtin_dll, &params );
+        status = WINE_UNIX_CALL( unix_unwind_builtin_dll, &params );
         if (status != STATUS_SUCCESS) return status;
 
         if (dispatch->EstablisherFrame)
@@ -455,7 +463,7 @@ static NTSTATUS call_function_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_con
 /*******************************************************************
  *		KiUserExceptionDispatcher (NTDLL.@)
  */
-NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *context )
+NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     NTSTATUS status;
     DWORD c;
@@ -478,7 +486,7 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
     }
     else if (rec->ExceptionCode == EXCEPTION_WINE_NAME_THREAD && rec->ExceptionInformation[0] == 0x1000)
     {
-        if ((DWORD)rec->ExceptionInformation[2] == -1)
+        if ((DWORD)rec->ExceptionInformation[2] == -1 || (DWORD)rec->ExceptionInformation[2] == GetCurrentThreadId())
             WARN_(threadname)( "Thread renamed to %s\n", debugstr_a((char *)rec->ExceptionInformation[1]) );
         else
             WARN_(threadname)( "Thread ID %04lx renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
@@ -518,23 +526,56 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
     if (status != STATUS_UNHANDLED_EXCEPTION) RtlRaiseStatus( status );
     return NtRaiseException( rec, context, FALSE );
 }
+__ASM_GLOBAL_FUNC( KiUserExceptionDispatcher,
+                   __ASM_SEH(".seh_custom 0xee,0x02\n\t")  /* MSFT_OP_CONTEXT */
+                   __ASM_SEH(".seh_endprologue\n\t")
+                   __ASM_EHABI(".save {sp}\n\t") /* Restore Sp last */
+                   __ASM_EHABI(".pad #-(0x80 + 0x0c + 0x0c)\n\t") /* Move back across D0-D15, Cpsr, Fpscr, Padding, Pc, Lr and Sp */
+                   __ASM_EHABI(".vsave {d8-d15}\n\t")
+                   __ASM_EHABI(".pad #0x40\n\t") /* Skip past D0-D7 */
+                   __ASM_EHABI(".pad #0x0c\n\t") /* Skip past Cpsr, Fpscr and Padding */
+                   __ASM_EHABI(".save {lr, pc}\n\t")
+                   __ASM_EHABI(".pad #0x08\n\t") /* Skip past R12 and Sp - Sp is restored last */
+                   __ASM_EHABI(".save {r4-r11}\n\t")
+                   __ASM_EHABI(".pad #0x14\n\t") /* Skip past ContextFlags and R0-R3 */
+                   "add r0, sp, #0x1a0\n\t"     /* rec (context + 1) */
+                   "mov r1, sp\n\t"             /* context */
+                   "bl " __ASM_NAME("dispatch_exception") "\n\t"
+                   "udf #1" )
 
 
 /*******************************************************************
  *		KiUserApcDispatcher (NTDLL.@)
  */
-void WINAPI KiUserApcDispatcher( CONTEXT *context, ULONG_PTR ctx, ULONG_PTR arg1, ULONG_PTR arg2,
-                                 PNTAPCFUNC func )
-{
-    func( ctx, arg1, arg2 );
-    NtContinue( context, TRUE );
-}
+__ASM_GLOBAL_FUNC( KiUserApcDispatcher,
+                   __ASM_SEH(".seh_custom 0xee,0x02\n\t")  /* MSFT_OP_CONTEXT */
+                   "nop\n\t"
+                   __ASM_SEH(".seh_stackalloc 0x18\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
+                   __ASM_EHABI(".save {sp}\n\t") /* Restore Sp last */
+                   __ASM_EHABI(".pad #-(0x80 + 0x0c + 0x0c)\n\t") /* Move back across D0-D15, Cpsr, Fpscr, Padding, Pc, Lr and Sp */
+                   __ASM_EHABI(".vsave {d8-d15}\n\t")
+                   __ASM_EHABI(".pad #0x40\n\t") /* Skip past D0-D7 */
+                   __ASM_EHABI(".pad #0x0c\n\t") /* Skip past Cpsr, Fpscr and Padding */
+                   __ASM_EHABI(".save {lr, pc}\n\t")
+                   __ASM_EHABI(".pad #0x08\n\t") /* Skip past R12 and Sp - Sp is restored last */
+                   __ASM_EHABI(".save {r4-r11}\n\t")
+                   __ASM_EHABI(".pad #0x2c\n\t") /* Skip past args, ContextFlags and R0-R3 */
+                   "ldr r0, [sp, #0x04]\n\t"      /* arg1 */
+                   "ldr r1, [sp, #0x08]\n\t"      /* arg2 */
+                   "ldr r2, [sp, #0x0c]\n\t"      /* arg3 */
+                   "ldr ip, [sp]\n\t"             /* func */
+                   "blx ip\n\t"
+                   "add r0, sp, #0x18\n\t"        /* context */
+                   "ldr r1, [sp, #0x10]\n\t"      /* alertable */
+                   "bl " __ASM_NAME("NtContinue") "\n\t"
+                   "udf #1" )
 
 
 /*******************************************************************
  *		KiUserCallbackDispatcher (NTDLL.@)
  */
-void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
+void WINAPI dispatch_callback( void *args, ULONG len, ULONG id )
 {
     NTSTATUS status;
 
@@ -552,6 +593,21 @@ void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
 
     RtlRaiseStatus( status );
 }
+__ASM_GLOBAL_FUNC( KiUserCallbackDispatcher,
+                   __ASM_SEH(".seh_custom 0xee,0x01\n\t")  /* MSFT_OP_MACHINE_FRAME */
+                   "nop\n\t"
+                   __ASM_SEH(".seh_save_regs {lr}\n\t")
+                   "nop\n\t"
+                   __ASM_SEH(".seh_stackalloc 0xc\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
+                   __ASM_EHABI(".save {sp, pc}\n\t")
+                   __ASM_EHABI(".save {lr}\n\t")
+                   __ASM_EHABI(".pad #0x0c\n\t")
+                   "ldr r0, [sp]\n\t"             /* args */
+                   "ldr r1, [sp, #0x04]\n\t"      /* len */
+                   "ldr r2, [sp, #0x08]\n\t"      /* id */
+                   "bl " __ASM_NAME("dispatch_callback") "\n\t"
+                   "udf #1" )
 
 
 /***********************************************************************
@@ -605,7 +661,7 @@ static const BYTE unwind_instr_len[256] =
 /* 80 */ 4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 /* a0 */ 4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 /* c0 */ 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,4,4,4,4,4,4,4,4,
-/* e0 */ 4,4,4,4,4,4,4,4,4,4,4,4,2,2,2,4,0,0,0,0,0,4,4,2,2,4,4,2,4,2,4,0
+/* e0 */ 4,4,4,4,4,4,4,4,4,4,4,4,2,2,0,4,0,0,0,0,0,4,4,2,2,4,4,2,4,2,4,0
 };
 
 /***********************************************************************
@@ -685,8 +741,39 @@ static void pop_fpregs_range( int first, int last, CONTEXT *context,
     for (i = first; i <= last; i++)
     {
         if (ptrs && i >= 8 && i <= 15) (&ptrs->D8)[i - 8] = (ULONGLONG *)context->Sp;
-        context->u.D[i] = *(ULONGLONG *)context->Sp;
+        context->D[i] = *(ULONGLONG *)context->Sp;
         context->Sp += 8;
+    }
+}
+
+
+/***********************************************************************
+ *           ms_opcode
+ */
+static void ms_opcode( BYTE opcode, CONTEXT *context,
+                       KNONVOLATILE_CONTEXT_POINTERS *ptrs )
+{
+    switch (opcode)
+    {
+    case 1:  /* MSFT_OP_MACHINE_FRAME */
+        context->Pc = ((DWORD *)context->Sp)[1];
+        context->Sp = ((DWORD *)context->Sp)[0];
+        break;
+    case 2:  /* MSFT_OP_CONTEXT */
+    {
+        int i;
+        CONTEXT *src = (CONTEXT *)context->Sp;
+
+        *context = *src;
+        if (!ptrs) break;
+        for (i = 0; i < 8; i++) (&ptrs->R4)[i] = &src->R4 + i;
+        ptrs->Lr = &src->Lr;
+        for (i = 0; i < 8; i++) (&ptrs->D8)[i] = &src->D[i + 8];
+        break;
+    }
+    default:
+        WARN( "unsupported code %02x\n", opcode );
+        break;
     }
 }
 
@@ -749,11 +836,9 @@ static void process_unwind_codes( BYTE *ptr, BYTE *end, CONTEXT *context,
                 pop_lr( 4, context, ptrs );
         }
         else if (*ptr <= 0xee) /* Microsoft-specific 0x00-0x0f, Available 0x10-0xff */
-            WARN( "unsupported code %02x\n", *ptr );
+            ms_opcode( val & 0xff, context, ptrs );
         else if (*ptr <= 0xef && ((val & 0xff) <= 0x0f)) /* ldr lr, [sp], #x */
             pop_lr( 4 * (val & 0x0f), context, ptrs );
-        else if (*ptr == 0xf4) /* Custom private (unallocated) opcode, saved a full CONTEXT on the stack */
-            memcpy( context, (DWORD *)context->Sp, sizeof(CONTEXT) );
         else if (*ptr <= 0xf4) /* Available */
             WARN( "unsupported code %02x\n", *ptr );
         else if (*ptr <= 0xf5) /* vpop {dS-dE} */
@@ -781,32 +866,32 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
                                  CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *ptrs )
 {
     int i, pos = 0;
-    int pf = 0, ef = 0, fpoffset = 0, stack = func->u.s.StackAdjust;
+    int pf = 0, ef = 0, fpoffset = 0, stack = func->StackAdjust;
     int prologue_regmask = 0;
     int epilogue_regmask = 0;
     unsigned int offset, len;
     BYTE prologue[10], *prologue_end, epilogue[20], *epilogue_end;
 
     TRACE( "function %lx-%lx: len=%#x flag=%x ret=%u H=%u reg=%u R=%u L=%u C=%u stackadjust=%x\n",
-           base + func->BeginAddress, base + func->BeginAddress + func->u.s.FunctionLength * 2,
-           func->u.s.FunctionLength, func->u.s.Flag, func->u.s.Ret,
-           func->u.s.H, func->u.s.Reg, func->u.s.R, func->u.s.L, func->u.s.C, func->u.s.StackAdjust );
+           base + func->BeginAddress, base + func->BeginAddress + func->FunctionLength * 2,
+           func->FunctionLength, func->Flag, func->Ret,
+           func->H, func->Reg, func->R, func->L, func->C, func->StackAdjust );
 
     offset = (pc - base) - func->BeginAddress;
-    if (func->u.s.StackAdjust >= 0x03f4)
+    if (func->StackAdjust >= 0x03f4)
     {
-        pf = func->u.s.StackAdjust & 0x04;
-        ef = func->u.s.StackAdjust & 0x08;
-        stack = (func->u.s.StackAdjust & 3) + 1;
+        pf = func->StackAdjust & 0x04;
+        ef = func->StackAdjust & 0x08;
+        stack = (func->StackAdjust & 3) + 1;
     }
 
-    if (!func->u.s.R || pf)
+    if (!func->R || pf)
     {
-        int first = 4, last = func->u.s.Reg + 4;
+        int first = 4, last = func->Reg + 4;
         if (pf)
         {
-            first = (~func->u.s.StackAdjust) & 3;
-            if (func->u.s.R)
+            first = (~func->StackAdjust) & 3;
+            if (func->R)
                 last = 3;
         }
         for (i = first; i <= last; i++)
@@ -814,31 +899,31 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
         fpoffset = last + 1 - first;
     }
 
-    if (!func->u.s.R || ef)
+    if (!func->R || ef)
     {
-        int first = 4, last = func->u.s.Reg + 4;
+        int first = 4, last = func->Reg + 4;
         if (ef)
         {
-            first = (~func->u.s.StackAdjust) & 3;
-            if (func->u.s.R)
+            first = (~func->StackAdjust) & 3;
+            if (func->R)
                 last = 3;
         }
         for (i = first; i <= last; i++)
             epilogue_regmask |= 1 << i;
     }
 
-    if (func->u.s.C)
+    if (func->C)
     {
         prologue_regmask |= 1 << 11;
         epilogue_regmask |= 1 << 11;
     }
 
-    if (func->u.s.L)
+    if (func->L)
     {
         prologue_regmask |= 1 << 14; /* lr */
-        if (func->u.s.Ret != 0)
+        if (func->Ret != 0)
             epilogue_regmask |= 1 << 14; /* lr */
-        else if (!func->u.s.H)
+        else if (!func->H)
             epilogue_regmask |= 1 << 15; /* pc */
     }
 
@@ -856,12 +941,12 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
         }
     }
 
-    if (func->u.s.R && func->u.s.Reg != 7)
-        prologue[pos++] = 0xe0 | func->u.s.Reg; /* vpush {d8-dX} */
+    if (func->R && func->Reg != 7)
+        prologue[pos++] = 0xe0 | func->Reg; /* vpush {d8-dX} */
 
-    if (func->u.s.C && fpoffset == 0)
+    if (func->C && fpoffset == 0)
         prologue[pos++] = 0xfb; /* mov r11, sp - handled as nop16 */
-    else if (func->u.s.C)
+    else if (func->C)
         prologue[pos++] = 0xfc; /* add r11, sp, #x - handled as nop32 */
 
     if (prologue_regmask & 0xf00) /* r8-r11 set */
@@ -881,7 +966,7 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
         prologue[pos++] = bitmask & 0xff;
     }
 
-    if (func->u.s.H)
+    if (func->H)
         prologue[pos++] = 0x04; /* push {r0-r3} - handled as sub sp, sp, #16 */
 
     prologue[pos++] = 0xff; /* end */
@@ -902,8 +987,8 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
         }
     }
 
-    if (func->u.s.R && func->u.s.Reg != 7)
-        epilogue[pos++] = 0xe0 | func->u.s.Reg; /* vpush {d8-dX} */
+    if (func->R && func->Reg != 7)
+        epilogue[pos++] = 0xe0 | func->Reg; /* vpush {d8-dX} */
 
     if (epilogue_regmask & 0x7f00) /* r8-r11, lr set */
     {
@@ -922,23 +1007,23 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
         epilogue[pos++] = bitmask & 0xff;
     }
 
-    if (func->u.s.H && !(func->u.s.L && func->u.s.Ret == 0))
+    if (func->H && !(func->L && func->Ret == 0))
         epilogue[pos++] = 0x04; /* add sp, sp, #16 */
-    else if (func->u.s.H && (func->u.s.L && func->u.s.Ret == 0))
+    else if (func->H && (func->L && func->Ret == 0))
     {
         epilogue[pos++] = 0xef; /* ldr lr, [sp], #20 */
         epilogue[pos++] = 5;
     }
 
-    if (func->u.s.Ret == 1)
+    if (func->Ret == 1)
         epilogue[pos++] = 0xfd; /* bx lr */
-    else if (func->u.s.Ret == 2)
+    else if (func->Ret == 2)
         epilogue[pos++] = 0xfe; /* b address */
     else
         epilogue[pos++] = 0xff; /* end */
     epilogue_end = &epilogue[pos];
 
-    if (func->u.s.Flag == 1 && offset < 4 * (prologue_end - prologue)) {
+    if (func->Flag == 1 && offset < 4 * (prologue_end - prologue)) {
         /* Check prologue */
         len = get_sequence_len( prologue, prologue_end, 0 );
         if (offset < len)
@@ -948,12 +1033,12 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
         }
     }
 
-    if (func->u.s.Ret != 3 && 2 * func->u.s.FunctionLength - offset <= 4 * (epilogue_end - epilogue)) {
+    if (func->Ret != 3 && 2 * func->FunctionLength - offset <= 4 * (epilogue_end - epilogue)) {
         /* Check epilogue */
         len = get_sequence_len( epilogue, epilogue_end, 1 );
-        if (offset >= 2 * func->u.s.FunctionLength - len)
+        if (offset >= 2 * func->FunctionLength - len)
         {
-            process_unwind_codes( epilogue, epilogue_end, context, ptrs, offset - (2 * func->u.s.FunctionLength - len) );
+            process_unwind_codes( epilogue, epilogue_end, context, ptrs, offset - (2 * func->FunctionLength - len) );
             return NULL;
         }
     }
@@ -977,7 +1062,7 @@ static void *unwind_full_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION *f
     void *data;
     BYTE *end;
 
-    info = (struct unwind_info *)((char *)base + func->u.UnwindData);
+    info = (struct unwind_info *)((char *)base + func->UnwindData);
     data = info + 1;
     epilogs = info->epilog;
     codes = info->codes;
@@ -1066,7 +1151,7 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
     *handler_data = NULL;
 
     context->Pc = 0;
-    if (func->u.s.Flag)
+    if (func->Flag)
         handler = unwind_packed_data( base, pc, func, context, ctx_ptr );
     else
         handler = unwind_full_data( base, pc, func, context, handler_data, ctx_ptr );
@@ -1108,7 +1193,7 @@ __ASM_GLOBAL_FUNC( call_consolidate_callback,
                    "mov r2, #0x1a0\n\t"
                    __ASM_SEH(".seh_nop_w\n\t")
                    "bl " __ASM_NAME("memcpy") "\n\t"
-                   __ASM_SEH(".seh_custom 0xf4\n\t") /* A custom (unallocated) SEH opcode for CONTEXT on stack */
+                   __ASM_SEH(".seh_custom 0xee,0x02\n\t")  /* MSFT_OP_CONTEXT */
                    __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_def_cfa 13, 0\n\t")
                    __ASM_CFI(".cfi_escape 0x0f,0x04,0x7d,0xb8,0x00,0x06\n\t") /* DW_CFA_def_cfa_expression: DW_OP_breg13 + 56, DW_OP_deref */
@@ -1171,7 +1256,7 @@ void CDECL RtlRestoreContext( CONTEXT *context, EXCEPTION_RECORD *rec )
         context->Fpscr   = jmp->Fpscr;
 
         for (i = 0; i < 8; i++)
-            context->u.D[8+i] = jmp->D[i];
+            context->D[8+i] = jmp->D[i];
     }
     else if (rec && rec->ExceptionCode == STATUS_UNWIND_CONSOLIDATE && rec->NumberParameters >= 1)
     {
@@ -1453,7 +1538,7 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec,
 /***********************************************************************
  *		RtlRaiseException (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( RtlRaiseException, 4,
+__ASM_GLOBAL_FUNC( RtlRaiseException,
                     "push {r0, lr}\n\t"
                     __ASM_EHABI(".save {r0, lr}\n\t")
                     __ASM_SEH(".seh_save_regs {r0, lr}\n\t")
@@ -1476,7 +1561,12 @@ __ASM_STDCALL_FUNC( RtlRaiseException, 4,
                     "add r1, sp, #0x1a8\n\t"
                     "str r1, [sp, #0x38]\n\t"  /* context->Sp */
                     "mov r1, sp\n\t"
-                    "mov r2, #1\n\t"
+                    "mrc p15, 0, r3, c13, c0, 2\n\t" /* NtCurrentTeb() */
+                    "ldr r3, [r3, #0x30]\n\t"  /* peb */
+                    "ldrb r2, [r3, #2]\n\t"    /* peb->BeingDebugged */
+                    "cbnz r2, 1f\n\t"
+                    "bl " __ASM_NAME("dispatch_exception") "\n"
+                    "1:\tmov r2, #1\n\t"
                     "bl " __ASM_NAME("NtRaiseException") "\n\t"
                     "bl " __ASM_NAME("RtlRaiseStatus") )
 
@@ -1490,21 +1580,52 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
 }
 
 /***********************************************************************
- *           signal_start_thread
+ *           RtlUserThreadStart (NTDLL.@)
  */
-__ASM_GLOBAL_FUNC( signal_start_thread,
-                   "mov sp, r0\n\t"  /* context */
-                   "mov r1, #1\n\t"
-                   "b " __ASM_NAME("NtContinue") )
+#ifdef __WINE_PE_BUILD
+__ASM_GLOBAL_FUNC( RtlUserThreadStart,
+                   ".seh_endprologue\n\t"
+                   "mov r2, r1\n\t"
+                   "mov r1, r0\n\t"
+                   "mov r0, #0\n\t"
+                   "ldr ip, 1f\n\t"
+                   "ldr ip, [ip]\n\t"
+                   "blx ip\n"
+                   "1:\t.long " __ASM_NAME("pBaseThreadInitThunk") "\n\t"
+                   ".seh_handler " __ASM_NAME("call_unhandled_exception_handler") ", %except" )
+#else
+void WINAPI RtlUserThreadStart( PRTL_THREAD_START_ROUTINE entry, void *arg )
+{
+    __TRY
+    {
+        pBaseThreadInitThunk( 0, (LPTHREAD_START_ROUTINE)entry, arg );
+    }
+    __EXCEPT(call_unhandled_exception_filter)
+    {
+        NtTerminateProcess( GetCurrentProcess(), GetExceptionCode() );
+    }
+    __ENDTRY
+}
+#endif
+
+/******************************************************************
+ *		LdrInitializeThunk (NTDLL.@)
+ */
+void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unk2, ULONG_PTR unk3, ULONG_PTR unk4 )
+{
+    loader_init( context, (void **)&context->R0 );
+    TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", (void *)context->R0, (void *)context->R1 );
+    NtContinue( context, TRUE );
+}
 
 /**********************************************************************
  *              DbgBreakPoint   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( DbgBreakPoint, 0, "udf #0xfe; bx lr; nop; nop; nop; nop" );
+__ASM_GLOBAL_FUNC( DbgBreakPoint, "udf #0xfe; bx lr; nop; nop; nop; nop" );
 
 /**********************************************************************
  *              DbgUserBreakPoint   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "udf #0xfe; bx lr; nop; nop; nop; nop" );
+__ASM_GLOBAL_FUNC( DbgUserBreakPoint, "udf #0xfe; bx lr; nop; nop; nop; nop" );
 
 #endif  /* __arm__ */

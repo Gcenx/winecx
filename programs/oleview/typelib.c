@@ -124,13 +124,13 @@ static void SaveIdl(WCHAR *wszFileName)
     }
 
     len = WideCharToMultiByte( CP_UTF8, 0, data->idl, data->idlLen, NULL, 0, NULL, NULL );
-    wszIdl = HeapAlloc(GetProcessHeap(), 0, len);
+    wszIdl = malloc(len);
     WideCharToMultiByte( CP_UTF8, 0, data->idl, data->idlLen, wszIdl, len, NULL, NULL );
 
     if(!WriteFile(hFile, wszIdl, len, &dwNumWrite, NULL))
         ShowLastError();
 
-    HeapFree(GetProcessHeap(), 0, wszIdl);
+    free(wszIdl);
     CloseHandle(hFile);
 }
 
@@ -183,8 +183,7 @@ static void AddToTLDataStrW(TYPELIB_DATA *pTLData, const WCHAR *wszSource)
 {
     int SourceLen = lstrlenW(wszSource);
 
-    pTLData->idl = HeapReAlloc(GetProcessHeap(), 0, pTLData->idl,
-            sizeof(WCHAR)*(pTLData->idlLen+SourceLen+1));
+    pTLData->idl = realloc(pTLData->idl, sizeof(WCHAR) * (pTLData->idlLen + SourceLen + 1));
 
     memcpy(&pTLData->idl[pTLData->idlLen], wszSource, sizeof(WCHAR)*(SourceLen+1));
     pTLData->idlLen += SourceLen;
@@ -205,8 +204,8 @@ static void AddToTLDataStrWithTabsW(TYPELIB_DATA *pTLData, WCHAR *wszSource)
     }
     if(*(pSourcePos - 1) != L'\n') newLinesNo++;
 
-    pTLData->idl = HeapReAlloc(GetProcessHeap(), 0, pTLData->idl,
-            sizeof(WCHAR)*(pTLData->idlLen+lineLen+4*newLinesNo+1));
+    pTLData->idl = realloc(pTLData->idl,
+            sizeof(WCHAR) * (pTLData->idlLen + lineLen + 4 * newLinesNo + 1));
 
     pSourcePos = wszSource;
     pSourceBeg = wszSource;
@@ -244,9 +243,9 @@ static TYPELIB_DATA *InitializeTLData(void)
 {
     TYPELIB_DATA *pTLData;
 
-    pTLData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(TYPELIB_DATA));
+    pTLData = calloc(1, sizeof(TYPELIB_DATA));
 
-    pTLData->idl = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR));
+    pTLData->idl = malloc(sizeof(WCHAR));
     pTLData->idl[0] = '\0';
 
     return pTLData;
@@ -318,26 +317,26 @@ static void CreateTypeInfo(WCHAR *wszAddTo, WCHAR *wszAddAfter, TYPEDESC tdesc, 
         VTADDTOSTR(VT_DATE);
         VTADDTOSTR(VT_R8);
         case VT_CARRAY:
-        for(i=0; i<U(tdesc).lpadesc->cDims; i++)
+        for(i=0; i<tdesc.lpadesc->cDims; i++)
         {
-            wsprintfW(wszBuf, wszFormat, U(tdesc).lpadesc->rgbounds[i].cElements);
+            wsprintfW(wszBuf, wszFormat, tdesc.lpadesc->rgbounds[i].cElements);
             AddToStrW(wszAddAfter, wszBuf);
         }
-        CreateTypeInfo(wszAddTo, wszAddAfter, U(tdesc).lpadesc->tdescElem, pTypeInfo);
+        CreateTypeInfo(wszAddTo, wszAddAfter, tdesc.lpadesc->tdescElem, pTypeInfo);
         break;
 	case VT_SAFEARRAY:
 	AddToStrW(wszAddTo, wszVT_SAFEARRAY);
         AddToStrW(wszAddTo, L"(");
-        CreateTypeInfo(wszAddTo, wszAddAfter, *U(tdesc).lptdesc, pTypeInfo);
+        CreateTypeInfo(wszAddTo, wszAddAfter, *tdesc.lptdesc, pTypeInfo);
         AddToStrW(wszAddTo, L")");
 	break;
         case VT_PTR:
-        CreateTypeInfo(wszAddTo, wszAddAfter, *U(tdesc).lptdesc, pTypeInfo);
+        CreateTypeInfo(wszAddTo, wszAddAfter, *tdesc.lptdesc, pTypeInfo);
         AddToStrW(wszAddTo, L"*");
         break;
         case VT_USERDEFINED:
         hRes = ITypeInfo_GetRefTypeInfo(pTypeInfo,
-                U(tdesc).hreftype, &pRefTypeInfo);
+                tdesc.hreftype, &pRefTypeInfo);
         if(SUCCEEDED(hRes))
         {
             ITypeInfo_GetDocumentation(pRefTypeInfo, MEMBERID_NIL,
@@ -363,9 +362,9 @@ static int EnumVars(ITypeInfo *pTypeInfo, int cVars, HTREEITEM hParent)
     WCHAR wszText[MAX_LOAD_STRING];
     WCHAR wszAfter[MAX_LOAD_STRING];
 
-    U(tvis).item.mask = TVIF_TEXT|TVIF_PARAM;
-    U(tvis).item.cchTextMax = MAX_LOAD_STRING;
-    U(tvis).item.pszText = wszText;
+    tvis.item.mask = TVIF_TEXT|TVIF_PARAM;
+    tvis.item.cchTextMax = MAX_LOAD_STRING;
+    tvis.item.pszText = wszText;
     tvis.hInsertAfter = TVI_LAST;
     tvis.hParent = hParent;
 
@@ -378,7 +377,7 @@ static int EnumVars(ITypeInfo *pTypeInfo, int cVars, HTREEITEM hParent)
                 NULL, NULL, NULL))) continue;
 
         tld = InitializeTLData();
-        U(tvis).item.lParam = (LPARAM) tld;
+        tvis.item.lParam = (LPARAM) tld;
         if(pVarDesc->memid < MIN_VAR_ID)
         {
 
@@ -424,9 +423,9 @@ static int EnumEnums(ITypeInfo *pTypeInfo, int cVars, HTREEITEM hParent)
     WCHAR wszText[MAX_LOAD_STRING];
     WCHAR wszAfter[MAX_LOAD_STRING];
 
-    U(tvis).item.mask = TVIF_TEXT|TVIF_PARAM;
-    U(tvis).item.cchTextMax = MAX_LOAD_STRING;
-    U(tvis).item.pszText = wszText;
+    tvis.item.mask = TVIF_TEXT|TVIF_PARAM;
+    tvis.item.cchTextMax = MAX_LOAD_STRING;
+    tvis.item.pszText = wszText;
     tvis.hInsertAfter = TVI_LAST;
     tvis.hParent = hParent;
 
@@ -439,7 +438,7 @@ static int EnumEnums(ITypeInfo *pTypeInfo, int cVars, HTREEITEM hParent)
                 NULL, NULL, NULL))) continue;
 
         tld = InitializeTLData();
-        U(tvis).item.lParam = (LPARAM) tld;
+        tvis.item.lParam = (LPARAM) tld;
 
         memset(wszText, 0, sizeof(wszText));
         memset(wszAfter, 0, sizeof(wszAfter));
@@ -448,7 +447,7 @@ static int EnumEnums(ITypeInfo *pTypeInfo, int cVars, HTREEITEM hParent)
         {
             VARIANT var;
             VariantInit(&var);
-            if (VariantChangeType(&var, U(*pVarDesc).lpvarValue, 0, VT_BSTR) == S_OK)
+            if (VariantChangeType(&var, pVarDesc->lpvarValue, 0, VT_BSTR) == S_OK)
             {
                 AddToStrW(wszText, wszConst);
                 AddToStrW(wszText, L" ");
@@ -488,7 +487,7 @@ static int EnumFuncs(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, HTREEITEM hParen
     WCHAR szRhs[] = {'r','h','s',0};    /* Right-hand side of a propput */
     BOOL bFirst;
 
-    U(tvis).item.mask = TVIF_TEXT|TVIF_PARAM;
+    tvis.item.mask = TVIF_TEXT|TVIF_PARAM;
     tvis.hInsertAfter = TVI_LAST;
     tvis.hParent = hParent;
 
@@ -512,9 +511,9 @@ static int EnumFuncs(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, HTREEITEM hParen
         memset(wszText, 0, sizeof(wszText));
         memset(wszAfter, 0, sizeof(wszAfter));
         tld = InitializeTLData();
-        U(tvis).item.cchTextMax = SysStringLen(bstrName);
-        U(tvis).item.pszText = bstrName;
-        U(tvis).item.lParam = (LPARAM) tld;
+        tvis.item.cchTextMax = SysStringLen(bstrName);
+        tvis.item.pszText = bstrName;
+        tvis.item.lParam = (LPARAM) tld;
         bFirst = TRUE;
         if(pFuncDesc->memid < MIN_FUNC_ID || pTypeAttr->wTypeFlags & TYPEFLAG_FDUAL)
         {
@@ -572,12 +571,11 @@ static int EnumFuncs(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, HTREEITEM hParen
             AddToTLDataStrW(tld, wszAfter);
         }
 
-        bstrParamNames = HeapAlloc(GetProcessHeap(), 0,
-                sizeof(BSTR)*(pFuncDesc->cParams+1));
+        bstrParamNames = malloc(sizeof(BSTR) * (pFuncDesc->cParams + 1));
         if(FAILED(ITypeInfo_GetNames(pTypeInfo, pFuncDesc->memid, bstrParamNames,
                 pFuncDesc->cParams+1, &namesNo)))
         {
-            HeapFree(GetProcessHeap(), 0, bstrParamNames);
+            free(bstrParamNames);
             continue;
         }
         SysFreeString(bstrParamNames[0]);
@@ -601,7 +599,7 @@ static int EnumFuncs(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, HTREEITEM hParen
             }
             bFirst = TRUE;
 #define ENUM_PARAM_FLAG(x)\
-            if(U(pFuncDesc->lprgelemdescParam[j]).paramdesc.wParamFlags & x) \
+            if(pFuncDesc->lprgelemdescParam[j].paramdesc.wParamFlags & x) \
             {\
                 if(bFirst)\
                     AddToTLDataStrW(tld, L"[");\
@@ -619,9 +617,9 @@ static int EnumFuncs(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, HTREEITEM hParen
             ENUM_PARAM_FLAG(PARAMFLAG_FOPT);
             ENUM_PARAM_FLAG(PARAMFLAG_FHASCUSTDATA);
 
-            if(U(pFuncDesc->lprgelemdescParam[j]).paramdesc.wParamFlags & PARAMFLAG_FHASDEFAULT)
+            if(pFuncDesc->lprgelemdescParam[j].paramdesc.wParamFlags & PARAMFLAG_FHASDEFAULT)
             {
-		VARIANT var, *param=&U(pFuncDesc->lprgelemdescParam[j]).paramdesc.pparamdescex->varDefaultValue;
+		VARIANT var, *param=&pFuncDesc->lprgelemdescParam[j].paramdesc.pparamdescex->varDefaultValue;
 		VariantInit(&var);
                 if(bFirst) AddToTLDataStrW(tld, L"[");
                 else AddToTLDataStrW(tld, L", ");
@@ -660,7 +658,7 @@ static int EnumFuncs(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, HTREEITEM hParen
         AddToTLDataStrW(tld, L");\n");
 
         SendMessageW(typelib.hTree, TVM_INSERTITEMW, 0, (LPARAM)&tvis);
-        HeapFree(GetProcessHeap(), 0, bstrParamNames);
+        free(bstrParamNames);
         SysFreeString(bstrName);
         SysFreeString(bstrHelpString);
         ITypeInfo_ReleaseFuncDesc(pTypeInfo, pFuncDesc);
@@ -684,9 +682,9 @@ static int EnumImplTypes(ITypeInfo *pTypeInfo, int cImplTypes, HTREEITEM hParent
     LoadStringW(globals.hMainInst, IDS_INHERITINTERFACES, wszInheritedInterfaces,
                 ARRAY_SIZE(wszInheritedInterfaces));
 
-    U(tvis).item.mask = TVIF_TEXT;
-    U(tvis).item.cchTextMax = MAX_LOAD_STRING;
-    U(tvis).item.pszText = wszInheritedInterfaces;
+    tvis.item.mask = TVIF_TEXT;
+    tvis.item.cchTextMax = MAX_LOAD_STRING;
+    tvis.item.pszText = wszInheritedInterfaces;
     tvis.hInsertAfter = TVI_LAST;
     tvis.hParent = hParent;
 
@@ -709,8 +707,8 @@ static int EnumImplTypes(ITypeInfo *pTypeInfo, int cImplTypes, HTREEITEM hParent
             continue;
         }
 
-        U(tvis).item.cchTextMax = SysStringLen(bstrName);
-        U(tvis).item.pszText = bstrName;
+        tvis.item.cchTextMax = SysStringLen(bstrName);
+        tvis.item.pszText = bstrName;
 
         hParent = TreeView_InsertItemW(typelib.hTree, &tvis);
         EnumVars(pRefTypeInfo, pTypeAttr->cVars, hParent);
@@ -1100,9 +1098,9 @@ static int PopulateTree(void)
     WCHAR wszProperties[] = { 'p','r','o','p','e','r','t','i','e','s','\0' };
     WCHAR wszMethods[] = { 'm','e','t','h','o','d','s','\0' };
 
-    U(tvis).item.mask = TVIF_TEXT|TVIF_PARAM;
-    U(tvis).item.cchTextMax = MAX_LOAD_STRING;
-    U(tvis).item.pszText = wszText;
+    tvis.item.mask = TVIF_TEXT|TVIF_PARAM;
+    tvis.item.cchTextMax = MAX_LOAD_STRING;
+    tvis.item.pszText = wszText;
     tvis.hInsertAfter = TVI_LAST;
     tvis.hParent = TVI_ROOT;
 
@@ -1116,7 +1114,7 @@ static int PopulateTree(void)
         args[0] = (DWORD_PTR)typelib.wszFileName;
         args[1] = hRes;
         FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY,
-                       wszError, 0, 0, wszMessage, ARRAY_SIZE(wszMessage), (__ms_va_list*)args);
+                       wszError, 0, 0, wszMessage, ARRAY_SIZE(wszMessage), (va_list *)args);
         MessageBoxW(globals.hMainWnd, wszMessage, NULL, MB_OK|MB_ICONEXCLAMATION);
         return 1;
     }
@@ -1126,7 +1124,7 @@ static int PopulateTree(void)
     ITypeLib_GetLibAttr(pTypeLib, &pTLibAttr);
 
     tld = InitializeTLData();
-    U(tvis).item.lParam = (LPARAM) tld;
+    tvis.item.lParam = (LPARAM) tld;
     AddToTLDataStrW(tld, wszGeneratedInfo);
     AddToTLDataStrW(tld, typelib.wszFileName);
     AddToTLDataStrW(tld, L"\n\n[\n");
@@ -1177,7 +1175,7 @@ static int PopulateTree(void)
         memset(wszText, 0, sizeof(wszText));
         memset(wszAfter, 0, sizeof(wszAfter));
         tld = InitializeTLData();
-        U(tvis).item.lParam = (LPARAM)tld;
+        tvis.item.lParam = (LPARAM)tld;
         switch(pTypeAttr->typekind)
         {
             case TKIND_ENUM:
@@ -1259,7 +1257,7 @@ static int PopulateTree(void)
                 lstrcpyW(wszText, wszProperties);
                 tvis.hParent = hParent;
                 tld = InitializeTLData();
-                U(tvis).item.lParam = (LPARAM) tld;
+                tvis.item.lParam = (LPARAM) tld;
                 AddToTLDataStrW(tld, wszProperties);
                 AddToTLDataStrW(tld, L":\n");
                 tvis.hParent = TreeView_InsertItemW(typelib.hTree, &tvis);
@@ -1269,7 +1267,7 @@ static int PopulateTree(void)
                 lstrcpyW(wszText, wszMethods);
                 tvis.hParent = hParent;
                 tld = InitializeTLData();
-                U(tvis).item.lParam = (LPARAM) tld;
+                tvis.item.lParam = (LPARAM) tld;
                 AddToTLDataStrW(tld, wszMethods);
                 AddToTLDataStrW(tld, L":\n");
                 tvis.hParent = TreeView_InsertItemW(typelib.hTree, &tvis);
@@ -1293,7 +1291,7 @@ static int PopulateTree(void)
 
                     memset(wszText, 0, sizeof(wszText));
                     tld = InitializeTLData();
-                    U(tvis).item.lParam = (LPARAM) tld;
+                    tvis.item.lParam = (LPARAM) tld;
 
                     ITypeInfo_GetRefTypeInfo(pTypeInfo, hRefType, &pRefTypeInfo);
                     ITypeInfo_GetDocumentation(pRefTypeInfo, MEMBERID_NIL, &bstrName,
@@ -1449,8 +1447,8 @@ static void EmptyTLTree(void)
         SendMessageW(typelib.hTree, TVM_GETITEMW, 0, (LPARAM)&tvi);
         if(tvi.lParam)
         {
-            HeapFree(GetProcessHeap(), 0, ((TYPELIB_DATA *)tvi.lParam)->idl);
-            HeapFree(GetProcessHeap(), 0, (TYPELIB_DATA *)tvi.lParam);
+            free(((TYPELIB_DATA*)tvi.lParam)->idl);
+            free((TYPELIB_DATA*)tvi.lParam);
         }
 
         SendMessageW(typelib.hTree, TVM_DELETEITEM, 0, (LPARAM)del);

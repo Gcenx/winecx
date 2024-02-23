@@ -1,7 +1,7 @@
 MODULE    = whoami.exe
-IMPORTS   = secur32
+IMPORTS   = secur32 advapi32
 
 EXTRADLLFLAGS = -mconsole -municode
 
-C_SRCS = \
+SOURCES = \
 	main.c

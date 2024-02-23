@@ -24,9 +24,6 @@
 #pragma makedep unix
 #endif
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include "config.h"
 
 #include <assert.h>
@@ -313,41 +310,41 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
 
     data.type = MOTION_EVENT;
     data.motion.hwnd = LongToHandle( win );
-    data.motion.input.type             = INPUT_MOUSE;
-    data.motion.input.u.mi.dx          = x;
-    data.motion.input.u.mi.dy          = y;
-    data.motion.input.u.mi.mouseData   = 0;
-    data.motion.input.u.mi.time        = 0;
-    data.motion.input.u.mi.dwExtraInfo = 0;
-    data.motion.input.u.mi.dwFlags     = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    data.motion.input.type           = INPUT_MOUSE;
+    data.motion.input.mi.dx          = x;
+    data.motion.input.mi.dy          = y;
+    data.motion.input.mi.mouseData   = 0;
+    data.motion.input.mi.time        = 0;
+    data.motion.input.mi.dwExtraInfo = 0;
+    data.motion.input.mi.dwFlags     = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     switch (action & AMOTION_EVENT_ACTION_MASK)
     {
     case AMOTION_EVENT_ACTION_DOWN:
     case AMOTION_EVENT_ACTION_BUTTON_PRESS:
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_PRIMARY)
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_SECONDARY)
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_TERTIARY)
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_MIDDLEDOWN;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_MIDDLEDOWN;
         if (!(state & ~prev_state)) /* touch event */
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
         break;
     case AMOTION_EVENT_ACTION_UP:
     case AMOTION_EVENT_ACTION_CANCEL:
     case AMOTION_EVENT_ACTION_BUTTON_RELEASE:
         if ((prev_state & ~state) & AMOTION_EVENT_BUTTON_PRIMARY)
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
         if ((prev_state & ~state) & AMOTION_EVENT_BUTTON_SECONDARY)
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_RIGHTUP;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_RIGHTUP;
         if ((prev_state & ~state) & AMOTION_EVENT_BUTTON_TERTIARY)
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_MIDDLEUP;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_MIDDLEUP;
         if (!(prev_state & ~state)) /* touch event */
-            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
+            data.motion.input.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
         break;
     case AMOTION_EVENT_ACTION_SCROLL:
-        data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_WHEEL;
-        data.motion.input.u.mi.mouseData = vscroll < 0 ? -WHEEL_DELTA : WHEEL_DELTA;
+        data.motion.input.mi.dwFlags |= MOUSEEVENTF_WHEEL;
+        data.motion.input.mi.mouseData = vscroll < 0 ? -WHEEL_DELTA : WHEEL_DELTA;
         break;
     case AMOTION_EVENT_ACTION_MOVE:
     case AMOTION_EVENT_ACTION_HOVER_MOVE:
@@ -438,9 +435,9 @@ static int process_events( DWORD mask )
         case SURFACE_CHANGED:
             break;  /* always process it to unblock other threads */
         case MOTION_EVENT:
-            if (event->data.motion.input.u.mi.dwFlags & (MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_RIGHTDOWN|
-                                                         MOUSEEVENTF_MIDDLEDOWN|MOUSEEVENTF_LEFTUP|
-                                                         MOUSEEVENTF_RIGHTUP|MOUSEEVENTF_MIDDLEUP))
+            if (event->data.motion.input.mi.dwFlags & (MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_RIGHTDOWN|
+                                                       MOUSEEVENTF_MIDDLEDOWN|MOUSEEVENTF_LEFTUP|
+                                                       MOUSEEVENTF_RIGHTUP|MOUSEEVENTF_MIDDLEUP))
             {
                 if (mask & QS_MOUSEBUTTON) break;
             }
@@ -488,23 +485,23 @@ static int process_events( DWORD mask )
             {
                 HWND capture = get_capture_window();
 
-                if (event->data.motion.input.u.mi.dwFlags & (MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_RIGHTDOWN|MOUSEEVENTF_MIDDLEDOWN))
+                if (event->data.motion.input.mi.dwFlags & (MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_RIGHTDOWN|MOUSEEVENTF_MIDDLEDOWN))
                     TRACE( "BUTTONDOWN pos %d,%d hwnd %p flags %x\n",
-                           (int)event->data.motion.input.u.mi.dx, (int)event->data.motion.input.u.mi.dy,
-                           event->data.motion.hwnd, (int)event->data.motion.input.u.mi.dwFlags );
-                else if (event->data.motion.input.u.mi.dwFlags & (MOUSEEVENTF_LEFTUP|MOUSEEVENTF_RIGHTUP|MOUSEEVENTF_MIDDLEUP))
+                           (int)event->data.motion.input.mi.dx, (int)event->data.motion.input.mi.dy,
+                           event->data.motion.hwnd, (int)event->data.motion.input.mi.dwFlags );
+                else if (event->data.motion.input.mi.dwFlags & (MOUSEEVENTF_LEFTUP|MOUSEEVENTF_RIGHTUP|MOUSEEVENTF_MIDDLEUP))
                     TRACE( "BUTTONUP pos %d,%d hwnd %p flags %x\n",
-                           (int)event->data.motion.input.u.mi.dx, (int)event->data.motion.input.u.mi.dy,
-                           event->data.motion.hwnd, (int)event->data.motion.input.u.mi.dwFlags );
+                           (int)event->data.motion.input.mi.dx, (int)event->data.motion.input.mi.dy,
+                           event->data.motion.hwnd, (int)event->data.motion.input.mi.dwFlags );
                 else
                     TRACE( "MOUSEMOVE pos %d,%d hwnd %p flags %x\n",
-                           (int)event->data.motion.input.u.mi.dx, (int)event->data.motion.input.u.mi.dy,
-                           event->data.motion.hwnd, (int)event->data.motion.input.u.mi.dwFlags );
-                if (!capture && (event->data.motion.input.u.mi.dwFlags & MOUSEEVENTF_ABSOLUTE))
+                           (int)event->data.motion.input.mi.dx, (int)event->data.motion.input.mi.dy,
+                           event->data.motion.hwnd, (int)event->data.motion.input.mi.dwFlags );
+                if (!capture && (event->data.motion.input.mi.dwFlags & MOUSEEVENTF_ABSOLUTE))
                 {
                     RECT rect;
-                    SetRect( &rect, event->data.motion.input.u.mi.dx, event->data.motion.input.u.mi.dy,
-                             event->data.motion.input.u.mi.dx + 1, event->data.motion.input.u.mi.dy + 1 );
+                    SetRect( &rect, event->data.motion.input.mi.dx, event->data.motion.input.mi.dy,
+                             event->data.motion.input.mi.dx + 1, event->data.motion.input.mi.dy + 1 );
 
                     SERVER_START_REQ( update_window_zorder )
                     {
@@ -522,15 +519,15 @@ static int process_events( DWORD mask )
             break;
 
         case KEYBOARD_EVENT:
-            if (event->data.kbd.input.u.ki.dwFlags & KEYEVENTF_KEYUP)
+            if (event->data.kbd.input.ki.dwFlags & KEYEVENTF_KEYUP)
                 TRACE("KEYUP hwnd %p vkey %x '%c' scancode %x\n", event->data.kbd.hwnd,
-                      event->data.kbd.input.u.ki.wVk, event->data.kbd.input.u.ki.wVk,
-                      event->data.kbd.input.u.ki.wScan );
+                      event->data.kbd.input.ki.wVk, event->data.kbd.input.ki.wVk,
+                      event->data.kbd.input.ki.wScan );
             else
                 TRACE("KEYDOWN hwnd %p vkey %x '%c' scancode %x\n", event->data.kbd.hwnd,
-                      event->data.kbd.input.u.ki.wVk, event->data.kbd.input.u.ki.wVk,
-                      event->data.kbd.input.u.ki.wScan );
-            update_keyboard_lock_state( event->data.kbd.input.u.ki.wVk, event->data.kbd.lock_state );
+                      event->data.kbd.input.ki.wVk, event->data.kbd.input.ki.wVk,
+                      event->data.kbd.input.ki.wScan );
+            update_keyboard_lock_state( event->data.kbd.input.ki.wVk, event->data.kbd.lock_state );
             __wine_send_input( 0, &event->data.kbd.input, NULL );
             break;
 
@@ -1200,20 +1197,17 @@ LRESULT ANDROID_DesktopWindowProc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
 
 
 /***********************************************************************
- *           ANDROID_MsgWaitForMultipleObjectsEx
+ *           ANDROID_ProcessEvents
  */
-NTSTATUS ANDROID_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
-                                              const LARGE_INTEGER *timeout,
-                                              DWORD mask, DWORD flags )
+BOOL ANDROID_ProcessEvents( DWORD mask )
 {
     if (GetCurrentThreadId() == desktop_tid)
     {
         /* don't process nested events */
         if (current_event) mask = 0;
-        if (process_events( mask )) return count - 1;
+        return process_events( mask );
     }
-    return NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
-                                     !!(flags & MWMO_ALERTABLE), timeout );
+    return FALSE;
 }
 
 /**********************************************************************
@@ -1385,7 +1379,6 @@ void ANDROID_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
  */
 UINT ANDROID_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
 {
-    if (IsRectEmpty( rect )) return swp;
     if (!(NtUserGetWindowLongW( hwnd, GWL_STYLE ) & WS_MINIMIZE)) return swp;
     /* always hide icons off-screen */
     if (rect->left != -32000 || rect->top != -32000)
@@ -1450,44 +1443,35 @@ static BOOL get_icon_info( HICON handle, ICONINFOEXW *ret )
 /***********************************************************************
  *           ANDROID_SetCursor
  */
-void ANDROID_SetCursor( HCURSOR handle )
+void ANDROID_SetCursor( HWND hwnd, HCURSOR handle )
 {
-    static HCURSOR last_cursor;
-    static DWORD last_cursor_change;
-
-    if (InterlockedExchangePointer( (void **)&last_cursor, handle ) != handle ||
-        NtGetTickCount() - last_cursor_change > 100)
+    if (handle)
     {
-        last_cursor_change = NtGetTickCount();
+        unsigned int width = 0, height = 0, *bits = NULL;
+        ICONINFOEXW info;
+        int id;
 
-        if (handle)
+        if (!get_icon_info( handle, &info )) return;
+
+        if (!(id = get_cursor_system_id( &info )))
         {
-            unsigned int width = 0, height = 0, *bits = NULL;
-            ICONINFOEXW info;
-            int id;
+            HDC hdc = NtGdiCreateCompatibleDC( 0 );
+            bits = get_bitmap_argb( hdc, info.hbmColor, info.hbmMask, &width, &height );
+            NtGdiDeleteObjectApp( hdc );
 
-            if (!get_icon_info( handle, &info )) return;
-
-            if (!(id = get_cursor_system_id( &info )))
+            /* make sure hotspot is valid */
+            if (info.xHotspot >= width || info.yHotspot >= height)
             {
-                HDC hdc = NtGdiCreateCompatibleDC( 0 );
-                bits = get_bitmap_argb( hdc, info.hbmColor, info.hbmMask, &width, &height );
-                NtGdiDeleteObjectApp( hdc );
-
-                /* make sure hotspot is valid */
-                if (info.xHotspot >= width || info.yHotspot >= height)
-                {
-                    info.xHotspot = width / 2;
-                    info.yHotspot = height / 2;
-                }
+                info.xHotspot = width / 2;
+                info.yHotspot = height / 2;
             }
-            ioctl_set_cursor( id, width, height, info.xHotspot, info.yHotspot, bits );
-            free( bits );
-            NtGdiDeleteObjectApp( info.hbmColor );
-            NtGdiDeleteObjectApp( info.hbmMask );
         }
-        else ioctl_set_cursor( 0, 0, 0, 0, 0, NULL );
+        ioctl_set_cursor( id, width, height, info.xHotspot, info.yHotspot, bits );
+        free( bits );
+        NtGdiDeleteObjectApp( info.hbmColor );
+        NtGdiDeleteObjectApp( info.hbmMask );
     }
+    else ioctl_set_cursor( 0, 0, 0, 0, 0, NULL );
 }
 
 
@@ -1617,10 +1601,11 @@ BOOL ANDROID_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info
     if (info->pptSrc) OffsetRect( &src_rect, info->pptSrc->x, info->pptSrc->y );
     NtGdiTransformPoints( info->hdcSrc, (POINT *)&src_rect, (POINT *)&src_rect, 2, NtGdiDPtoLP );
 
+    if (info->dwFlags & ULW_ALPHA) blend = *info->pblend;
     ret = NtGdiAlphaBlend( hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
                            info->hdcSrc, src_rect.left, src_rect.top,
                            src_rect.right - src_rect.left, src_rect.bottom - src_rect.top,
-                           (info->dwFlags & ULW_ALPHA) ? *info->pblend : blend, 0 );
+                           *(DWORD *)&blend, 0 );
     if (ret)
     {
         memcpy( dst_bits, src_bits, bmi->bmiHeader.biSizeImage );
@@ -1673,9 +1658,9 @@ LRESULT ANDROID_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
 
 
 /***********************************************************************
- *           android_create_desktop
+ *           ANDROID_CreateDesktop
  */
-NTSTATUS android_create_desktop( void *arg )
+BOOL ANDROID_CreateDesktop( const WCHAR *name, UINT width, UINT height )
 {
     /* wait until we receive the surface changed event */
     while (!screen_width)

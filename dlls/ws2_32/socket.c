@@ -765,9 +765,9 @@ SOCKET WINAPI accept( SOCKET s, struct sockaddr *addr, int *len )
                                     NULL, 0, &accept_handle, sizeof(accept_handle) );
     if (status == STATUS_PENDING)
     {
-        if (WaitForSingleObject( sync_event, INFINITE ) == WAIT_FAILED)
+        if (wait_event_alertable( sync_event ) == WAIT_FAILED)
             return SOCKET_ERROR;
-        status = io.u.Status;
+        status = io.Status;
     }
     if (status)
     {
@@ -862,8 +862,8 @@ static BOOL WINAPI WS2_TransmitFile( SOCKET s, HANDLE file, DWORD file_len, DWOR
         event = overlapped->hEvent;
         overlapped->Internal = STATUS_PENDING;
         overlapped->InternalHigh = 0;
-        params.offset.u.LowPart = overlapped->u.s.Offset;
-        params.offset.u.HighPart = overlapped->u.s.OffsetHigh;
+        params.offset.LowPart = overlapped->Offset;
+        params.offset.HighPart = overlapped->OffsetHigh;
     }
     else
     {
@@ -889,7 +889,7 @@ static BOOL WINAPI WS2_TransmitFile( SOCKET s, HANDLE file, DWORD file_len, DWOR
     {
         if (WaitForSingleObject( event, INFINITE ) == WAIT_FAILED)
             return FALSE;
-        status = piosb->u.Status;
+        status = piosb->Status;
     }
     SetLastError( NtStatusToWSAError( status ) );
     TRACE( "status %#lx.\n", status );
@@ -926,7 +926,7 @@ static void WINAPI WS2_GetAcceptExSockaddrs( void *buffer, DWORD data_size, DWOR
 static void WINAPI socket_apc( void *apc_user, IO_STATUS_BLOCK *io, ULONG reserved )
 {
     LPWSAOVERLAPPED_COMPLETION_ROUTINE func = apc_user;
-    func( NtStatusToWSAError( io->u.Status ), io->Information, (OVERLAPPED *)io, 0 );
+    func( NtStatusToWSAError( io->Status ), io->Information, (OVERLAPPED *)io, 0 );
 }
 
 static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *ret_size, DWORD *flags,
@@ -954,7 +954,7 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
     {
         if (!(event = get_sync_event())) return -1;
     }
-    piosb->u.Status = STATUS_PENDING;
+    piosb->Status = STATUS_PENDING;
 
     if (completion)
     {
@@ -977,7 +977,7 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
     {
         if (wait_event_alertable( event ) == WAIT_FAILED)
             return -1;
-        status = piosb->u.Status;
+        status = piosb->Status;
     }
     if (!status && ret_size) *ret_size = piosb->Information;
     SetLastError( NtStatusToWSAError( status ) );
@@ -1022,7 +1022,7 @@ static int WS2_sendto( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *ret
     {
         if (!(event = get_sync_event())) return -1;
     }
-    piosb->u.Status = STATUS_PENDING;
+    piosb->Status = STATUS_PENDING;
 
     if (completion)
     {
@@ -1044,7 +1044,7 @@ static int WS2_sendto( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *ret
     {
         if (WaitForSingleObject( event, INFINITE ) == WAIT_FAILED)
             return -1;
-        status = piosb->u.Status;
+        status = piosb->Status;
     }
     if (!status && ret_size) *ret_size = piosb->Information;
     SetLastError( NtStatusToWSAError( status ) );
@@ -1174,7 +1174,7 @@ int WINAPI bind( SOCKET s, const struct sockaddr *addr, int len )
     {
         if (WaitForSingleObject( sync_event, INFINITE ) == WAIT_FAILED)
             return -1;
-        status = io.u.Status;
+        status = io.Status;
     }
 
     if (status)  TRACE( "failed, status %#lx.\n", status );
@@ -1240,8 +1240,8 @@ int WINAPI connect( SOCKET s, const struct sockaddr *addr, int len )
     free( params );
     if (status == STATUS_PENDING)
     {
-        if (WaitForSingleObject( sync_event, INFINITE ) == WAIT_FAILED) return -1;
-        status = io.u.Status;
+        if (wait_event_alertable( sync_event ) == WAIT_FAILED) return -1;
+        status = io.Status;
     }
     if (status)
     {
@@ -1514,6 +1514,7 @@ int WINAPI getpeername( SOCKET s, struct sockaddr *addr, int *len )
 {
     IO_STATUS_BLOCK io;
     NTSTATUS status;
+    int safe_len = 0;
 
     TRACE( "socket %#Ix, addr %p, len %d\n", s, addr, len ? *len : 0 );
 
@@ -1523,14 +1524,14 @@ int WINAPI getpeername( SOCKET s, struct sockaddr *addr, int *len )
         return -1;
     }
 
-    if (!len)
-    {
-        SetLastError( WSAEFAULT );
-        return -1;
-    }
+    /* Windows checks the validity of the socket before checking len, so
+     * let wineserver do the same. Since len being NULL and *len being 0
+     * yield the same error, we can substitute in 0 if len is NULL. */
+    if (len)
+        safe_len = *len;
 
     status = NtDeviceIoControlFile( (HANDLE)s, NULL, NULL, NULL, &io,
-                                    IOCTL_AFD_WINE_GETPEERNAME, NULL, 0, addr, *len );
+                                    IOCTL_AFD_WINE_GETPEERNAME, NULL, 0, addr, safe_len );
     if (!status)
         *len = io.Information;
     SetLastError( NtStatusToWSAError( status ) );
@@ -2266,7 +2267,7 @@ static DWORD server_ioctl_sock( SOCKET s, DWORD code, LPVOID in_buff, DWORD in_s
     {
         if (WaitForSingleObject( event, INFINITE ) == WAIT_FAILED)
             return -1;
-        status = piosb->u.Status;
+        status = piosb->Status;
     }
     if (status == STATUS_NOT_SUPPORTED)
     {
@@ -2847,7 +2848,7 @@ int WINAPI select( int count, fd_set *read_ptr, fd_set *write_ptr,
             free( params );
             return -1;
         }
-        status = io.u.Status;
+        status = io.Status;
     }
     if (status == STATUS_TIMEOUT) status = STATUS_SUCCESS;
     if (!status)
@@ -2994,12 +2995,12 @@ int WINAPI WSAPoll( WSAPOLLFD *fds, ULONG count, int timeout )
                                     params, params_size, params, params_size );
     if (status == STATUS_PENDING)
     {
-        if (WaitForSingleObject( sync_event, INFINITE ) == WAIT_FAILED)
+        if (wait_event_alertable( sync_event ) == WAIT_FAILED)
         {
             free( params );
             return -1;
         }
-        status = io.u.Status;
+        status = io.Status;
     }
     if (!status)
     {
@@ -3604,10 +3605,8 @@ int WINAPI WSAEnumNetworkEvents( SOCKET s, WSAEVENT event, WSANETWORKEVENTS *ret
 
     TRACE( "socket %#Ix, event %p, events %p\n", s, event, ret_events );
 
-    ResetEvent( event );
-
     status = NtDeviceIoControlFile( (HANDLE)s, NULL, NULL, NULL, &io, IOCTL_AFD_GET_EVENTS,
-                                    NULL, 0, &params, sizeof(params) );
+                                    event, 0, &params, sizeof(params) );
     if (!status)
     {
         ret_events->lNetworkEvents = afd_poll_flag_to_win32( params.flags );
@@ -3630,7 +3629,10 @@ int WINAPI WSAEnumNetworkEvents( SOCKET s, WSAEVENT event, WSANETWORKEVENTS *ret
         if (ret_events->lNetworkEvents & FD_CLOSE)
         {
             if (!(ret_events->iErrorCode[FD_CLOSE_BIT] = NtStatusToWSAError( params.status[AFD_POLL_BIT_HUP] )))
-                ret_events->iErrorCode[FD_CLOSE_BIT] = NtStatusToWSAError( params.status[AFD_POLL_BIT_RESET] );
+            {
+                if (params.flags & AFD_POLL_RESET)
+                    ret_events->iErrorCode[FD_CLOSE_BIT] = WSAECONNABORTED;
+            }
         }
     }
     SetLastError( NtStatusToWSAError( status ) );
@@ -3732,7 +3734,7 @@ BOOL WINAPI WSAGetOverlappedResult( SOCKET s, LPWSAOVERLAPPED lpOverlapped,
         *lpcbTransfer = lpOverlapped->InternalHigh;
 
     if ( lpdwFlags )
-        *lpdwFlags = lpOverlapped->u.s.Offset;
+        *lpdwFlags = lpOverlapped->Offset;
 
     SetLastError( NtStatusToWSAError(status) );
     TRACE( "status %#lx.\n", status );
@@ -3847,7 +3849,7 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
 {
     struct afd_create_params create_params;
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING string;
+    UNICODE_STRING string = RTL_CONSTANT_STRING(L"\\Device\\Afd");
     IO_STATUS_BLOCK io;
     NTSTATUS status;
     HANDLE handle;
@@ -3925,7 +3927,6 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         }
     }
 
-    RtlInitUnicodeString(&string, L"\\Device\\Afd");
     InitializeObjectAttributes(&attr, &string, (flags & WSA_FLAG_NO_HANDLE_INHERIT) ? 0 : OBJ_INHERIT, NULL, NULL);
     if ((status = NtOpenFile(&handle, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, &attr,
             &io, 0, (flags & WSA_FLAG_OVERLAPPED) ? 0 : FILE_SYNCHRONOUS_IO_NONALERT)))
@@ -4070,6 +4071,12 @@ int WINAPI WSARecv(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
                    LPWSAOVERLAPPED lpOverlapped,
                    LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
 {
+    if (!dwBufferCount)
+    {
+        SetLastError( WSAEINVAL );
+        return -1;
+    }
+
     return WS2_recv_base(s, lpBuffers, dwBufferCount, NumberOfBytesReceived, lpFlags,
                        NULL, NULL, lpOverlapped, lpCompletionRoutine, NULL);
 }

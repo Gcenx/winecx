@@ -24,8 +24,6 @@
 #include <assert.h>
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #define WIN32_LEAN_AND_MEAN
@@ -246,6 +244,13 @@ struct dbg_thread
     BOOL                        suspended;
 };
 
+struct dbg_module
+{
+    struct list                 entry;
+    DWORD_PTR                   base;
+    DWORD_PTR                   tls_index_offset;
+};
+
 struct dbg_delayed_bp
 {
     BOOL                        is_symbol;
@@ -271,9 +276,11 @@ struct dbg_process
     void*                       pio_data;
     const WCHAR*		imageName;
     struct list           	threads;
+    struct list                 modules;
     struct backend_cpu*         be_cpu;
     HANDLE                      event_on_first_exception;
     BOOL                        active_debuggee;
+    BOOL                        is_wow64;
     struct dbg_breakpoint       bp[MAX_BREAKPOINTS];
     unsigned                    next_bp;
     struct dbg_delayed_bp*      delayed_bp;
@@ -323,8 +330,7 @@ extern BOOL             break_add_break(const ADDRESS64* addr, BOOL verbose, BOO
 extern BOOL             break_add_break_from_lvalue(const struct dbg_lvalue* value, BOOL swbp);
 extern void             break_add_break_from_id(const char* name, int lineno, BOOL swbp);
 extern void             break_add_break_from_lineno(const char *filename, int lineno, BOOL swbp);
-extern void             break_add_watch_from_lvalue(const struct dbg_lvalue* lvalue, BOOL is_write);
-extern void             break_add_watch_from_id(const char* name, BOOL is_write);
+extern void             break_add_watch(const struct dbg_lvalue* value, BOOL is_write);
 extern void             break_check_delayed_bp(void);
 extern void             break_delete_xpoint(int num);
 extern void             break_delete_xpoints_from_module(DWORD64 base);
@@ -379,7 +385,7 @@ extern BOOL             expr_print(const struct expr* exp);
   /* info.c */
 extern void             print_help(void);
 extern void             info_help(void);
-extern void             info_win32_module(DWORD64 mod);
+extern void             info_win32_module(DWORD64 mod, BOOL multi_machine);
 extern void             info_win32_class(HWND hWnd, const char* clsName);
 extern void             info_win32_window(HWND hWnd, BOOL detailed);
 extern void             info_win32_processes(void);
@@ -388,6 +394,7 @@ extern void             info_win32_frame_exceptions(DWORD tid);
 extern void             info_win32_virtual(DWORD pid);
 extern void             info_win32_segments(DWORD start, int length);
 extern void             info_win32_exception(void);
+extern void             info_win32_system(void);
 extern void             info_wine_dbg_channel(BOOL add, const char* chnl, const char* name);
 extern WCHAR*           fetch_thread_description(DWORD tid);
 
@@ -408,6 +415,7 @@ extern BOOL             memory_get_string(struct dbg_process* pcs, void* addr, B
 extern BOOL             memory_get_string_indirect(struct dbg_process* pcs, void* addr, BOOL unicode, WCHAR* buffer, int size);
 extern BOOL             memory_get_register(DWORD regno, struct dbg_lvalue* value, char* buffer, int len);
 extern void             memory_disassemble(const struct dbg_lvalue*, const struct dbg_lvalue*, int instruction_count);
+extern void             memory_disasm_one_x86_insn(ADDRESS64 *addr, int display);
 extern BOOL             memory_disasm_one_insn(ADDRESS64* addr);
 #define MAX_OFFSET_TO_STR_LEN 19
 extern char*            memory_offset_to_string(char *str, DWORD64 offset, unsigned mode);
@@ -503,7 +511,7 @@ extern BOOL             types_is_integral_type(const struct dbg_lvalue*);
 extern BOOL             types_is_float_type(const struct dbg_lvalue*);
 extern BOOL             types_is_pointer_type(const struct dbg_lvalue*);
 extern BOOL             types_find_basic(const WCHAR*, const char*, struct dbg_type* type);
-extern BOOL             types_unload_module(DWORD_PTR linear);
+extern BOOL             types_unload_module(struct dbg_process* pcs, DWORD_PTR linear);
 
   /* winedbg.c */
 #ifdef __GNUC__
@@ -524,6 +532,9 @@ extern struct dbg_thread* dbg_get_thread(struct dbg_process* p, DWORD tid);
 extern void             dbg_del_thread(struct dbg_thread* t);
 extern BOOL             dbg_init(HANDLE hProc, const WCHAR* in, BOOL invade);
 extern BOOL             dbg_load_module(HANDLE hProc, HANDLE hFile, const WCHAR* name, DWORD_PTR base, DWORD size);
+extern struct dbg_module* dbg_get_module(struct dbg_process* pcs, DWORD_PTR base);
+extern void             dbg_del_module(struct dbg_module* mod);
+extern BOOL             dbg_unload_module(struct dbg_process* pcs, DWORD_PTR base);
 extern void             dbg_set_option(const char*, const char*);
 extern void             dbg_start_interactive(const char*, HANDLE hFile);
 extern void             dbg_init_console(void);

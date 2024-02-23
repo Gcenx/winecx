@@ -1374,9 +1374,13 @@ static void test_reader_d3d9(void)
     UINT token;
     ULONG refcount;
 
-    window = create_window();
     d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
-    ok(!!d3d9, "Failed to create a D3D9 object.\n");
+    if (!d3d9)
+    {
+        skip("Failed to create a D3D9 object, skipping tests.\n");
+        return;
+    }
+    window = create_window();
     if (!(d3d9_device = create_d3d9_device(d3d9, window)))
     {
         skip("Failed to create a D3D9 device, skipping tests.\n");
@@ -1468,50 +1472,63 @@ static void test_sink_writer_mp4(void)
     ok(!writer, "Unexpected pointer %p.\n", writer);
 
     hr = MFCreateSinkWriterFromURL(NULL, stream, attr, &writer);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     if (hr == S_OK)
         IMFSinkWriter_Release(writer);
 
     hr = MFCreateSinkWriterFromURL(tmp_file, NULL, NULL, &writer);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     if (hr == S_OK)
         IMFSinkWriter_Release(writer);
 
     hr = MFCreateSinkWriterFromURL(tmp_file, NULL, attr, &writer);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     if (hr == S_OK)
         IMFSinkWriter_Release(writer);
 
     hr = MFCreateSinkWriterFromURL(tmp_file, stream, NULL, &writer);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     if (hr == S_OK)
         IMFSinkWriter_Release(writer);
 
     hr = MFCreateSinkWriterFromURL(tmp_file, stream, attr, &writer);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    if (hr != S_OK)
-    {
-        IMFByteStream_Release(stream);
-        IMFAttributes_Release(attr);
-        return;
-    }
 
     /* Test GetServiceForStream. */
     sink = (void *)0xdeadbeef;
     hr = IMFSinkWriter_GetServiceForStream(writer, MF_SINK_WRITER_MEDIASINK,
             &GUID_NULL, &IID_IMFMediaSink, (void **)&sink);
+    todo_wine
     ok(hr == MF_E_UNSUPPORTED_SERVICE, "Unexpected hr %#lx.\n", hr);
+    todo_wine
     ok(!sink, "Unexpected pointer %p.\n", sink);
 
     DeleteFileW(tmp_file);
     IMFSinkWriter_Release(writer);
     IMFByteStream_Release(stream);
     IMFAttributes_Release(attr);
+}
+
+static void test_interfaces(void)
+{
+    IMFSourceReader *reader;
+    IMFMediaSource *source;
+    IUnknown *unk;
+    HRESULT hr;
+
+    source = create_test_source(1);
+    ok(!!source, "Failed to create test source.\n");
+
+    hr = MFCreateSourceReaderFromMediaSource(source, NULL, &reader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFSourceReader_QueryInterface(reader, &IID_IMFSourceReaderEx, (void **)&unk);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE) /* Windows 7 and below.*/, "Unexpected hr %#lx.\n", hr);
+    if (unk)
+        IUnknown_Release(unk);
+
+    IMFSourceReader_Release(reader);
+    IMFMediaSource_Release(source);
 }
 
 START_TEST(mfplat)
@@ -1524,6 +1541,7 @@ START_TEST(mfplat)
     init_functions();
 
     test_factory();
+    test_interfaces();
     test_source_reader("test.wav", false);
     test_source_reader("test.mp4", true);
     test_source_reader_from_media_source();

@@ -1,5 +1,6 @@
 TESTDLL   = dbghelp.dll
-IMPORTS   = dbghelp
+IMPORTS   = dbghelp user32
 
-C_SRCS = \
-	dbghelp.c
+SOURCES = \
+	dbghelp.c \
+	path.c

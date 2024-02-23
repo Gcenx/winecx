@@ -35,11 +35,10 @@
 #include "dmusici.h"
 
 #include "dswave_private.h"
+#include "dmusic_wave.h"
 #include "dmobject.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dswave);
-
-LONG DSWAVE_refCount = 0;
 
 typedef struct {
         IClassFactory IClassFactory_iface;
@@ -70,40 +69,33 @@ static HRESULT WINAPI WaveCF_QueryInterface(IClassFactory * iface, REFIID riid, 
 
 static ULONG WINAPI WaveCF_AddRef(IClassFactory * iface)
 {
-	DSWAVE_LockModule();
-
 	return 2; /* non-heap based object */
 }
 
 static ULONG WINAPI WaveCF_Release(IClassFactory * iface)
 {
-	DSWAVE_UnlockModule();
-
 	return 1; /* non-heap based object */
 }
 
 static HRESULT WINAPI WaveCF_CreateInstance(IClassFactory * iface, IUnknown *outer_unk, REFIID riid,
         void **ret_iface)
 {
-    TRACE ("(%p, %s, %p)\n", outer_unk, debugstr_dmguid(riid), ret_iface);
+    IDirectMusicObject *object;
+    HRESULT hr;
 
-    if (outer_unk) {
-        *ret_iface = NULL;
-        return CLASS_E_NOAGGREGATION;
-    }
+    TRACE("(%p, %s, %p)\n", outer_unk, debugstr_dmguid(riid), ret_iface);
 
-    return create_dswave(riid, ret_iface);
+    *ret_iface = NULL;
+    if (outer_unk) return CLASS_E_NOAGGREGATION;
+    if (FAILED(hr = wave_create(&object))) return hr;
+    hr = IDirectMusicObject_QueryInterface(object, riid, ret_iface);
+    IDirectMusicObject_Release(object);
+    return hr;
 }
 
 static HRESULT WINAPI WaveCF_LockServer(IClassFactory * iface, BOOL dolock)
 {
 	TRACE("(%d)\n", dolock);
-
-	if (dolock)
-		DSWAVE_LockModule();
-	else
-		DSWAVE_UnlockModule();
-	
 	return S_OK;
 }
 
@@ -116,17 +108,6 @@ static const IClassFactoryVtbl WaveCF_Vtbl = {
 };
 
 static IClassFactoryImpl Wave_CF = {{&WaveCF_Vtbl}};
-
-/******************************************************************
- *		DllCanUnloadNow (DSWAVE.@)
- *
- *
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-	return DSWAVE_refCount != 0 ? S_FALSE : S_OK;
-}
-
 
 /******************************************************************
  *		DllGetClassObject (DSWAVE.@)

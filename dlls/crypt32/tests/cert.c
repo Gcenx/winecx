@@ -369,6 +369,7 @@ static void testCertProperties(void)
     BYTE hash[20] = { 0 }, hashProperty[20];
     CRYPT_DATA_BLOB blob;
     CERT_KEY_CONTEXT keyContext;
+    unsigned int value;
 
     ok(context != NULL, "CertCreateCertificateContext failed: %08lx\n", GetLastError());
 
@@ -566,6 +567,25 @@ static void testCertProperties(void)
             free(buf);
         }
     }
+
+    ret = CertGetCertificateContextProperty(context, CERT_LAST_USER_PROP_ID, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND, "got ret %d, error %#lx.\n", ret, GetLastError());
+
+    blob.cbData = sizeof(value);
+    blob.pbData = (BYTE *)&value;
+    value = 1;
+    ret = CertSetCertificateContextProperty(context, CERT_LAST_USER_PROP_ID, 0, &blob);
+    ok(ret, "got error %#lx.\n", GetLastError());
+    value = 0xdeadbeef;
+    size = 0xdeadbeef;
+    ret = CertGetCertificateContextProperty(context, CERT_LAST_USER_PROP_ID, NULL, &size);
+    ok(ret, "got error %#lx.\n", GetLastError());
+    ok(size == sizeof(value), "got size %lu.\n", size);
+    ret = CertGetCertificateContextProperty(context, CERT_LAST_USER_PROP_ID, &value, &size);
+    ok(ret, "got error %#lx.\n", GetLastError());
+    ok(size == sizeof(value), "got size %lu.\n", size);
+    ok(value == 1, "got value %u.\n", value);
+
     CertFreeCertificateContext(context);
 
     context = CertCreateCertificateContext(X509_ASN_ENCODING,
@@ -2192,17 +2212,44 @@ static void testCreateSelfSignCert(void)
     HCRYPTPROV csp;
     BOOL ret;
     HCRYPTKEY key;
-    CRYPT_KEY_PROV_INFO info;
+    CRYPT_KEY_PROV_INFO info, *ret_info;
+    DWORD size;
 
     /* This crashes:
-    context = CertCreateSelfSignCertificate(0, NULL, 0, NULL, NULL, NULL, NULL,
-     NULL);
-     * Calling this with no first parameter creates a new key container, which
-     * lasts beyond the test, so I don't test that.  Nb: the generated key
-     * name is a GUID.
-    context = CertCreateSelfSignCertificate(0, &name, 0, NULL, NULL, NULL, NULL,
-     NULL);
-     */
+    context = CertCreateSelfSignCertificate(0, NULL, 0, NULL, NULL, NULL, NULL, NULL); */
+
+    /* Test CSP created by implementation without CSP or CSP parameters provided. */
+    context = CertCreateSelfSignCertificate(0, &name, 0, NULL, NULL, NULL, NULL, NULL);
+    ok(!!context, "failed, error %#lx.\n", GetLastError());
+    size = 0;
+    ret = CertGetCertificateContextProperty(context, CERT_KEY_PROV_INFO_PROP_ID, NULL, &size);
+    ok(ret, "failed, error %#lx.\n", GetLastError());
+    ret_info = malloc(size);
+    ok(!!ret_info, "memory allocation failed.\n");
+    ret = CertGetCertificateContextProperty(context, CERT_KEY_PROV_INFO_PROP_ID, ret_info, &size);
+    ok(ret, "failed, error %#lx.\n", GetLastError());
+    CertFreeCertificateContext(context);
+    ok(ret_info->dwKeySpec == AT_SIGNATURE, "got %#lx.\n", ret_info->dwKeySpec);
+    ok(!ret_info->dwFlags, "got %#lx.\n", ret_info->dwFlags);
+    ok(ret_info->pwszContainerName && *ret_info->pwszContainerName, "got %s.\n",
+            debugstr_w(ret_info->pwszContainerName));
+    ret = CryptAcquireContextW(&csp, ret_info->pwszContainerName, ret_info->pwszProvName, ret_info->dwProvType, 0);
+    ok(ret, "failed, error %#lx.\n", GetLastError());
+    ret = CryptGetUserKey(csp, AT_SIGNATURE, &key);
+    ok(ret, "failed, error %#lx.\n", GetLastError());
+    ret = CryptDestroyKey(key);
+    ok(ret, "failed, error %#lx.\n", GetLastError());
+    ret = CryptGetUserKey(csp, AT_KEYEXCHANGE, &key);
+    ok(!ret && GetLastError() == NTE_NO_KEY, "got ret %d, error %#lx.\n", ret, GetLastError());
+    CryptReleaseContext(csp, 0);
+    csp = 0xdeadbeef;
+    ret = CryptAcquireContextW(&csp, ret_info->pwszContainerName, ret_info->pwszProvName,
+            ret_info->dwProvType, CRYPT_DELETEKEYSET);
+    ok(ret, "failed, error %#lx.\n", GetLastError());
+    ok(!csp, "got %p.\n", (void *)csp);
+    ret = CryptAcquireContextW(&csp, ret_info->pwszContainerName, ret_info->pwszProvName, ret_info->dwProvType, 0);
+    ok(!ret && GetLastError() == NTE_BAD_KEYSET, "got ret %d, error %#lx.\n", ret, GetLastError());
+    free(ret_info);
 
     /* Acquire a CSP */
     CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,

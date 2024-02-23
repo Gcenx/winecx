@@ -155,6 +155,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
         wmp_instance = hInstDLL;
         break;
     case DLL_PROCESS_DETACH:
+        if (lpv) break;
         unregister_wmp_class();
         unregister_player_msg_class();
         release_typelib();

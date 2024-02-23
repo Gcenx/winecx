@@ -35,8 +35,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "wincrypt.h"
@@ -2407,15 +2405,15 @@ static BOOL WINAPI CRYPT_AsnEncodeAltNameEntry(DWORD dwCertEncodingType,
     case CERT_ALT_NAME_DNS_NAME:
     case CERT_ALT_NAME_URL:
         tag = ASN_CONTEXT | (entry->dwAltNameChoice - 1);
-        if (entry->u.pwszURL)
+        if (entry->pwszURL)
         {
             DWORD i;
 
             /* Not + 1: don't encode the NULL-terminator */
-            dataLen = lstrlenW(entry->u.pwszURL);
+            dataLen = lstrlenW(entry->pwszURL);
             for (i = 0; ret && i < dataLen; i++)
             {
-                if (entry->u.pwszURL[i] > 0x7f)
+                if (entry->pwszURL[i] > 0x7f)
                 {
                     SetLastError(CRYPT_E_INVALID_IA5_STRING);
                     ret = FALSE;
@@ -2428,16 +2426,16 @@ static BOOL WINAPI CRYPT_AsnEncodeAltNameEntry(DWORD dwCertEncodingType,
         break;
     case CERT_ALT_NAME_DIRECTORY_NAME:
         tag = ASN_CONTEXT | ASN_CONSTRUCTOR | (entry->dwAltNameChoice - 1);
-        dataLen = entry->u.DirectoryName.cbData;
+        dataLen = entry->DirectoryName.cbData;
         break;
     case CERT_ALT_NAME_IP_ADDRESS:
         tag = ASN_CONTEXT | (entry->dwAltNameChoice - 1);
-        dataLen = entry->u.IPAddress.cbData;
+        dataLen = entry->IPAddress.cbData;
         break;
     case CERT_ALT_NAME_REGISTERED_ID:
     {
         struct AsnEncodeTagSwappedItem swapped =
-         { ASN_CONTEXT | (entry->dwAltNameChoice - 1), entry->u.pszRegisteredID,
+         { ASN_CONTEXT | (entry->dwAltNameChoice - 1), entry->pszRegisteredID,
            CRYPT_AsnEncodeOid };
 
         return CRYPT_AsnEncodeSwapTag(0, NULL, &swapped, 0, NULL, pbEncoded,
@@ -2478,14 +2476,14 @@ static BOOL WINAPI CRYPT_AsnEncodeAltNameEntry(DWORD dwCertEncodingType,
                 DWORD i;
 
                 for (i = 0; i < dataLen; i++)
-                    *pbEncoded++ = (BYTE)entry->u.pwszURL[i];
+                    *pbEncoded++ = (BYTE)entry->pwszURL[i];
                 break;
             }
             case CERT_ALT_NAME_DIRECTORY_NAME:
-                memcpy(pbEncoded, entry->u.DirectoryName.pbData, dataLen);
+                memcpy(pbEncoded, entry->DirectoryName.pbData, dataLen);
                 break;
             case CERT_ALT_NAME_IP_ADDRESS:
-                memcpy(pbEncoded, entry->u.IPAddress.pbData, dataLen);
+                memcpy(pbEncoded, entry->IPAddress.pbData, dataLen);
                 break;
             }
             if (ret)
@@ -3757,7 +3755,7 @@ static BOOL CRYPT_AsnEncodeDistPoint(const CRL_DIST_POINT *distPoint,
         break;
     case CRL_DIST_POINT_FULL_NAME:
         swapped[cSwapped].tag = ASN_CONTEXT | ASN_CONSTRUCTOR | 0;
-        swapped[cSwapped].pvStructInfo = &distPoint->DistPointName.u.FullName;
+        swapped[cSwapped].pvStructInfo = &distPoint->DistPointName.FullName;
         swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeAltName;
         constructed.tag = 0;
         constructed.pvStructInfo = &swapped[cSwapped];
@@ -3972,7 +3970,7 @@ static BOOL WINAPI CRYPT_AsnEncodeIssuingDistPoint(DWORD dwCertEncodingType,
             break;
         case CRL_DIST_POINT_FULL_NAME:
             swapped[cSwapped].tag = ASN_CONTEXT | ASN_CONSTRUCTOR | 0;
-            swapped[cSwapped].pvStructInfo = &point->DistPointName.u.FullName;
+            swapped[cSwapped].pvStructInfo = &point->DistPointName.FullName;
             swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeAltName;
             constructed.tag = 0;
             constructed.pvStructInfo = &swapped[cSwapped];
@@ -4275,7 +4273,7 @@ static BOOL WINAPI CRYPT_AsnEncodeCMSSignerInfo(DWORD dwCertEncodingType,
          info->SignerId.dwIdChoice != CERT_ID_KEY_IDENTIFIER)
             SetLastError(E_INVALIDARG);
         else if (info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER &&
-         !info->SignerId.u.IssuerSerialNumber.Issuer.cbData)
+         !info->SignerId.IssuerSerialNumber.Issuer.cbData)
             SetLastError(E_INVALIDARG);
         else
         {
@@ -4288,7 +4286,7 @@ static BOOL WINAPI CRYPT_AsnEncodeCMSSignerInfo(DWORD dwCertEncodingType,
             if (info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER)
             {
                 items[cItem].pvStructInfo =
-                 &info->SignerId.u.IssuerSerialNumber.Issuer;
+                 &info->SignerId.IssuerSerialNumber.Issuer;
                 items[cItem].encodeFunc =
                  CRYPT_AsnEncodeIssuerSerialNumber;
                 cItem++;
@@ -4296,7 +4294,7 @@ static BOOL WINAPI CRYPT_AsnEncodeCMSSignerInfo(DWORD dwCertEncodingType,
             else
             {
                 swapped[cSwapped].tag = ASN_CONTEXT | 0;
-                swapped[cSwapped].pvStructInfo = &info->SignerId.u.KeyId;
+                swapped[cSwapped].pvStructInfo = &info->SignerId.KeyId;
                 swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeOctets;
                 items[cItem].pvStructInfo = &swapped[cSwapped];
                 items[cItem].encodeFunc = CRYPT_AsnEncodeSwapTag;
@@ -4347,30 +4345,19 @@ static BOOL WINAPI CRYPT_AsnEncodeCMSSignerInfo(DWORD dwCertEncodingType,
 BOOL CRYPT_AsnEncodeCMSSignedInfo(CRYPT_SIGNED_INFO *signedInfo, void *pvData,
  DWORD *pcbData)
 {
+    struct DERSetDescriptor digestAlgorithmsSet = { signedInfo->cSignerInfo,
+     signedInfo->rgSignerInfo, sizeof(CMSG_CMS_SIGNER_INFO),
+     offsetof(CMSG_CMS_SIGNER_INFO, HashAlgorithm),
+     CRYPT_AsnEncodeAlgorithmIdWithNullParams };
     struct AsnEncodeSequenceItem items[7] = {
      { &signedInfo->version, CRYPT_AsnEncodeInt, 0 },
+     { &digestAlgorithmsSet, CRYPT_DEREncodeItemsAsSet, 0 },
+     { &signedInfo->content, CRYPT_AsnEncodePKCSContentInfoInternal, 0 }
     };
-    struct DERSetDescriptor digestAlgorithmsSet = { 0 }, certSet = { 0 };
-    struct DERSetDescriptor crlSet = { 0 }, signerSet = { 0 };
+    struct DERSetDescriptor certSet = { 0 }, crlSet = { 0 }, signerSet = { 0 };
     struct AsnEncodeTagSwappedItem swapped[2] = { { 0 } };
-    DWORD cItem = 1, cSwapped = 0;
-    BOOL ret = TRUE;
+    DWORD cItem = 3, cSwapped = 0;
 
-    if (signedInfo->cSignerInfo)
-    {
-        digestAlgorithmsSet.cItems = signedInfo->cSignerInfo;
-        digestAlgorithmsSet.items = signedInfo->rgSignerInfo;
-        digestAlgorithmsSet.itemSize = sizeof(CMSG_CMS_SIGNER_INFO);
-        digestAlgorithmsSet.itemOffset =
-         offsetof(CMSG_CMS_SIGNER_INFO, HashAlgorithm);
-        digestAlgorithmsSet.encode = CRYPT_AsnEncodeAlgorithmIdWithNullParams;
-        items[cItem].pvStructInfo = &digestAlgorithmsSet;
-        items[cItem].encodeFunc = CRYPT_DEREncodeItemsAsSet;
-        cItem++;
-    }
-    items[cItem].pvStructInfo = &signedInfo->content;
-    items[cItem].encodeFunc = CRYPT_AsnEncodePKCSContentInfoInternal;
-    cItem++;
     if (signedInfo->cCertEncoded)
     {
         certSet.cItems = signedInfo->cCertEncoded;
@@ -4401,22 +4388,17 @@ BOOL CRYPT_AsnEncodeCMSSignedInfo(CRYPT_SIGNED_INFO *signedInfo, void *pvData,
         cSwapped++;
         cItem++;
     }
-    if (ret && signedInfo->cSignerInfo)
-    {
-        signerSet.cItems = signedInfo->cSignerInfo;
-        signerSet.items = signedInfo->rgSignerInfo;
-        signerSet.itemSize = sizeof(CMSG_CMS_SIGNER_INFO);
-        signerSet.itemOffset = 0;
-        signerSet.encode = CRYPT_AsnEncodeCMSSignerInfo;
-        items[cItem].pvStructInfo = &signerSet;
-        items[cItem].encodeFunc = CRYPT_DEREncodeItemsAsSet;
-        cItem++;
-    }
-    if (ret)
-        ret = CRYPT_AsnEncodeSequence(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-         items, cItem, 0, NULL, pvData, pcbData);
+    signerSet.cItems = signedInfo->cSignerInfo;
+    signerSet.items = signedInfo->rgSignerInfo;
+    signerSet.itemSize = sizeof(CMSG_CMS_SIGNER_INFO);
+    signerSet.itemOffset = 0;
+    signerSet.encode = CRYPT_AsnEncodeCMSSignerInfo;
+    items[cItem].pvStructInfo = &signerSet;
+    items[cItem].encodeFunc = CRYPT_DEREncodeItemsAsSet;
+    cItem++;
 
-    return ret;
+    return CRYPT_AsnEncodeSequence(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+     items, cItem, 0, NULL, pvData, pcbData);
 }
 
 static BOOL WINAPI CRYPT_AsnEncodeRecipientInfo(DWORD dwCertEncodingType,
@@ -4426,7 +4408,7 @@ static BOOL WINAPI CRYPT_AsnEncodeRecipientInfo(DWORD dwCertEncodingType,
     const CMSG_KEY_TRANS_RECIPIENT_INFO *info = pvStructInfo;
     struct AsnEncodeSequenceItem items[] = {
      { &info->dwVersion, CRYPT_AsnEncodeInt, 0 },
-     { &info->RecipientId.u.IssuerSerialNumber,
+     { &info->RecipientId.IssuerSerialNumber,
        CRYPT_AsnEncodeIssuerSerialNumber, 0 },
      { &info->KeyEncryptionAlgorithm,
        CRYPT_AsnEncodeAlgorithmIdWithNullParams, 0 },

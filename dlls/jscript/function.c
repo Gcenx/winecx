@@ -65,9 +65,8 @@ typedef struct {
 
 typedef struct {
     jsdisp_t jsdisp;
-    InterpretedFunction *function;
     jsval_t *buf;
-    call_frame_t *frame;
+    scope_chain_t *scope;
     unsigned argc;
 } ArgumentsInstance;
 
@@ -114,8 +113,9 @@ static void Arguments_destructor(jsdisp_t *jsdisp)
         free(arguments->buf);
     }
 
-    if(arguments->function)
-        jsdisp_release(&arguments->function->function.dispex);
+    if(arguments->scope)
+        scope_release(arguments->scope);
+
     free(arguments);
 }
 
@@ -129,48 +129,36 @@ static jsval_t *get_argument_ref(ArgumentsInstance *arguments, unsigned idx)
 {
     if(arguments->buf)
         return arguments->buf + idx;
-    if(arguments->frame->base_scope->frame || idx >= arguments->frame->function->param_cnt)
-        return arguments->jsdisp.ctx->stack + arguments->frame->arguments_off + idx;
-    return NULL;
+    if(!arguments->scope->detached_vars)
+        return arguments->jsdisp.ctx->stack + arguments->scope->frame->arguments_off + idx;
+    return arguments->scope->detached_vars->var + idx;
 }
 
 static HRESULT Arguments_idx_get(jsdisp_t *jsdisp, unsigned idx, jsval_t *r)
 {
     ArgumentsInstance *arguments = arguments_from_jsdisp(jsdisp);
-    jsval_t *ref;
 
     TRACE("%p[%u]\n", arguments, idx);
 
-    if((ref = get_argument_ref(arguments, idx)))
-        return jsval_copy(*ref, r);
-
-    /* FIXME: Accessing by name won't work for duplicated argument names */
-    return jsdisp_propget_name(arguments->frame->base_scope->jsobj,
-                               arguments->function->func_code->params[idx], r);
+    return jsval_copy(*get_argument_ref(arguments, idx), r);
 }
 
 static HRESULT Arguments_idx_put(jsdisp_t *jsdisp, unsigned idx, jsval_t val)
 {
     ArgumentsInstance *arguments = arguments_from_jsdisp(jsdisp);
-    jsval_t *ref;
+    jsval_t copy, *ref;
     HRESULT hres;
 
     TRACE("%p[%u] = %s\n", arguments, idx, debugstr_jsval(val));
 
-    if((ref = get_argument_ref(arguments, idx))) {
-        jsval_t copy;
-        hres = jsval_copy(val, &copy);
-        if(FAILED(hres))
-            return hres;
+    hres = jsval_copy(val, &copy);
+    if(FAILED(hres))
+        return hres;
 
-        jsval_release(*ref);
-        *ref = copy;
-        return S_OK;
-    }
-
-    /* FIXME: Accessing by name won't work for duplicated argument names */
-    return jsdisp_propput_name(arguments->frame->base_scope->jsobj,
-                               arguments->function->func_code->params[idx], val);
+    ref = get_argument_ref(arguments, idx);
+    jsval_release(*ref);
+    *ref = copy;
+    return S_OK;
 }
 
 static HRESULT Arguments_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *jsdisp)
@@ -187,7 +175,13 @@ static HRESULT Arguments_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op 
         }
     }
 
-    return gc_process_linked_obj(gc_ctx, op, jsdisp, &arguments->function->function.dispex, (void**)&arguments->function);
+    if(arguments->scope) {
+        hres = gc_process_linked_obj(gc_ctx, op, jsdisp, &arguments->scope->dispex, (void**)&arguments->scope);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    return S_OK;
 }
 
 static const builtin_info_t Arguments_info = {
@@ -217,17 +211,16 @@ HRESULT setup_arguments_object(script_ctx_t *ctx, call_frame_t *frame)
         return hres;
     }
 
-    args->function = (InterpretedFunction*)function_from_jsdisp(jsdisp_addref(frame->function_instance));
     args->argc = frame->argc;
-    args->frame = frame;
+    args->scope = scope_addref(frame->base_scope);
 
     hres = jsdisp_define_data_property(&args->jsdisp, L"length", PROPF_WRITABLE | PROPF_CONFIGURABLE,
                                        jsval_number(args->argc));
     if(SUCCEEDED(hres))
         hres = jsdisp_define_data_property(&args->jsdisp, L"callee", PROPF_WRITABLE | PROPF_CONFIGURABLE,
-                                           jsval_obj(&args->function->function.dispex));
+                                           jsval_obj(frame->function_instance));
     if(SUCCEEDED(hres))
-        hres = jsdisp_propput(frame->base_scope->jsobj, L"arguments", PROPF_WRITABLE, TRUE, jsval_obj(&args->jsdisp));
+        hres = jsdisp_propput(as_jsdisp(frame->base_scope->obj), L"arguments", PROPF_WRITABLE, TRUE, jsval_obj(&args->jsdisp));
     if(FAILED(hres)) {
         jsdisp_release(&args->jsdisp);
         return hres;
@@ -237,39 +230,38 @@ HRESULT setup_arguments_object(script_ctx_t *ctx, call_frame_t *frame)
     return S_OK;
 }
 
-void detach_arguments_object(jsdisp_t *args_disp)
+void detach_arguments_object(call_frame_t *frame)
 {
-    ArgumentsInstance *arguments = arguments_from_jsdisp(args_disp);
-    call_frame_t *frame = arguments->frame;
-    const BOOL on_stack = frame->base_scope->frame == frame;
-    HRESULT hres;
+    ArgumentsInstance *arguments = arguments_from_jsdisp(frame->arguments_obj);
+    scope_chain_t *scope = arguments->scope;
+    const BOOL on_stack = scope->frame == frame;
+    jsdisp_t *jsobj = as_jsdisp(scope->obj);
 
     /* Reset arguments value to cut the reference cycle. Note that since all activation contexts have
      * their own arguments property, it's impossible to use prototype's one during name lookup */
-    jsdisp_propput_name(frame->base_scope->jsobj, L"arguments", jsval_undefined());
-    arguments->frame = NULL;
+    jsdisp_propput_name(jsobj, L"arguments", jsval_undefined());
 
     /* Don't bother coppying arguments if call frame holds the last reference. */
-    if(arguments->jsdisp.ref > 1) {
+    if(arguments->jsdisp.ref > 1 && !arguments->jsdisp.ctx->html_mode) {
         arguments->buf = malloc(arguments->argc * sizeof(*arguments->buf));
         if(arguments->buf) {
+            const jsval_t *args = on_stack ? arguments->jsdisp.ctx->stack + frame->arguments_off : scope->detached_vars->var;
             int i;
 
             for(i = 0; i < arguments->argc ; i++) {
-                if(on_stack || i >= frame->function->param_cnt)
-                    hres = jsval_copy(arguments->jsdisp.ctx->stack[frame->arguments_off + i], arguments->buf+i);
-                else
-                    hres = jsdisp_propget_name(frame->base_scope->jsobj, frame->function->params[i], arguments->buf+i);
-                if(FAILED(hres))
+                if(FAILED(jsval_copy(args[i], &arguments->buf[i])))
                     arguments->buf[i] = jsval_undefined();
             }
         }else {
             ERR("out of memory\n");
             arguments->argc = 0;
         }
+
+        arguments->scope = NULL;
+        scope_release(scope);
     }
 
-    jsdisp_release(frame->arguments_obj);
+    jsdisp_release(&arguments->jsdisp);
 }
 
 HRESULT Function_invoke(jsdisp_t *func_this, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
@@ -287,6 +279,26 @@ HRESULT Function_invoke(jsdisp_t *func_this, jsval_t vthis, WORD flags, unsigned
     }
 
     return function->vtbl->call(function->dispex.ctx, function, vthis, flags, argc, argv, r);
+}
+
+static HRESULT Function_get_caller(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
+{
+    FunctionInstance *function = function_from_jsdisp(jsthis);
+    call_frame_t *frame;
+
+    TRACE("%p\n", jsthis);
+
+    for(frame = ctx->call_ctx; frame; frame = frame->prev_frame) {
+        if(frame->function_instance == &function->dispex) {
+            if(!frame->prev_frame || !frame->prev_frame->function_instance)
+                break;
+            *r = jsval_obj(jsdisp_addref(frame->prev_frame->function_instance));
+            return S_OK;
+        }
+    }
+
+    *r = jsval_null();
+    return S_OK;
 }
 
 static HRESULT Function_get_length(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
@@ -581,9 +593,10 @@ static HRESULT Function_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op o
 
 static const builtin_prop_t Function_props[] = {
     {L"apply",               Function_apply,                 PROPF_METHOD|2},
-    {L"arguments",           NULL, 0,                        Function_get_arguments},
+    {L"arguments",           NULL, PROPF_HTML,               Function_get_arguments},
     {L"bind",                Function_bind,                  PROPF_METHOD|PROPF_ES5|1},
     {L"call",                Function_call,                  PROPF_METHOD|1},
+    {L"caller",              NULL, PROPF_HTML,               Function_get_caller},
     {L"length",              NULL, 0,                        Function_get_length},
     {L"toString",            Function_toString,              PROPF_METHOD}
 };
@@ -603,6 +616,7 @@ static const builtin_info_t Function_info = {
 
 static const builtin_prop_t FunctionInst_props[] = {
     {L"arguments",           NULL, 0,                        Function_get_arguments},
+    {L"caller",              NULL, PROPF_HTML,               Function_get_caller},
     {L"length",              NULL, 0,                        Function_get_length}
 };
 
@@ -788,6 +802,7 @@ static HRESULT InterpretedFunction_set_prototype(script_ctx_t *ctx, jsdisp_t *js
 
 static const builtin_prop_t InterpretedFunction_props[] = {
     {L"arguments",           NULL, 0,                        Function_get_arguments},
+    {L"caller",              NULL, PROPF_HTML,               Function_get_caller},
     {L"length",              NULL, 0,                        Function_get_length},
     {L"prototype",           NULL, 0,                        InterpretedFunction_get_prototype, InterpretedFunction_set_prototype}
 };
@@ -908,6 +923,35 @@ HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, function_cod
     return S_OK;
 }
 
+static HRESULT BindFunction_get_arguments(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
+{
+    return JS_E_INVALID_ACTION;
+}
+
+static HRESULT BindFunction_get_caller(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
+{
+    return JS_E_INVALID_ACTION;
+}
+
+static const builtin_prop_t BindFunction_props[] = {
+    {L"arguments",           NULL, 0,                        BindFunction_get_arguments},
+    {L"caller",              NULL, 0,                        BindFunction_get_caller},
+    {L"length",              NULL, 0,                        Function_get_length}
+};
+
+static const builtin_info_t BindFunction_info = {
+    JSCLASS_FUNCTION,
+    Function_value,
+    ARRAY_SIZE(BindFunction_props),
+    BindFunction_props,
+    Function_destructor,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    Function_gc_traverse
+};
+
 static HRESULT BindFunction_call(script_ctx_t *ctx, FunctionInstance *func, jsval_t vthis, unsigned flags,
          unsigned argc, jsval_t *argv, jsval_t *r)
 {
@@ -994,7 +1038,7 @@ static HRESULT create_bind_function(script_ctx_t *ctx, FunctionInstance *target,
     BindFunction *function;
     HRESULT hres;
 
-    hres = create_function(ctx, NULL, &BindFunctionVtbl, FIELD_OFFSET(BindFunction, args[argc]), PROPF_METHOD,
+    hres = create_function(ctx, &BindFunction_info, &BindFunctionVtbl, FIELD_OFFSET(BindFunction, args[argc]), PROPF_METHOD,
                            FALSE, NULL, (void**)&function);
     if(FAILED(hres))
         return hres;
@@ -1138,6 +1182,12 @@ static HRESULT FunctionProt_value(script_ctx_t *ctx, jsval_t vthis, WORD flags, 
 {
     FIXME("\n");
     return E_NOTIMPL;
+}
+
+BOOL is_builtin_eval_func(jsdisp_t *jsdisp)
+{
+    return is_class(jsdisp, JSCLASS_FUNCTION) && function_from_jsdisp(jsdisp)->vtbl == &NativeFunctionVtbl &&
+           ((NativeFunction*)function_from_jsdisp(jsdisp))->proc == JSGlobal_eval;
 }
 
 HRESULT init_function_constr(script_ctx_t *ctx, jsdisp_t *object_prototype)

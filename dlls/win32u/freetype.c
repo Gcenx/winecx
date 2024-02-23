@@ -46,6 +46,7 @@
 #define CompareString __carbon_CompareString
 #define GetCurrentThread __carbon_GetCurrentThread
 #define GetCurrentProcess __carbon_GetCurrentProcess
+#define GetProcessInformation __carbon_GetProcessInformation
 #define AnimatePalette __carbon_AnimatePalette
 #define DeleteMenu __carbon_DeleteMenu
 #define DrawMenu __carbon_DrawMenu
@@ -72,6 +73,7 @@
 #undef GetCurrentThread
 #undef _CDECL
 #undef GetCurrentProcess
+#undef GetProcessInformation
 #undef AnimatePalette
 #undef CheckMenuItem
 #undef DeleteMenu
@@ -2096,7 +2098,7 @@ static UINT freetype_get_font_data( struct gdi_font *font, UINT table, UINT offs
     err = pFT_Load_Sfnt_Table(ft_face, RtlUlongByteSwap(table), offset, buf, &len);
     if (err)
     {
-        TRACE("Can't find table %s\n", debugstr_an((char*)&table, 4));
+        TRACE("Can't find table %s\n", debugstr_fourcc(table));
 	return GDI_ERROR;
     }
     return len;
@@ -4079,7 +4081,7 @@ static UINT freetype_get_unicode_ranges( struct gdi_font *font, GLYPHSET *gs )
     else
     {
         DWORD encoding = RtlUlongByteSwap(ft_face->charmap->encoding);
-        FIXME("encoding %s not supported\n", debugstr_an((char *)&encoding, 4));
+        FIXME("encoding %s not supported\n", debugstr_fourcc(encoding));
     }
 
     return num_ranges;
@@ -4244,7 +4246,7 @@ static UINT freetype_get_kerning_pairs( struct gdi_font *font, KERNINGPAIR **pai
         DWORD encoding = RtlUlongByteSwap(ft_face->charmap->encoding);
         ULONG n;
 
-        FIXME("encoding %s not supported\n", debugstr_an((char *)&encoding, 4));
+        FIXME("encoding %s not supported\n", debugstr_fourcc(encoding));
         for (n = 0; n <= 65535; n++)
             glyph_to_char[n] = (USHORT)n;
     }

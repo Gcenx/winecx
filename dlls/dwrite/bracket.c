@@ -1,10 +1,10 @@
 /* Unicode Bidirectional Bracket table */
-/* generated from https://www.unicode.org/Public/15.0.0/ucd/UCD.zip:BidiBrackets.txt */
+/* generated from https://www.unicode.org/Public/15.1.0/ucd/UCD.zip:BidiBrackets.txt */
 /* DO NOT EDIT!! */
 
 #include "windef.h"
 
-const unsigned short DECLSPEC_HIDDEN bidi_bracket_table[572] =
+const unsigned short bidi_bracket_table[572] =
 {
     /* level 1 offsets */
     0x0100, 0x0108, 0x0108, 0x0108, 0x0108, 0x0108, 0x0108, 0x0108,

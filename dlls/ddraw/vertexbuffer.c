@@ -95,7 +95,7 @@ static ULONG WINAPI d3d_vertex_buffer7_Release(IDirect3DVertexBuffer7 *iface)
         if (buffer->version == 7)
             IDirectDraw7_Release(&buffer->ddraw->IDirectDraw7_iface);
 
-        heap_free(buffer);
+        free(buffer);
     }
 
     return ref;
@@ -111,7 +111,7 @@ static HRESULT d3d_vertex_buffer_create_wined3d_buffer(struct d3d_vertex_buffer 
     struct wined3d_buffer_desc desc;
 
     desc.byte_width = buffer->size;
-    desc.usage = WINED3DUSAGE_STATICDECL;
+    desc.usage = WINED3DUSAGE_STATICDECL | WINED3DUSAGE_VIDMEM_ACCOUNTING;
     if (dynamic)
         desc.usage |= WINED3DUSAGE_DYNAMIC;
     desc.bind_flags = WINED3D_BIND_VERTEX_BUFFER;
@@ -448,7 +448,7 @@ HRESULT d3d_vertex_buffer_create(struct d3d_vertex_buffer **vertex_buf,
     TRACE("    FVF %#lx\n", desc->dwFVF);
     TRACE("    dwNumVertices %lu\n", desc->dwNumVertices);
 
-    if (!(buffer = heap_alloc_zero(sizeof(*buffer))))
+    if (!(buffer = calloc(1, sizeof(*buffer))))
         return DDERR_OUTOFMEMORY;
 
     buffer->IDirect3DVertexBuffer7_iface.lpVtbl = &d3d_vertex_buffer7_vtbl;
@@ -485,7 +485,7 @@ end:
     if (hr == D3D_OK)
         *vertex_buf = buffer;
     else
-        heap_free(buffer);
+        free(buffer);
 
     return hr;
 }

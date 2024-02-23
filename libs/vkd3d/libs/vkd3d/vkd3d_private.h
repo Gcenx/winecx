@@ -22,6 +22,7 @@
 #define COBJMACROS
 #define NONAMELESSUNION
 #define VK_NO_PROTOTYPES
+#define CONST_VTABLE
 
 #ifdef _WIN32
 # define _WIN32_WINNT 0x0600  /* for condition variables */
@@ -44,13 +45,11 @@
 
 #define VK_CALL(f) (vk_procs->f)
 
-#define VKD3D_DESCRIPTOR_MAGIC_HAS_VIEW 0x01000000u
-
 #define VKD3D_DESCRIPTOR_MAGIC_FREE    0x00000000u
 #define VKD3D_DESCRIPTOR_MAGIC_CBV     VKD3D_MAKE_TAG('C', 'B', 'V', 0)
-#define VKD3D_DESCRIPTOR_MAGIC_SRV     VKD3D_MAKE_TAG('S', 'R', 'V', 1)
-#define VKD3D_DESCRIPTOR_MAGIC_UAV     VKD3D_MAKE_TAG('U', 'A', 'V', 1)
-#define VKD3D_DESCRIPTOR_MAGIC_SAMPLER VKD3D_MAKE_TAG('S', 'M', 'P', 1)
+#define VKD3D_DESCRIPTOR_MAGIC_SRV     VKD3D_MAKE_TAG('S', 'R', 'V', 0)
+#define VKD3D_DESCRIPTOR_MAGIC_UAV     VKD3D_MAKE_TAG('U', 'A', 'V', 0)
+#define VKD3D_DESCRIPTOR_MAGIC_SAMPLER VKD3D_MAKE_TAG('S', 'M', 'P', 0)
 #define VKD3D_DESCRIPTOR_MAGIC_DSV     VKD3D_MAKE_TAG('D', 'S', 'V', 0)
 #define VKD3D_DESCRIPTOR_MAGIC_RTV     VKD3D_MAKE_TAG('R', 'T', 'V', 0)
 
@@ -123,6 +122,7 @@ struct vkd3d_vulkan_info
     bool KHR_draw_indirect_count;
     bool KHR_get_memory_requirements2;
     bool KHR_image_format_list;
+    bool KHR_maintenance2;
     bool KHR_maintenance3;
     bool KHR_push_descriptor;
     bool KHR_sampler_mirror_clamp_to_edge;
@@ -149,8 +149,11 @@ struct vkd3d_vulkan_info
     unsigned int max_vertex_attrib_divisor;
 
     VkPhysicalDeviceLimits device_limits;
-    VkPhysicalDeviceSparseProperties sparse_properties;
     struct vkd3d_device_descriptor_limits descriptor_limits;
+
+    VkPhysicalDeviceSparseProperties sparse_properties;
+    bool sparse_binding;
+    bool sparse_residency_3d;
 
     VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT texel_buffer_alignment_properties;
 
@@ -207,56 +210,79 @@ struct vkd3d_cond
     CONDITION_VARIABLE cond;
 };
 
-static inline int vkd3d_mutex_init(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_init(struct vkd3d_mutex *lock)
 {
     InitializeCriticalSection(&lock->lock);
-    return 0;
 }
 
-static inline int vkd3d_mutex_lock(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_lock(struct vkd3d_mutex *lock)
 {
     EnterCriticalSection(&lock->lock);
-    return 0;
 }
 
-static inline int vkd3d_mutex_unlock(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_unlock(struct vkd3d_mutex *lock)
 {
     LeaveCriticalSection(&lock->lock);
-    return 0;
 }
 
-static inline int vkd3d_mutex_destroy(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_destroy(struct vkd3d_mutex *lock)
 {
     DeleteCriticalSection(&lock->lock);
-    return 0;
 }
 
-static inline int vkd3d_cond_init(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_init(struct vkd3d_cond *cond)
 {
     InitializeConditionVariable(&cond->cond);
-    return 0;
 }
 
-static inline int vkd3d_cond_signal(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_signal(struct vkd3d_cond *cond)
 {
     WakeConditionVariable(&cond->cond);
-    return 0;
 }
 
-static inline int vkd3d_cond_broadcast(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_broadcast(struct vkd3d_cond *cond)
 {
     WakeAllConditionVariable(&cond->cond);
-    return 0;
 }
 
-static inline int vkd3d_cond_wait(struct vkd3d_cond *cond, struct vkd3d_mutex *lock)
+static inline void vkd3d_cond_wait(struct vkd3d_cond *cond, struct vkd3d_mutex *lock)
 {
-    return !SleepConditionVariableCS(&cond->cond, &lock->lock, INFINITE);
+    if (!SleepConditionVariableCS(&cond->cond, &lock->lock, INFINITE))
+        ERR("Could not sleep on the condition variable, error %u.\n", GetLastError());
 }
 
-static inline int vkd3d_cond_destroy(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_destroy(struct vkd3d_cond *cond)
 {
-    return 0;
+}
+
+static inline unsigned int vkd3d_atomic_increment(unsigned int volatile *x)
+{
+    return InterlockedIncrement((LONG volatile *)x);
+}
+
+static inline unsigned int vkd3d_atomic_decrement(unsigned int volatile *x)
+{
+    return InterlockedDecrement((LONG volatile *)x);
+}
+
+static inline bool vkd3d_atomic_compare_exchange(unsigned int volatile *x, unsigned int cmp, unsigned int xchg)
+{
+    return InterlockedCompareExchange((LONG volatile *)x, xchg, cmp) == cmp;
+}
+
+static inline unsigned int vkd3d_atomic_exchange(unsigned int volatile *x, unsigned int val)
+{
+    return InterlockedExchange((LONG volatile *)x, val);
+}
+
+static inline bool vkd3d_atomic_compare_exchange_pointer(void * volatile *x, void *cmp, void *xchg)
+{
+    return InterlockedCompareExchangePointer(x, xchg, cmp) == cmp;
+}
+
+static inline void *vkd3d_atomic_exchange_pointer(void * volatile *x, void *val)
+{
+    return InterlockedExchangePointer(x, val);
 }
 
 #else  /* _WIN32 */
@@ -280,50 +306,152 @@ struct vkd3d_cond
 };
 
 
-static inline int vkd3d_mutex_init(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_init(struct vkd3d_mutex *lock)
 {
-    return pthread_mutex_init(&lock->lock, NULL);
+    int ret;
+
+    ret = pthread_mutex_init(&lock->lock, NULL);
+    if (ret)
+        ERR("Could not initialize the mutex, error %d.\n", ret);
 }
 
-static inline int vkd3d_mutex_lock(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_lock(struct vkd3d_mutex *lock)
 {
-    return pthread_mutex_lock(&lock->lock);
+    int ret;
+
+    ret = pthread_mutex_lock(&lock->lock);
+    if (ret)
+        ERR("Could not lock the mutex, error %d.\n", ret);
 }
 
-static inline int vkd3d_mutex_unlock(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_unlock(struct vkd3d_mutex *lock)
 {
-    return pthread_mutex_unlock(&lock->lock);
+    int ret;
+
+    ret = pthread_mutex_unlock(&lock->lock);
+    if (ret)
+        ERR("Could not unlock the mutex, error %d.\n", ret);
 }
 
-static inline int vkd3d_mutex_destroy(struct vkd3d_mutex *lock)
+static inline void vkd3d_mutex_destroy(struct vkd3d_mutex *lock)
 {
-    return pthread_mutex_destroy(&lock->lock);
+    int ret;
+
+    ret = pthread_mutex_destroy(&lock->lock);
+    if (ret)
+        ERR("Could not destroy the mutex, error %d.\n", ret);
 }
 
-static inline int vkd3d_cond_init(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_init(struct vkd3d_cond *cond)
 {
-    return pthread_cond_init(&cond->cond, NULL);
+    int ret;
+
+    ret = pthread_cond_init(&cond->cond, NULL);
+    if (ret)
+        ERR("Could not initialize the condition variable, error %d.\n", ret);
 }
 
-static inline int vkd3d_cond_signal(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_signal(struct vkd3d_cond *cond)
 {
-    return pthread_cond_signal(&cond->cond);
+    int ret;
+
+    ret = pthread_cond_signal(&cond->cond);
+    if (ret)
+        ERR("Could not signal the condition variable, error %d.\n", ret);
 }
 
-static inline int vkd3d_cond_broadcast(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_broadcast(struct vkd3d_cond *cond)
 {
-    return pthread_cond_broadcast(&cond->cond);
+    int ret;
+
+    ret = pthread_cond_broadcast(&cond->cond);
+    if (ret)
+        ERR("Could not broadcast the condition variable, error %d.\n", ret);
 }
 
-static inline int vkd3d_cond_wait(struct vkd3d_cond *cond, struct vkd3d_mutex *lock)
+static inline void vkd3d_cond_wait(struct vkd3d_cond *cond, struct vkd3d_mutex *lock)
 {
-    return pthread_cond_wait(&cond->cond, &lock->lock);
+    int ret;
+
+    ret = pthread_cond_wait(&cond->cond, &lock->lock);
+    if (ret)
+        ERR("Could not wait on the condition variable, error %d.\n", ret);
 }
 
-static inline int vkd3d_cond_destroy(struct vkd3d_cond *cond)
+static inline void vkd3d_cond_destroy(struct vkd3d_cond *cond)
 {
-    return pthread_cond_destroy(&cond->cond);
+    int ret;
+
+    ret = pthread_cond_destroy(&cond->cond);
+    if (ret)
+        ERR("Could not destroy the condition variable, error %d.\n", ret);
 }
+
+# if HAVE_SYNC_SUB_AND_FETCH
+static inline unsigned int vkd3d_atomic_decrement(unsigned int volatile *x)
+{
+    return __sync_sub_and_fetch(x, 1);
+}
+# else
+#  error "vkd3d_atomic_decrement() not implemented for this platform"
+# endif  /* HAVE_SYNC_SUB_AND_FETCH */
+
+# if HAVE_SYNC_ADD_AND_FETCH
+static inline unsigned int vkd3d_atomic_increment(unsigned int volatile *x)
+{
+    return __sync_add_and_fetch(x, 1);
+}
+# else
+#  error "vkd3d_atomic_increment() not implemented for this platform"
+# endif  /* HAVE_SYNC_ADD_AND_FETCH */
+
+# if HAVE_SYNC_BOOL_COMPARE_AND_SWAP
+static inline bool vkd3d_atomic_compare_exchange(unsigned int volatile *x, unsigned int cmp, unsigned int xchg)
+{
+    return __sync_bool_compare_and_swap(x, cmp, xchg);
+}
+
+static inline bool vkd3d_atomic_compare_exchange_pointer(void * volatile *x, void *cmp, void *xchg)
+{
+    return __sync_bool_compare_and_swap(x, cmp, xchg);
+}
+# else
+#  error "vkd3d_atomic_compare_exchange() not implemented for this platform"
+# endif
+
+# if HAVE_ATOMIC_EXCHANGE_N
+static inline unsigned int vkd3d_atomic_exchange(unsigned int volatile *x, unsigned int val)
+{
+    return __atomic_exchange_n(x, val, __ATOMIC_SEQ_CST);
+}
+
+static inline void *vkd3d_atomic_exchange_pointer(void * volatile *x, void *val)
+{
+    return __atomic_exchange_n(x, val, __ATOMIC_SEQ_CST);
+}
+# elif HAVE_SYNC_BOOL_COMPARE_AND_SWAP
+static inline unsigned int vkd3d_atomic_exchange(unsigned int volatile *x, unsigned int val)
+{
+    unsigned int i;
+    do
+    {
+        i = *x;
+    } while (!__sync_bool_compare_and_swap(x, i, val));
+    return i;
+}
+
+static inline void *vkd3d_atomic_exchange_pointer(void * volatile *x, void *val)
+{
+    void *p;
+    do
+    {
+        p = *x;
+    } while (!__sync_bool_compare_and_swap(x, p, val));
+    return p;
+}
+# else
+#   error "vkd3d_atomic_exchange() not implemented for this platform"
+# endif
 
 #endif  /* _WIN32 */
 
@@ -391,30 +519,6 @@ D3D12_GPU_VIRTUAL_ADDRESS vkd3d_gpu_va_allocator_allocate(struct vkd3d_gpu_va_al
 void *vkd3d_gpu_va_allocator_dereference(struct vkd3d_gpu_va_allocator *allocator, D3D12_GPU_VIRTUAL_ADDRESS address);
 void vkd3d_gpu_va_allocator_free(struct vkd3d_gpu_va_allocator *allocator, D3D12_GPU_VIRTUAL_ADDRESS address);
 
-struct vkd3d_gpu_descriptor_allocation
-{
-    const struct d3d12_desc *base;
-    size_t count;
-};
-
-struct vkd3d_gpu_descriptor_allocator
-{
-    struct vkd3d_mutex mutex;
-
-    struct vkd3d_gpu_descriptor_allocation *allocations;
-    size_t allocations_size;
-    size_t allocation_count;
-};
-
-size_t vkd3d_gpu_descriptor_allocator_range_size_from_descriptor(
-        struct vkd3d_gpu_descriptor_allocator *allocator, const struct d3d12_desc *desc);
-bool vkd3d_gpu_descriptor_allocator_register_range(struct vkd3d_gpu_descriptor_allocator *allocator,
-        const struct d3d12_desc *base, size_t count);
-bool vkd3d_gpu_descriptor_allocator_unregister_range(
-        struct vkd3d_gpu_descriptor_allocator *allocator, const struct d3d12_desc *base);
-struct d3d12_descriptor_heap *vkd3d_gpu_descriptor_allocator_heap_from_descriptor(
-        struct vkd3d_gpu_descriptor_allocator *allocator, const struct d3d12_desc *desc);
-
 struct vkd3d_render_pass_key
 {
     unsigned int attachment_count;
@@ -471,14 +575,11 @@ static inline void vkd3d_private_data_destroy(struct vkd3d_private_data *data)
 
 static inline HRESULT vkd3d_private_store_init(struct vkd3d_private_store *store)
 {
-    int rc;
-
     list_init(&store->content);
 
-    if ((rc = vkd3d_mutex_init(&store->mutex)))
-        ERR("Failed to initialize mutex, error %d.\n", rc);
+    vkd3d_mutex_init(&store->mutex);
 
-    return hresult_from_errno(rc);
+    return S_OK;
 }
 
 static inline void vkd3d_private_store_destroy(struct vkd3d_private_store *store)
@@ -517,9 +618,11 @@ struct vkd3d_signaled_semaphore
 /* ID3D12Fence */
 struct d3d12_fence
 {
-    ID3D12Fence ID3D12Fence_iface;
+    ID3D12Fence1 ID3D12Fence1_iface;
     LONG internal_refcount;
     LONG refcount;
+
+    D3D12_FENCE_FLAGS flags;
 
     uint64_t value;
     uint64_t max_pending_value;
@@ -561,6 +664,7 @@ struct d3d12_heap
 {
     ID3D12Heap ID3D12Heap_iface;
     LONG refcount;
+    LONG resource_count;
 
     bool is_private;
     D3D12_HEAP_DESC desc;
@@ -578,7 +682,7 @@ struct d3d12_heap
 };
 
 HRESULT d3d12_heap_create(struct d3d12_device *device, const D3D12_HEAP_DESC *desc,
-        const struct d3d12_resource *resource, struct d3d12_heap **heap);
+        const struct d3d12_resource *resource, ID3D12ProtectedResourceSession *protected_session, struct d3d12_heap **heap);
 struct d3d12_heap *unsafe_impl_from_ID3D12Heap(ID3D12Heap *iface);
 
 #define VKD3D_RESOURCE_PUBLIC_FLAGS \
@@ -587,10 +691,34 @@ struct d3d12_heap *unsafe_impl_from_ID3D12Heap(ID3D12Heap *iface);
 #define VKD3D_RESOURCE_DEDICATED_HEAP 0x00000008
 #define VKD3D_RESOURCE_LINEAR_TILING  0x00000010
 
+struct vkd3d_tiled_region_extent
+{
+    unsigned int width;
+    unsigned int height;
+    unsigned int depth;
+};
+
+struct vkd3d_subresource_tile_info
+{
+    unsigned int offset;
+    unsigned int count;
+    struct vkd3d_tiled_region_extent extent;
+};
+
+struct d3d12_resource_tile_info
+{
+    VkExtent3D tile_extent;
+    unsigned int total_count;
+    unsigned int standard_mip_count;
+    unsigned int packed_mip_tile_count;
+    unsigned int subresource_count;
+    struct vkd3d_subresource_tile_info *subresources;
+};
+
 /* ID3D12Resource */
 struct d3d12_resource
 {
-    ID3D12Resource ID3D12Resource_iface;
+    ID3D12Resource1 ID3D12Resource1_iface;
     LONG refcount;
     LONG internal_refcount;
 
@@ -615,8 +743,20 @@ struct d3d12_resource
 
     struct d3d12_device *device;
 
+    struct d3d12_resource_tile_info tiles;
+
     struct vkd3d_private_store private_store;
 };
+
+static inline struct d3d12_resource *impl_from_ID3D12Resource(ID3D12Resource *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d12_resource, ID3D12Resource1_iface);
+}
+
+static inline struct d3d12_resource *impl_from_ID3D12Resource1(ID3D12Resource1 *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d12_resource, ID3D12Resource1_iface);
+}
 
 static inline bool d3d12_resource_is_buffer(const struct d3d12_resource *resource)
 {
@@ -630,11 +770,16 @@ static inline bool d3d12_resource_is_texture(const struct d3d12_resource *resour
 
 bool d3d12_resource_is_cpu_accessible(const struct d3d12_resource *resource);
 HRESULT d3d12_resource_validate_desc(const D3D12_RESOURCE_DESC *desc, struct d3d12_device *device);
+void d3d12_resource_get_tiling(struct d3d12_device *device, const struct d3d12_resource *resource,
+        UINT *total_tile_count, D3D12_PACKED_MIP_INFO *packed_mip_info, D3D12_TILE_SHAPE *standard_tile_shape,
+        UINT *sub_resource_tiling_count, UINT first_sub_resource_tiling,
+        D3D12_SUBRESOURCE_TILING *sub_resource_tilings);
 
 HRESULT d3d12_committed_resource_create(struct d3d12_device *device,
         const D3D12_HEAP_PROPERTIES *heap_properties, D3D12_HEAP_FLAGS heap_flags,
         const D3D12_RESOURCE_DESC *desc, D3D12_RESOURCE_STATES initial_state,
-        const D3D12_CLEAR_VALUE *optimized_clear_value, struct d3d12_resource **resource);
+        const D3D12_CLEAR_VALUE *optimized_clear_value, ID3D12ProtectedResourceSession *protected_session,
+        struct d3d12_resource **resource);
 HRESULT d3d12_placed_resource_create(struct d3d12_device *device, struct d3d12_heap *heap, uint64_t heap_offset,
         const D3D12_RESOURCE_DESC *desc, D3D12_RESOURCE_STATES initial_state,
         const D3D12_CLEAR_VALUE *optimized_clear_value, struct d3d12_resource **resource);
@@ -659,11 +804,9 @@ enum vkd3d_view_type
     VKD3D_VIEW_TYPE_SAMPLER,
 };
 
-struct vkd3d_view
+struct vkd3d_resource_view
 {
-    LONG refcount;
     enum vkd3d_view_type type;
-    uint64_t serial_id;
     union
     {
         VkBufferView vk_buffer_view;
@@ -689,9 +832,6 @@ struct vkd3d_view
     } info;
 };
 
-void vkd3d_view_decref(struct vkd3d_view *view, struct d3d12_device *device);
-void vkd3d_view_incref(struct vkd3d_view *view);
-
 struct vkd3d_texture_view_desc
 {
     VkImageViewType view_type;
@@ -703,29 +843,91 @@ struct vkd3d_texture_view_desc
     VkImageAspectFlags vk_image_aspect;
     VkComponentMapping components;
     bool allowed_swizzle;
+    VkImageUsageFlags usage;
 };
 
-bool vkd3d_create_buffer_view(struct d3d12_device *device, VkBuffer vk_buffer, const struct vkd3d_format *format,
-        VkDeviceSize offset, VkDeviceSize size, struct vkd3d_view **view);
-bool vkd3d_create_texture_view(struct d3d12_device *device, VkImage vk_image,
+struct vkd3d_desc_header
+{
+    uint32_t magic;
+    unsigned int volatile refcount;
+    void *next;
+    VkDescriptorType vk_descriptor_type;
+};
+
+struct vkd3d_view
+{
+    struct vkd3d_desc_header h;
+    struct vkd3d_resource_view v;
+};
+
+bool vkd3d_create_buffer_view(struct d3d12_device *device, uint32_t magic, VkBuffer vk_buffer,
+        const struct vkd3d_format *format, VkDeviceSize offset, VkDeviceSize size, struct vkd3d_view **view);
+bool vkd3d_create_texture_view(struct d3d12_device *device, uint32_t magic, VkImage vk_image,
         const struct vkd3d_texture_view_desc *desc, struct vkd3d_view **view);
 
-struct vkd3d_view_info
+struct vkd3d_cbuffer_desc
 {
-    uint64_t written_serial_id;
-    struct vkd3d_view *view;
+    struct vkd3d_desc_header h;
+    VkDescriptorBufferInfo vk_cbv_info;
 };
 
 struct d3d12_desc
 {
-    uint32_t magic;
-    VkDescriptorType vk_descriptor_type;
-    union
+    struct
     {
-        VkDescriptorBufferInfo vk_cbv_info;
-        struct vkd3d_view_info view_info;
-    } u;
+        union d3d12_desc_object
+        {
+            struct vkd3d_desc_header *header;
+            struct vkd3d_view *view;
+            struct vkd3d_cbuffer_desc *cb_desc;
+            void *object;
+        } u;
+    } s;
+    unsigned int index;
+    unsigned int next;
 };
+
+void vkd3d_view_decref(void *view, struct d3d12_device *device);
+
+static inline bool vkd3d_view_incref(void *desc)
+{
+    struct vkd3d_desc_header *h = desc;
+    unsigned int refcount;
+
+    do
+    {
+        refcount = h->refcount;
+        /* Avoid incrementing a freed object. Reading the value is safe because objects are recycled. */
+        if (refcount <= 0)
+            return false;
+    }
+    while (!vkd3d_atomic_compare_exchange(&h->refcount, refcount, refcount + 1));
+
+    return true;
+}
+
+static inline void *d3d12_desc_get_object_ref(const volatile struct d3d12_desc *src, struct d3d12_device *device)
+{
+    void *view;
+
+    /* Some games, e.g. Shadow of the Tomb Raider, GRID 2019, and Horizon Zero Dawn, write descriptors
+     * from multiple threads without syncronisation. This is apparently valid in Windows. */
+    for (;;)
+    {
+        do
+        {
+            if (!(view = src->s.u.object))
+                return NULL;
+        } while (!vkd3d_view_incref(view));
+
+        /* Check if the object is still in src to handle the case where it was
+         * already freed and reused elsewhere when the refcount was incremented. */
+        if (view == src->s.u.object)
+            return view;
+
+        vkd3d_view_decref(view, device);
+    }
+}
 
 static inline struct d3d12_desc *d3d12_desc_from_cpu_handle(D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle)
 {
@@ -737,7 +939,15 @@ static inline struct d3d12_desc *d3d12_desc_from_gpu_handle(D3D12_GPU_DESCRIPTOR
     return (struct d3d12_desc *)(intptr_t)gpu_handle.ptr;
 }
 
-void d3d12_desc_copy(struct d3d12_desc *dst, const struct d3d12_desc *src, struct d3d12_device *device);
+static inline void d3d12_desc_copy_raw(struct d3d12_desc *dst, const struct d3d12_desc *src)
+{
+    dst->s = src->s;
+}
+
+struct d3d12_descriptor_heap;
+
+void d3d12_desc_copy(struct d3d12_desc *dst, const struct d3d12_desc *src, struct d3d12_descriptor_heap *dst_heap,
+        struct d3d12_device *device);
 void d3d12_desc_create_cbv(struct d3d12_desc *descriptor,
         struct d3d12_device *device, const D3D12_CONSTANT_BUFFER_VIEW_DESC *desc);
 void d3d12_desc_create_srv(struct d3d12_desc *descriptor,
@@ -750,13 +960,12 @@ void d3d12_desc_create_sampler(struct d3d12_desc *sampler, struct d3d12_device *
 void d3d12_desc_write_atomic(struct d3d12_desc *dst, const struct d3d12_desc *src, struct d3d12_device *device);
 
 bool vkd3d_create_raw_buffer_view(struct d3d12_device *device,
-        D3D12_GPU_VIRTUAL_ADDRESS gpu_address, VkBufferView *vk_buffer_view);
+        D3D12_GPU_VIRTUAL_ADDRESS gpu_address, D3D12_ROOT_PARAMETER_TYPE parameter_type, VkBufferView *vk_buffer_view);
 HRESULT vkd3d_create_static_sampler(struct d3d12_device *device,
         const D3D12_STATIC_SAMPLER_DESC *desc, VkSampler *vk_sampler);
 
 struct d3d12_rtv_desc
 {
-    uint32_t magic;
     VkSampleCountFlagBits sample_count;
     const struct vkd3d_format *format;
     uint64_t width;
@@ -776,7 +985,6 @@ void d3d12_rtv_desc_create_rtv(struct d3d12_rtv_desc *rtv_desc, struct d3d12_dev
 
 struct d3d12_dsv_desc
 {
-    uint32_t magic;
     VkSampleCountFlagBits sample_count;
     const struct vkd3d_format *format;
     uint64_t width;
@@ -826,15 +1034,10 @@ struct vkd3d_vk_descriptor_heap_layout
     VkDescriptorSetLayout vk_set_layout;
 };
 
-#define VKD3D_DESCRIPTOR_WRITE_BUFFER_SIZE 64
-
 struct d3d12_descriptor_heap_vk_set
 {
     VkDescriptorSet vk_set;
-    VkDescriptorBufferInfo vk_buffer_infos[VKD3D_DESCRIPTOR_WRITE_BUFFER_SIZE];
-    VkBufferView vk_buffer_views[VKD3D_DESCRIPTOR_WRITE_BUFFER_SIZE];
-    VkDescriptorImageInfo vk_image_infos[VKD3D_DESCRIPTOR_WRITE_BUFFER_SIZE];
-    VkWriteDescriptorSet vk_descriptor_writes[VKD3D_DESCRIPTOR_WRITE_BUFFER_SIZE];
+    VkDescriptorType vk_type;
 };
 
 /* ID3D12DescriptorHeap */
@@ -847,6 +1050,7 @@ struct d3d12_descriptor_heap
     D3D12_DESCRIPTOR_HEAP_DESC desc;
 
     struct d3d12_device *device;
+    bool use_vk_heaps;
 
     struct vkd3d_private_store private_store;
 
@@ -854,27 +1058,26 @@ struct d3d12_descriptor_heap
     struct d3d12_descriptor_heap_vk_set vk_descriptor_sets[VKD3D_SET_INDEX_COUNT];
     struct vkd3d_mutex vk_sets_mutex;
 
-    BYTE descriptors[];
+    unsigned int volatile dirty_list_head;
+
+    uint8_t DECLSPEC_ALIGN(sizeof(void *)) descriptors[];
 };
+
+void d3d12_desc_flush_vk_heap_updates_locked(struct d3d12_descriptor_heap *descriptor_heap, struct d3d12_device *device);
+
+static inline struct d3d12_descriptor_heap *d3d12_desc_get_descriptor_heap(const struct d3d12_desc *descriptor)
+{
+    return CONTAINING_RECORD(descriptor - descriptor->index, struct d3d12_descriptor_heap, descriptors);
+}
+
+static inline unsigned int d3d12_desc_heap_range_size(const struct d3d12_desc *descriptor)
+{
+    const struct d3d12_descriptor_heap *heap = d3d12_desc_get_descriptor_heap(descriptor);
+    return heap->desc.NumDescriptors - descriptor->index;
+}
 
 HRESULT d3d12_descriptor_heap_create(struct d3d12_device *device,
         const D3D12_DESCRIPTOR_HEAP_DESC *desc, struct d3d12_descriptor_heap **descriptor_heap);
-
-struct d3d12_desc_copy_location
-{
-    struct d3d12_desc src;
-    struct d3d12_desc *dst;
-};
-
-struct d3d12_desc_copy_info
-{
-    unsigned int count;
-    bool uav_counter;
-};
-
-void d3d12_desc_copy_vk_heap_range(struct d3d12_desc_copy_location *locations, const struct d3d12_desc_copy_info *info,
-        struct d3d12_descriptor_heap *descriptor_heap, enum vkd3d_vk_descriptor_set_index set,
-        struct d3d12_device *device);
 
 /* ID3D12QueryHeap */
 struct d3d12_query_heap
@@ -896,7 +1099,7 @@ HRESULT d3d12_query_heap_create(struct d3d12_device *device,
 struct d3d12_query_heap *unsafe_impl_from_ID3D12QueryHeap(ID3D12QueryHeap *iface);
 
 /* A Vulkan query has to be issued at least one time before the result is
- * available. In D3D12 it is legal to get query reults for not issued queries.
+ * available. In D3D12 it is legal to get query results for not issued queries.
  */
 static inline bool d3d12_query_heap_is_result_available(const struct d3d12_query_heap *heap,
         unsigned int query_index)
@@ -1114,10 +1317,38 @@ static inline bool d3d12_pipeline_state_has_unknown_dsv_format(struct d3d12_pipe
     return false;
 }
 
+struct d3d12_pipeline_state_desc
+{
+    ID3D12RootSignature *root_signature;
+    D3D12_SHADER_BYTECODE vs;
+    D3D12_SHADER_BYTECODE ps;
+    D3D12_SHADER_BYTECODE ds;
+    D3D12_SHADER_BYTECODE hs;
+    D3D12_SHADER_BYTECODE gs;
+    D3D12_SHADER_BYTECODE cs;
+    D3D12_STREAM_OUTPUT_DESC stream_output;
+    D3D12_BLEND_DESC blend_state;
+    unsigned int sample_mask;
+    D3D12_RASTERIZER_DESC rasterizer_state;
+    D3D12_DEPTH_STENCIL_DESC1 depth_stencil_state;
+    D3D12_INPUT_LAYOUT_DESC input_layout;
+    D3D12_INDEX_BUFFER_STRIP_CUT_VALUE strip_cut_value;
+    D3D12_PRIMITIVE_TOPOLOGY_TYPE primitive_topology_type;
+    struct D3D12_RT_FORMAT_ARRAY rtv_formats;
+    DXGI_FORMAT dsv_format;
+    DXGI_SAMPLE_DESC sample_desc;
+    D3D12_VIEW_INSTANCING_DESC view_instancing_desc;
+    unsigned int node_mask;
+    D3D12_CACHED_PIPELINE_STATE cached_pso;
+    D3D12_PIPELINE_STATE_FLAGS flags;
+};
+
 HRESULT d3d12_pipeline_state_create_compute(struct d3d12_device *device,
         const D3D12_COMPUTE_PIPELINE_STATE_DESC *desc, struct d3d12_pipeline_state **state);
 HRESULT d3d12_pipeline_state_create_graphics(struct d3d12_device *device,
         const D3D12_GRAPHICS_PIPELINE_STATE_DESC *desc, struct d3d12_pipeline_state **state);
+HRESULT d3d12_pipeline_state_create(struct d3d12_device *device,
+        const D3D12_PIPELINE_STATE_STREAM_DESC *desc, struct d3d12_pipeline_state **state);
 VkPipeline d3d12_pipeline_state_get_or_create_pipeline(struct d3d12_pipeline_state *state,
         D3D12_PRIMITIVE_TOPOLOGY topology, const uint32_t *strides, VkFormat dsv_format, VkRenderPass *vk_render_pass);
 struct d3d12_pipeline_state *unsafe_impl_from_ID3D12PipelineState(ID3D12PipelineState *iface);
@@ -1232,7 +1463,7 @@ enum vkd3d_pipeline_bind_point
 /* ID3D12CommandList */
 struct d3d12_command_list
 {
-    ID3D12GraphicsCommandList2 ID3D12GraphicsCommandList2_iface;
+    ID3D12GraphicsCommandList5 ID3D12GraphicsCommandList5_iface;
     LONG refcount;
 
     D3D12_COMMAND_LIST_TYPE type;
@@ -1273,6 +1504,8 @@ struct d3d12_command_list
     VkDeviceSize so_counter_buffer_offsets[D3D12_SO_BUFFER_SLOT_COUNT];
 
     void (*update_descriptors)(struct d3d12_command_list *list, enum vkd3d_pipeline_bind_point bind_point);
+    struct d3d12_descriptor_heap *descriptor_heaps[64];
+    unsigned int descriptor_heap_count;
 
     struct vkd3d_private_store private_store;
 };
@@ -1317,6 +1550,8 @@ enum vkd3d_cs_op
     VKD3D_CS_OP_WAIT,
     VKD3D_CS_OP_SIGNAL,
     VKD3D_CS_OP_EXECUTE,
+    VKD3D_CS_OP_UPDATE_MAPPINGS,
+    VKD3D_CS_OP_COPY_MAPPINGS,
 };
 
 struct vkd3d_cs_wait
@@ -1337,6 +1572,30 @@ struct vkd3d_cs_execute
     unsigned int buffer_count;
 };
 
+struct vkd3d_cs_update_mappings
+{
+    struct d3d12_resource *resource;
+    struct d3d12_heap *heap;
+    D3D12_TILED_RESOURCE_COORDINATE *region_start_coordinates;
+    D3D12_TILE_REGION_SIZE *region_sizes;
+    D3D12_TILE_RANGE_FLAGS *range_flags;
+    UINT *heap_range_offsets;
+    UINT *range_tile_counts;
+    UINT region_count;
+    UINT range_count;
+    D3D12_TILE_MAPPING_FLAGS flags;
+};
+
+struct vkd3d_cs_copy_mappings
+{
+    struct d3d12_resource *dst_resource;
+    struct d3d12_resource *src_resource;
+    D3D12_TILED_RESOURCE_COORDINATE dst_region_start_coordinate;
+    D3D12_TILED_RESOURCE_COORDINATE src_region_start_coordinate;
+    D3D12_TILE_REGION_SIZE region_size;
+    D3D12_TILE_MAPPING_FLAGS flags;
+};
+
 struct vkd3d_cs_op_data
 {
     enum vkd3d_cs_op opcode;
@@ -1345,7 +1604,16 @@ struct vkd3d_cs_op_data
         struct vkd3d_cs_wait wait;
         struct vkd3d_cs_signal signal;
         struct vkd3d_cs_execute execute;
+        struct vkd3d_cs_update_mappings update_mappings;
+        struct vkd3d_cs_copy_mappings copy_mappings;
     } u;
+};
+
+struct d3d12_command_queue_op_array
+{
+    struct vkd3d_cs_op_data *ops;
+    size_t count;
+    size_t size;
 };
 
 /* ID3D12CommandQueue */
@@ -1365,10 +1633,17 @@ struct d3d12_command_queue
     struct d3d12_device *device;
 
     struct vkd3d_mutex op_mutex;
-    struct vkd3d_cs_op_data *ops;
-    size_t ops_count;
-    size_t ops_size;
+
+    /* These fields are protected by op_mutex. */
+    struct d3d12_command_queue_op_array op_queue;
     bool is_flushing;
+
+    /* This field is not protected by op_mutex, but can only be used
+     * by the thread that set is_flushing; when is_flushing is not
+     * set, aux_op_queue.count must be zero. */
+    struct d3d12_command_queue_op_array aux_op_queue;
+
+    bool supports_sparse_binding;
 
     struct vkd3d_private_store private_store;
 };
@@ -1381,6 +1656,7 @@ struct d3d12_command_signature
 {
     ID3D12CommandSignature ID3D12CommandSignature_iface;
     LONG refcount;
+    unsigned int internal_refcount;
 
     D3D12_COMMAND_SIGNATURE_DESC desc;
 
@@ -1451,12 +1727,26 @@ struct vkd3d_uav_clear_state
 HRESULT vkd3d_uav_clear_state_init(struct vkd3d_uav_clear_state *state, struct d3d12_device *device);
 void vkd3d_uav_clear_state_cleanup(struct vkd3d_uav_clear_state *state, struct d3d12_device *device);
 
+struct desc_object_cache_head
+{
+    void *head;
+    unsigned int spinlock;
+};
+
+struct vkd3d_desc_object_cache
+{
+    struct desc_object_cache_head heads[16];
+    unsigned int next_index;
+    unsigned int free_count;
+    size_t size;
+};
+
 #define VKD3D_DESCRIPTOR_POOL_COUNT 6
 
 /* ID3D12Device */
 struct d3d12_device
 {
-    ID3D12Device ID3D12Device_iface;
+    ID3D12Device5 ID3D12Device5_iface;
     LONG refcount;
 
     VkDevice vk_device;
@@ -1465,11 +1755,11 @@ struct d3d12_device
     PFN_vkd3d_signal_event signal_event;
     size_t wchar_size;
 
-    struct vkd3d_gpu_descriptor_allocator gpu_descriptor_allocator;
     struct vkd3d_gpu_va_allocator gpu_va_allocator;
 
     struct vkd3d_mutex mutex;
-    struct vkd3d_mutex desc_mutex[8];
+    struct vkd3d_desc_object_cache view_desc_cache;
+    struct vkd3d_desc_object_cache cbuffer_desc_cache;
     struct vkd3d_render_pass_cache render_pass_cache;
     VkPipelineCache vk_pipeline_cache;
 
@@ -1491,6 +1781,7 @@ struct d3d12_device
     unsigned int queue_family_count;
     VkTimeDomainEXT vk_host_time_domain;
 
+    struct vkd3d_mutex blocked_queues_mutex;
     struct d3d12_command_queue *blocked_queues[VKD3D_MAX_DEVICE_BLOCKED_QUEUES];
     unsigned int blocked_queue_count;
 
@@ -1510,6 +1801,7 @@ struct d3d12_device
     struct vkd3d_uav_clear_state uav_clear_state;
 
     VkDescriptorPoolSize vk_pool_sizes[VKD3D_DESCRIPTOR_POOL_COUNT];
+    unsigned int vk_pool_count;
     struct vkd3d_vk_descriptor_heap_layout vk_descriptor_heap_layouts[VKD3D_SET_INDEX_COUNT];
     bool use_vk_heaps;
 };
@@ -1520,40 +1812,27 @@ struct vkd3d_queue *d3d12_device_get_vkd3d_queue(struct d3d12_device *device, D3
 bool d3d12_device_is_uma(struct d3d12_device *device, bool *coherent);
 void d3d12_device_mark_as_removed(struct d3d12_device *device, HRESULT reason,
         const char *message, ...) VKD3D_PRINTF_FUNC(3, 4);
-struct d3d12_device *unsafe_impl_from_ID3D12Device(ID3D12Device *iface);
+struct d3d12_device *unsafe_impl_from_ID3D12Device5(ID3D12Device5 *iface);
 
 static inline HRESULT d3d12_device_query_interface(struct d3d12_device *device, REFIID iid, void **object)
 {
-    return ID3D12Device_QueryInterface(&device->ID3D12Device_iface, iid, object);
+    return ID3D12Device5_QueryInterface(&device->ID3D12Device5_iface, iid, object);
 }
 
 static inline ULONG d3d12_device_add_ref(struct d3d12_device *device)
 {
-    return ID3D12Device_AddRef(&device->ID3D12Device_iface);
+    return ID3D12Device5_AddRef(&device->ID3D12Device5_iface);
 }
 
 static inline ULONG d3d12_device_release(struct d3d12_device *device)
 {
-    return ID3D12Device_Release(&device->ID3D12Device_iface);
+    return ID3D12Device5_Release(&device->ID3D12Device5_iface);
 }
 
 static inline unsigned int d3d12_device_get_descriptor_handle_increment_size(struct d3d12_device *device,
         D3D12_DESCRIPTOR_HEAP_TYPE descriptor_type)
 {
-    return ID3D12Device_GetDescriptorHandleIncrementSize(&device->ID3D12Device_iface, descriptor_type);
-}
-
-static inline struct vkd3d_mutex *d3d12_device_get_descriptor_mutex(struct d3d12_device *device,
-        const struct d3d12_desc *descriptor)
-{
-    STATIC_ASSERT(!(ARRAY_SIZE(device->desc_mutex) & (ARRAY_SIZE(device->desc_mutex) - 1)));
-    uintptr_t idx = (uintptr_t)descriptor;
-
-    idx ^= idx >> 12;
-    idx ^= idx >> 6;
-    idx ^= idx >> 3;
-
-    return &device->desc_mutex[idx & (ARRAY_SIZE(device->desc_mutex) - 1)];
+    return ID3D12Device5_GetDescriptorHandleIncrementSize(&device->ID3D12Device5_iface, descriptor_type);
 }
 
 /* utils */

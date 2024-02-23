@@ -562,7 +562,7 @@ static void test_get_adapter_displaymode_ex(void)
 
     devmode = startmode;
     devmode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT;
-    S2(U1(devmode)).dmDisplayOrientation = DMDO_180;
+    devmode.dmDisplayOrientation = DMDO_180;
     retval = ChangeDisplaySettingsExW(NULL, &devmode, NULL, 0, NULL);
     if (retval == DISP_CHANGE_BADMODE)
     {
@@ -573,7 +573,7 @@ static void test_get_adapter_displaymode_ex(void)
     ok(retval == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsEx failed with %ld.\n", retval);
     /* try retrieve orientation info with EnumDisplaySettingsEx*/
     devmode.dmFields = 0;
-    S2(U1(devmode)).dmDisplayOrientation = 0;
+    devmode.dmDisplayOrientation = 0;
     ok(EnumDisplaySettingsExW(NULL, ENUM_CURRENT_SETTINGS, &devmode, EDS_ROTATEDMODE),
             "EnumDisplaySettingsEx failed.\n");
 
@@ -605,8 +605,8 @@ static void test_get_adapter_displaymode_ex(void)
     ok(mode_ex.ScanLineOrdering != 0, "ScanLineOrdering returned 0\n");
     /* Check that orientation is returned correctly by GetAdapterDisplayModeEx
      * and EnumDisplaySettingsEx(). */
-    ok(S2(U1(devmode)).dmDisplayOrientation == DMDO_180 && rotation == D3DDISPLAYROTATION_180,
-            "rotation is %d instead of %ld\n", rotation, S2(U1(devmode)).dmDisplayOrientation);
+    ok(devmode.dmDisplayOrientation == DMDO_180 && rotation == D3DDISPLAYROTATION_180,
+            "rotation is %d instead of %ld\n", rotation, devmode.dmDisplayOrientation);
 
     trace("GetAdapterDisplayModeEx returned Width = %d, Height = %d, RefreshRate = %d, Format = %x, ScanLineOrdering = %x, rotation = %d\n",
           mode_ex.Width, mode_ex.Height, mode_ex.RefreshRate, mode_ex.Format, mode_ex.ScanLineOrdering, rotation);
@@ -752,7 +752,7 @@ static void test_user_memory(void)
     hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
     ok(SUCCEEDED(hr), "Failed to get caps, hr %#lx.\n", hr);
 
-    mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 128 * 128 * 4);
+    mem = calloc(128 * 128, 4);
     hr = IDirect3DDevice9Ex_CreateTexture(device, 128, 128, 0, 0, D3DFMT_A8R8G8B8,
             D3DPOOL_SYSTEMMEM, &texture, &mem);
     ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#lx.\n", hr);
@@ -877,7 +877,7 @@ static void test_user_memory(void)
     ok(SUCCEEDED(hr), "Failed to set texture, hr %#lx.\n", hr);
     IDirect3DTexture9_Release(texture2);
     IDirect3DTexture9_Release(texture);
-    HeapFree(GetProcessHeap(), 0, mem);
+    free(mem);
     refcount = IDirect3DDevice9Ex_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
 
@@ -942,7 +942,7 @@ static void test_reset(void)
 
     IDirect3D9_GetAdapterDisplayMode(d3d9, D3DADAPTER_DEFAULT, &d3ddm);
     adapter_mode_count = IDirect3D9_GetAdapterModeCount(d3d9, D3DADAPTER_DEFAULT, d3ddm.Format);
-    modes = HeapAlloc(GetProcessHeap(), 0, sizeof(*modes) * adapter_mode_count);
+    modes = malloc(sizeof(*modes) * adapter_mode_count);
     for (i = 0; i < adapter_mode_count; ++i)
     {
         UINT j;
@@ -1410,7 +1410,7 @@ static void test_reset(void)
     d3dpp.AutoDepthStencilFormat = D3DFMT_D24S8;
 
 cleanup:
-    HeapFree(GetProcessHeap(), 0, modes);
+    free(modes);
     IDirect3D9_Release(d3d9);
     refcount = IDirect3DDevice9Ex_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
@@ -1456,7 +1456,7 @@ static void test_reset_ex(void)
     mode_filter.Size = sizeof(mode_filter);
     mode_filter.Format = mode.Format;
     adapter_mode_count = IDirect3D9Ex_GetAdapterModeCountEx(d3d9, D3DADAPTER_DEFAULT, &mode_filter);
-    modes = HeapAlloc(GetProcessHeap(), 0, sizeof(*modes) * adapter_mode_count);
+    modes = malloc(sizeof(*modes) * adapter_mode_count);
     for (i = 0; i < adapter_mode_count; ++i)
     {
         unsigned int j;
@@ -1833,7 +1833,7 @@ static void test_reset_ex(void)
     IDirect3DSwapChain9_Release(swapchain);
 
 cleanup:
-    HeapFree(GetProcessHeap(), 0, modes);
+    free(modes);
     IDirect3D9Ex_Release(d3d9);
     refcount = IDirect3DDevice9Ex_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
@@ -1975,7 +1975,7 @@ static void test_user_memory_getdc(void)
         goto done;
     }
 
-    data = HeapAlloc(GetProcessHeap(), 0, sizeof(*data) * 16 * 16);
+    data = malloc(sizeof(*data) * 16 * 16);
     memset(data, 0xaa, sizeof(*data) * 16 * 16);
     hr = IDirect3DDevice9Ex_CreateOffscreenPlainSurface(device, 16, 16,
             D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surface, (HANDLE *)&data);
@@ -1997,7 +1997,7 @@ static void test_user_memory_getdc(void)
     ok(data[8 * 16] == 0x00000000, "Expected color 0x00000000, got %#x.\n", data[8 * 16]);
 
     IDirect3DSurface9_Release(surface);
-    HeapFree(GetProcessHeap(), 0, data);
+    free(data);
 
     ref = IDirect3DDevice9_Release(device);
     ok(!ref, "Unexpected refcount %lu.\n", ref);
@@ -3013,14 +3013,42 @@ static void test_wndproc(void)
         SetForegroundWindow(GetDesktopWindow());
         ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it, i=%u.\n",
                 expect_messages->message, expect_messages->window, i);
+
+        /* kwin sometimes resizes hidden windows. */
+        flaky
         ok(!windowposchanged_received, "Received WM_WINDOWPOSCHANGED but did not expect it, i=%u.\n", i);
+
         expect_messages = NULL;
-        flush_events();
 
         ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
         ok(ret, "Failed to get display mode.\n");
         ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth, "Got unexpected width %lu.\n", devmode.dmPelsWidth);
         ok(devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpected height %lu.\n", devmode.dmPelsHeight);
+
+        flush_events();
+
+        /* Openbox accidentally sets focus to the device window, causing WM_ACTIVATEAPP to be sent to the focus
+         * window. d3d9ex then restores the screen mode. This only happens in the D3DCREATE_NOWINDOWCHANGES case.
+         *
+         * This appears to be a race condition - it goes away if openbox is started with --sync. d3d9:device and
+         * d3d8:device are affected too, but because in their case d3d does not automatically restore the screen
+         * mode (it needs a call to device::Reset), the EnumDisplaySettings check succeeds regardless.
+         *
+         * Note that this is not a case of focus follows mouse. This happens when Openbox is configured to use
+         * click to focus too. */
+        if (GetForegroundWindow() == device_window)
+        {
+            skip("WM set focus to the device window, not checking screen mode.\n");
+        }
+        else
+        {
+            ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+            ok(ret, "Failed to get display mode.\n");
+            ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth,
+                    "Got unexpected width %lu.\n", devmode.dmPelsWidth);
+            ok(devmode.dmPelsHeight == registry_mode.dmPelsHeight,
+                    "Got unexpected height %lu.\n", devmode.dmPelsHeight);
+        }
 
         /* SW_SHOWMINNOACTIVE is needed to make FVWM happy. SW_SHOWNOACTIVATE is needed to make windows
          * send SIZE_RESTORED after ShowWindow(SW_SHOWMINNOACTIVE). */
@@ -3097,8 +3125,11 @@ static void test_wndproc(void)
         flaky_wine
         ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it, i=%u.\n",
                 expect_messages->message, expect_messages->window, i);
-        flaky_if(i == 0 || i == 1)
+
+        /* kwin and Win8+ sometimes resize hidden windows. */
+        flaky
         ok(!windowposchanged_received, "Received WM_WINDOWPOSCHANGED but did not expect it, i=%u.\n", i);
+
         expect_messages = NULL;
 
         /* The window is iconic even though no message was sent. */
@@ -3655,6 +3686,7 @@ static void test_swapchain_parameters(void)
 {
     IDirect3DDevice9Ex *device;
     IDirect3D9Ex *d3d9ex;
+    RECT client_rect;
     HWND window;
     HRESULT hr;
     unsigned int i;
@@ -3806,6 +3838,39 @@ static void test_swapchain_parameters(void)
         IDirect3DDevice9Ex_Release(device);
     }
 
+    memset(&present_parameters, 0, sizeof(present_parameters));
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    present_parameters.Windowed = TRUE;
+    present_parameters.BackBufferWidth = 0;
+    present_parameters.BackBufferHeight = 0;
+    present_parameters.BackBufferFormat = D3DFMT_UNKNOWN;
+
+    GetClientRect(window, &client_rect);
+
+    hr = IDirect3D9Ex_CreateDeviceEx(d3d9ex, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            window, D3DCREATE_SOFTWARE_VERTEXPROCESSING,
+            &present_parameters, NULL, &device);
+
+    ok(present_parameters.BackBufferWidth == client_rect.right, "Got unexpected BackBufferWidth %u, expected %ld.\n",
+            present_parameters.BackBufferWidth, client_rect.right);
+    ok(present_parameters.BackBufferHeight == client_rect.bottom, "Got unexpected BackBufferHeight %u, expected %ld.\n",
+            present_parameters.BackBufferHeight, client_rect.bottom);
+    ok(present_parameters.BackBufferFormat != D3DFMT_UNKNOWN, "Got unexpected BackBufferFormat %#x.\n",
+            present_parameters.BackBufferFormat);
+    ok(present_parameters.BackBufferCount == 1, "Got unexpected BackBufferCount %u.\n", present_parameters.BackBufferCount);
+    ok(!present_parameters.MultiSampleType, "Got unexpected MultiSampleType %u.\n", present_parameters.MultiSampleType);
+    ok(!present_parameters.MultiSampleQuality, "Got unexpected MultiSampleQuality %lu.\n", present_parameters.MultiSampleQuality);
+    ok(present_parameters.SwapEffect == D3DSWAPEFFECT_DISCARD, "Got unexpected SwapEffect %#x.\n", present_parameters.SwapEffect);
+    ok(!present_parameters.hDeviceWindow, "Got unexpected hDeviceWindow %p.\n", present_parameters.hDeviceWindow);
+    ok(present_parameters.Windowed, "Got unexpected Windowed %#x.\n", present_parameters.Windowed);
+    ok(!present_parameters.EnableAutoDepthStencil, "Got unexpected EnableAutoDepthStencil %#x.\n", present_parameters.EnableAutoDepthStencil);
+    ok(!present_parameters.AutoDepthStencilFormat, "Got unexpected AutoDepthStencilFormat %#x.\n", present_parameters.AutoDepthStencilFormat);
+    ok(!present_parameters.Flags, "Got unexpected Flags %#lx.\n", present_parameters.Flags);
+    ok(!present_parameters.FullScreen_RefreshRateInHz, "Got unexpected FullScreen_RefreshRateInHz %u.\n",
+            present_parameters.FullScreen_RefreshRateInHz);
+    ok(!present_parameters.PresentationInterval, "Got unexpected PresentationInterval %#x.\n", present_parameters.PresentationInterval);
+    IDirect3DDevice9Ex_Release(device);
+
     IDirect3D9Ex_Release(d3d9ex);
     DestroyWindow(window);
 }
@@ -3813,9 +3878,11 @@ static void test_swapchain_parameters(void)
 static void test_backbuffer_resize(void)
 {
     D3DPRESENT_PARAMETERS present_parameters = {0};
+    IDirect3DSwapChain9 *swapchain, *old_swapchain;
     IDirect3DSurface9 *backbuffer, *old_backbuffer;
+    IDirect3DDevice9Ex *device, *device2;
+    IDirect3DBaseTexture9 *texture;
     D3DSURFACE_DESC surface_desc;
-    IDirect3DDevice9Ex *device;
     unsigned int color;
     ULONG refcount;
     HWND window;
@@ -3861,6 +3928,16 @@ static void test_backbuffer_resize(void)
     color = get_pixel_color(device, 1, 1);
     ok(color == 0x00ff0000, "Got unexpected color 0x%08x.\n", color);
 
+    hr = IDirect3DDevice9_GetSwapChain(device, 0, &old_swapchain);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirect3DSurface9_GetContainer(backbuffer, &IID_IDirect3DSwapChain9, (void **)&swapchain);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(swapchain == old_swapchain, "Swapchains didn't match.\n");
+    IDirect3DSwapChain9_Release(swapchain);
+    hr = IDirect3DSurface9_GetContainer(backbuffer, &IID_IDirect3DDevice9, (void **)&device2);
+    ok(hr == E_NOINTERFACE, "Got hr %#lx.\n", hr);
+
     present_parameters.BackBufferWidth = 800;
     present_parameters.BackBufferHeight = 600;
     present_parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
@@ -3875,14 +3952,30 @@ static void test_backbuffer_resize(void)
     old_backbuffer = backbuffer;
     hr = IDirect3DSurface9_GetDesc(old_backbuffer, &surface_desc);
     ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#lx.\n", hr);
-    todo_wine ok(surface_desc.Width == 640, "Got unexpected width %u.\n", surface_desc.Width);
-    todo_wine ok(surface_desc.Height == 480, "Got unexpected height %u.\n", surface_desc.Height);
+    ok(surface_desc.Width == 640, "Got unexpected width %u.\n", surface_desc.Width);
+    ok(surface_desc.Height == 480, "Got unexpected height %u.\n", surface_desc.Height);
+
+    hr = IDirect3DDevice9_GetSwapChain(device, 0, &swapchain);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(swapchain == old_swapchain, "Swapchains didn't match.\n");
+    IDirect3DSwapChain9_Release(swapchain);
+    IDirect3DSwapChain9_Release(old_swapchain);
+
+    hr = IDirect3DSurface9_GetContainer(old_backbuffer, &IID_IDirect3DSwapChain9, (void **)&swapchain);
+    ok(hr == E_NOINTERFACE, "Got hr %#lx.\n", hr);
+    hr = IDirect3DSurface9_GetContainer(old_backbuffer, &IID_IDirect3DBaseTexture9, (void **)&texture);
+    ok(hr == E_NOINTERFACE, "Got hr %#lx.\n", hr);
+    hr = IDirect3DSurface9_GetContainer(old_backbuffer, &IID_IDirect3DDevice9, (void **)&device2);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(device2 == device, "Devices didn't match.\n");
+    IDirect3DDevice9_Release(device2);
+
     refcount = IDirect3DSurface9_Release(old_backbuffer);
     ok(!refcount, "Surface has %lu references left.\n", refcount);
 
     hr = IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer);
     ok(SUCCEEDED(hr), "Failed to get backbuffer, hr %#lx.\n", hr);
-    todo_wine ok(backbuffer != old_backbuffer, "Expected new backbuffer surface.\n");
+    ok(backbuffer != old_backbuffer, "Expected new backbuffer surface.\n");
 
     hr = IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
     ok(SUCCEEDED(hr), "Failed to set render target, hr %#lx.\n", hr);

@@ -989,15 +989,7 @@ DWORD WINAPIV SSCall(
 	FARPROC fun,	/* [in] function to call */
 	...		/* [in/out] arguments */
 ) {
-    DWORD i,ret;
-    DWORD *args = ((DWORD *)&fun) + 1;
-
-    TRACE("(%ld,0x%08lx,%p,[",nr,flags,fun);
-    for (i = 0; i < nr/4; i++) TRACE("0x%08lx,",args[i]);
-    TRACE("])\n");
-    ret = call_entry_point( fun, nr / sizeof(DWORD), args );
-    TRACE(" returning %ld ...\n",ret);
-    return ret;
+    return call_entry_point( fun, nr / sizeof(DWORD), (DWORD *)&fun + 1 );
 }
 
 /**********************************************************************
@@ -2242,7 +2234,7 @@ LPVOID WINAPI GetPK16SysVar(void)
 /**********************************************************************
  *           CommonUnimpStub    (KERNEL32.17)
  */
-int WINAPI DECLSPEC_HIDDEN __regs_CommonUnimpStub( const char *name, int type )
+int WINAPI __regs_CommonUnimpStub( const char *name, int type )
 {
     FIXME("generic stub %s\n", debugstr_a(name));
 

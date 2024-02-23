@@ -18,6 +18,8 @@
  */
 
 #include "wined3d_private.h"
+#include "wined3d_gl.h"
+#include "wined3d_vk.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
@@ -133,7 +135,7 @@ void wined3d_sampler_gl_init(struct wined3d_sampler_gl *sampler_gl, struct wined
 
     wined3d_sampler_init(&sampler_gl->s, device, desc, parent, parent_ops);
 
-    if (device->adapter->gl_info.supported[ARB_SAMPLER_OBJECTS])
+    if (wined3d_adapter_gl(device->adapter)->gl_info.supported[ARB_SAMPLER_OBJECTS])
         wined3d_cs_init_object(device->cs, wined3d_sampler_gl_cs_init, sampler_gl);
 }
 
@@ -305,24 +307,12 @@ static void texture_gl_apply_base_level(struct wined3d_texture_gl *texture_gl,
         const struct wined3d_sampler_desc *desc, const struct wined3d_gl_info *gl_info)
 {
     struct gl_texture *gl_tex;
-    unsigned int base_level;
-
-    if (texture_gl->t.flags & WINED3D_TEXTURE_COND_NP2)
-        base_level = 0;
-    else if (desc->mip_filter == WINED3D_TEXF_NONE)
-        base_level = texture_gl->t.lod;
-    else
-        base_level = min(max(desc->mip_base_level, texture_gl->t.lod), texture_gl->t.level_count - 1);
 
     gl_tex = wined3d_texture_gl_get_gl_texture(texture_gl, texture_gl->t.flags & WINED3D_TEXTURE_IS_SRGB);
-    if (base_level != gl_tex->base_level)
+    if (desc->mip_base_level != gl_tex->sampler_desc.mip_base_level)
     {
-        /* Note that WINED3D_SAMP_MAX_MIP_LEVEL specifies the largest mipmap
-         * (default 0), while GL_TEXTURE_MAX_LEVEL specifies the smallest
-         * mipmap used (default 1000). So WINED3D_SAMP_MAX_MIP_LEVEL
-         * corresponds to GL_TEXTURE_BASE_LEVEL. */
-        gl_info->gl_ops.gl.p_glTexParameteri(texture_gl->target, GL_TEXTURE_BASE_LEVEL, base_level);
-        gl_tex->base_level = base_level;
+        gl_info->gl_ops.gl.p_glTexParameteri(texture_gl->target, GL_TEXTURE_BASE_LEVEL, desc->mip_base_level);
+        gl_tex->sampler_desc.mip_base_level = desc->mip_base_level;
     }
 }
 

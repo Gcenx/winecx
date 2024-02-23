@@ -19,8 +19,6 @@
 #ifndef __WINE_DLLS_DDRAWEX_DDRAWEX_PRIVATE_H
 #define __WINE_DLLS_DDRAWEX_DDRAWEX_PRIVATE_H
 
-#include "wine/heap.h"
-
 DEFINE_GUID(CLSID_DirectDrawFactory, 0x4fd2a832, 0x86c8, 0x11d0, 0x8f, 0xca, 0x0, 0xc0, 0x4f, 0xd9, 0x18, 0x9d);
 DEFINE_GUID(IID_IDirectDrawFactory, 0x4fd2a833, 0x86c8, 0x11d0, 0x8f, 0xca, 0x0, 0xc0, 0x4f, 0xd9, 0x18, 0x9d);
 
@@ -48,10 +46,10 @@ DECLARE_INTERFACE_(IDirectDrawFactory, IUnknown)
 
 HRESULT WINAPI ddrawex_factory_CreateDirectDraw(IDirectDrawFactory *iface,
     GUID *guid, HWND window, DWORD coop_level, DWORD reserved, IUnknown *outer_unknown,
-    IDirectDraw **ddraw) DECLSPEC_HIDDEN;
+    IDirectDraw **ddraw);
 
-void DDSD_to_DDSD2(const DDSURFACEDESC *in, DDSURFACEDESC2 *out) DECLSPEC_HIDDEN;
-void DDSD2_to_DDSD(const DDSURFACEDESC2 *in, DDSURFACEDESC *out) DECLSPEC_HIDDEN;
+void DDSD_to_DDSD2(const DDSURFACEDESC *in, DDSURFACEDESC2 *out);
+void DDSD2_to_DDSD(const DDSURFACEDESC2 *in, DDSURFACEDESC *out);
 
 struct ddrawex
 {
@@ -65,8 +63,8 @@ struct ddrawex
     IDirectDraw4 *parent;
 };
 
-IDirectDraw4 *dd_get_outer(IDirectDraw4 *inner) DECLSPEC_HIDDEN;
-IDirectDraw4 *dd_get_inner(IDirectDraw4 *outer) DECLSPEC_HIDDEN;
+IDirectDraw4 *dd_get_outer(IDirectDraw4 *inner);
+IDirectDraw4 *dd_get_inner(IDirectDraw4 *outer);
 
 struct ddrawex_surface
 {
@@ -84,8 +82,8 @@ struct ddrawex_surface
 #define IID_DDrawexPriv IID_IDirectDrawSurface4
 };
 
-struct ddrawex_surface *unsafe_impl_from_IDirectDrawSurface4(IDirectDrawSurface4 *iface) DECLSPEC_HIDDEN;
-IDirectDrawSurface4 *dds_get_outer(IDirectDrawSurface4 *inner) DECLSPEC_HIDDEN;
-HRESULT prepare_permanent_dc(IDirectDrawSurface4 *iface) DECLSPEC_HIDDEN;
+struct ddrawex_surface *unsafe_impl_from_IDirectDrawSurface4(IDirectDrawSurface4 *iface);
+IDirectDrawSurface4 *dds_get_outer(IDirectDrawSurface4 *inner);
+HRESULT prepare_permanent_dc(IDirectDrawSurface4 *iface);
 
 #endif /* __WINE_DLLS_DDRAWEX_DDRAWEX_PRIVATE_H */

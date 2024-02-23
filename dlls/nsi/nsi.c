@@ -30,9 +30,38 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(nsi);
 
-static inline HANDLE get_nsi_device( void )
+static HANDLE nsi_device = INVALID_HANDLE_VALUE;
+static HANDLE nsi_device_async = INVALID_HANDLE_VALUE;
+
+BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
 {
-    return CreateFileW( L"\\\\.\\Nsi", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
+    switch (reason)
+    {
+        case DLL_PROCESS_ATTACH:
+            DisableThreadLibraryCalls( hinst );
+            break;
+        case DLL_PROCESS_DETACH:
+            if (nsi_device != INVALID_HANDLE_VALUE) CloseHandle( nsi_device );
+            if (nsi_device_async != INVALID_HANDLE_VALUE) CloseHandle( nsi_device_async );
+            break;
+    }
+    return TRUE;
+}
+
+static inline HANDLE get_nsi_device( BOOL async )
+{
+    HANDLE *cached_device = async ? &nsi_device_async : &nsi_device;
+    HANDLE device;
+
+    if (*cached_device == INVALID_HANDLE_VALUE)
+    {
+        device = CreateFileW( L"\\\\.\\Nsi", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                              async ? FILE_FLAG_OVERLAPPED : 0, NULL );
+        if (device != INVALID_HANDLE_VALUE
+            && InterlockedCompareExchangePointer( cached_device, device, INVALID_HANDLE_VALUE ) != INVALID_HANDLE_VALUE)
+            CloseHandle( device );
+    }
+    return *cached_device;
 }
 
 DWORD WINAPI NsiAllocateAndGetTable( DWORD unk, const NPI_MODULEID *module, DWORD table, void **key_data, DWORD key_size,
@@ -88,6 +117,19 @@ err:
     return err;
 }
 
+DWORD WINAPI NsiCancelChangeNotification( OVERLAPPED *ovr )
+{
+    DWORD err = ERROR_SUCCESS;
+
+    TRACE( "%p.\n", ovr );
+
+    if (!ovr) return ERROR_NOT_FOUND;
+    if (!CancelIoEx(  get_nsi_device( TRUE ), ovr ))
+        err = GetLastError();
+
+    return err;
+}
+
 DWORD WINAPI NsiEnumerateObjectsAllParameters( DWORD unk, DWORD unk2, const NPI_MODULEID *module, DWORD table,
                                                void *key_data, DWORD key_size, void *rw_data, DWORD rw_size,
                                                void *dynamic_data, DWORD dynamic_size, void *static_data, DWORD static_size,
@@ -123,7 +165,7 @@ DWORD WINAPI NsiEnumerateObjectsAllParameters( DWORD unk, DWORD unk2, const NPI_
 DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *params )
 {
     DWORD out_size, received, err = ERROR_SUCCESS;
-    HANDLE device = get_nsi_device();
+    HANDLE device = get_nsi_device( FALSE );
     struct nsiproxy_enumerate_all in;
     BYTE *out, *ptr;
 
@@ -132,12 +174,8 @@ DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *pa
     out_size = sizeof(DWORD) +
         (params->key_size + params->rw_size + params->dynamic_size + params->static_size) * params->count;
 
-    out = heap_alloc( out_size );
-    if (!out)
-    {
-        CloseHandle( device );
-        return ERROR_OUTOFMEMORY;
-    }
+    out = malloc( out_size );
+    if (!out) return ERROR_OUTOFMEMORY;
 
     in.module = *params->module;
     in.first_arg = params->first_arg;
@@ -164,8 +202,7 @@ DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *pa
         if (params->static_size) memcpy( params->static_data, ptr, params->static_size * params->count );
     }
 
-    heap_free( out );
-    CloseHandle( device );
+    free( out );
 
     return err;
 }
@@ -208,7 +245,7 @@ DWORD WINAPI NsiGetAllParameters( DWORD unk, const NPI_MODULEID *module, DWORD t
 
 DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
 {
-    HANDLE device = get_nsi_device();
+    HANDLE device = get_nsi_device( FALSE );
     struct nsiproxy_get_all_parameters *in;
     ULONG in_size = FIELD_OFFSET( struct nsiproxy_get_all_parameters, key[params->key_size] ), received;
     ULONG out_size = params->rw_size + params->dynamic_size + params->static_size;
@@ -217,8 +254,8 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
 
     if (device == INVALID_HANDLE_VALUE) return GetLastError();
 
-    in = heap_alloc( in_size );
-    out = heap_alloc( out_size );
+    in = malloc( in_size );
+    out = malloc( out_size );
     if (!in || !out)
     {
         err = ERROR_OUTOFMEMORY;
@@ -247,9 +284,8 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
     }
 
 err:
-    heap_free( out );
-    heap_free( in );
-    CloseHandle( device );
+    free( out );
+    free( in );
     return err;
 }
 
@@ -278,19 +314,15 @@ DWORD WINAPI NsiGetParameter( DWORD unk, const NPI_MODULEID *module, DWORD table
 
 DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
 {
-    HANDLE device = get_nsi_device();
+    HANDLE device = get_nsi_device( FALSE );
     struct nsiproxy_get_parameter *in;
     ULONG in_size = FIELD_OFFSET( struct nsiproxy_get_parameter, key[params->key_size] ), received;
     DWORD err = ERROR_SUCCESS;
 
     if (device == INVALID_HANDLE_VALUE) return GetLastError();
 
-    in = heap_alloc( in_size );
-    if (!in)
-    {
-        err = ERROR_OUTOFMEMORY;
-        goto err;
-    }
+    in = malloc( in_size );
+    if (!in) return ERROR_OUTOFMEMORY;
     in->module = *params->module;
     in->first_arg = params->first_arg;
     in->table = params->table;
@@ -302,8 +334,61 @@ DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
     if (!DeviceIoControl( device, IOCTL_NSIPROXY_WINE_GET_PARAMETER, in, in_size, params->data, params->data_size, &received, NULL ))
         err = GetLastError();
 
-err:
-    heap_free( in );
-    CloseHandle( device );
+    free( in );
+    return err;
+}
+
+DWORD WINAPI NsiRequestChangeNotification( DWORD unk, const NPI_MODULEID *module, DWORD table, OVERLAPPED *ovr,
+                                           HANDLE *handle )
+{
+    struct nsi_request_change_notification_ex params;
+
+    TRACE( "%lu %p %lu %p %p stub.\n", unk, module, table, ovr, handle );
+
+    params.unk = unk;
+    params.module = module;
+    params.table = table;
+    params.ovr = ovr;
+    params.handle = handle;
+    return NsiRequestChangeNotificationEx( &params );
+}
+
+DWORD WINAPI NsiRequestChangeNotificationEx( struct nsi_request_change_notification_ex *params )
+{
+    HANDLE device = get_nsi_device( TRUE );
+    struct nsiproxy_request_notification *in;
+    ULONG in_size = sizeof(struct nsiproxy_get_parameter), received;
+    OVERLAPPED overlapped, *ovr;
+    DWORD err = ERROR_SUCCESS;
+    DWORD len;
+
+    TRACE( "%p.\n", params );
+
+    if (params->unk) FIXME( "unknown parameter %#lx.\n", params->unk );
+
+    if (device == INVALID_HANDLE_VALUE) return GetLastError();
+
+    in = malloc( in_size );
+    if (!in) return ERROR_OUTOFMEMORY;
+    in->module = *params->module;
+    in->table = params->table;
+
+    if (!(ovr = params->ovr))
+    {
+        overlapped.hEvent = CreateEventW( NULL, FALSE, FALSE, NULL );
+        ovr = &overlapped;
+    }
+    if (!DeviceIoControl( device, IOCTL_NSIPROXY_WINE_CHANGE_NOTIFICATION, in, in_size, NULL, 0, &received, ovr ))
+        err = GetLastError();
+    if (ovr == &overlapped)
+    {
+        if (err == ERROR_IO_PENDING)
+            err = GetOverlappedResult( device, ovr, &len, TRUE ) ? 0 : GetLastError();
+        CloseHandle( overlapped.hEvent );
+    }
+    else if (params->handle && ovr && err == ERROR_IO_PENDING)
+        *params->handle = device;
+
+    free( in );
     return err;
 }

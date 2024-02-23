@@ -23,13 +23,11 @@
 
 #include <assert.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include "ntoskrnl_private.h"
 #include "excpt.h"
 #include "winreg.h"
 #include "ntsecapi.h"
+#include "evntprov.h"
 #include "ddk/csq.h"
 #include "wine/server.h"
 #include "wine/heap.h"
@@ -466,7 +464,7 @@ static ULONG get_irp_output_size( IRP *irp )
             break;
     }
 
-    if (NT_ERROR(irp->IoStatus.u.Status))
+    if (NT_ERROR(irp->IoStatus.Status))
         return 0;
     return irp->IoStatus.Information;
 }
@@ -493,7 +491,7 @@ static NTSTATUS WINAPI dispatch_irp_completion( DEVICE_OBJECT *device, IRP *irp,
     SERVER_START_REQ( set_irp_result )
     {
         req->handle   = wine_server_obj_handle( irp_data->handle );
-        req->status   = irp->IoStatus.u.Status;
+        req->status   = irp->IoStatus.Status;
         req->size     = irp->IoStatus.Information;
         if (out_size) wine_server_add_data( req, irp->UserBuffer, out_size );
         status = wine_server_call( req );
@@ -832,7 +830,6 @@ static NTSTATUS dispatch_volume( struct dispatch_context *context )
     irp->Tail.Overlay.Thread = (PETHREAD)KeGetCurrentThread();
     irp->Tail.Overlay.OriginalFileObject = file;
     irp->RequestorMode = UserMode;
-    context->in_buff = NULL;
 
     irp->Flags |= IRP_DEALLOCATE_BUFFER;  /* deallocate out_buff */
     return dispatch_irp( device, irp, context );
@@ -945,7 +942,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 
     for (;;)
     {
-        NtCurrentTeb()->Reserved5[1] = NULL;
+        NtCurrentTeb()->Instrumentation[1] = NULL;
         if (!context.in_buff && !(context.in_buff = HeapAlloc( GetProcessHeap(), 0, context.in_size )))
         {
             ERR( "failed to allocate buffer\n" );
@@ -974,7 +971,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 
                     req->prev        = wine_server_obj_handle( context.irp_data->handle );
                     req->pending     = irp->PendingReturned;
-                    req->iosb_status = irp->IoStatus.u.Status;
+                    req->iosb_status = irp->IoStatus.Status;
                     req->result      = irp->IoStatus.Information;
                     if (out_size) wine_server_add_data( req, irp->UserBuffer, out_size );
                 }
@@ -996,7 +993,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
                 context.params  = reply->params;
                 context.in_size = reply->in_size;
                 client_tid = reply->client_tid;
-                NtCurrentTeb()->Reserved5[1] = wine_server_get_ptr( reply->client_thread );
+                NtCurrentTeb()->Instrumentation[1] = wine_server_get_ptr( reply->client_thread );
             }
             else
             {
@@ -1104,7 +1101,7 @@ void WINAPI IoInitializeIrp( IRP *irp, USHORT size, CCHAR stack_size )
     InitializeListHead( &irp->ThreadListEntry );
     irp->StackCount = stack_size;
     irp->CurrentLocation = stack_size + 1;
-    irp->Tail.Overlay.s.u2.CurrentStackLocation =
+    irp->Tail.Overlay.CurrentStackLocation =
             (PIO_STACK_LOCATION)(irp + 1) + stack_size;
 }
 
@@ -1117,7 +1114,7 @@ void WINAPI IoReuseIrp(IRP *irp, NTSTATUS iostatus)
     AllocationFlags = irp->AllocationFlags;
     IoInitializeIrp(irp, irp->Size, irp->StackCount);
     irp->AllocationFlags = AllocationFlags;
-    irp->IoStatus.u.Status = iostatus;
+    irp->IoStatus.Status = iostatus;
 }
 
 /***********************************************************************
@@ -1509,7 +1506,7 @@ static void build_driver_keypath( const WCHAR *name, UNICODE_STRING *keypath )
 static NTSTATUS WINAPI unhandled_irp( DEVICE_OBJECT *device, IRP *irp )
 {
     TRACE( "(%p, %p)\n", device, irp );
-    irp->IoStatus.u.Status = STATUS_INVALID_DEVICE_REQUEST;
+    irp->IoStatus.Status = STATUS_INVALID_DEVICE_REQUEST;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return STATUS_INVALID_DEVICE_REQUEST;
 }
@@ -1846,7 +1843,7 @@ NTSTATUS WINAPI IoCallDriver( DEVICE_OBJECT *device, IRP *irp )
     NTSTATUS status;
 
     --irp->CurrentLocation;
-    irpsp = --irp->Tail.Overlay.s.u2.CurrentStackLocation;
+    irpsp = --irp->Tail.Overlay.CurrentStackLocation;
     irpsp->DeviceObject = device;
     dispatch = device->DriverObject->MajorFunction[irpsp->MajorFunction];
 
@@ -2058,10 +2055,10 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
 
     TRACE( "%p %u\n", irp, priority_boost );
 
-    status = irp->IoStatus.u.Status;
+    status = irp->IoStatus.Status;
     while (irp->CurrentLocation <= irp->StackCount)
     {
-        irpsp = irp->Tail.Overlay.s.u2.CurrentStackLocation;
+        irpsp = irp->Tail.Overlay.CurrentStackLocation;
         routine = irpsp->CompletionRoutine;
         call_flag = 0;
         if (routine)
@@ -2074,7 +2071,7 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
                 call_flag = 1;
         }
         ++irp->CurrentLocation;
-        ++irp->Tail.Overlay.s.u2.CurrentStackLocation;
+        ++irp->Tail.Overlay.CurrentStackLocation;
         if (irp->CurrentLocation <= irp->StackCount)
             device = IoGetCurrentIrpStackLocation(irp)->DeviceObject;
         else
@@ -2309,20 +2306,20 @@ static void initialize_lookaside_list( GENERAL_LOOKASIDE *lookaside, PALLOCATE_F
                                        ULONG type, SIZE_T size, ULONG tag )
 {
 
-    RtlInitializeSListHead( &lookaside->u.ListHead );
+    RtlInitializeSListHead( &lookaside->ListHead );
     lookaside->Depth                 = 4;
     lookaside->MaximumDepth          = 256;
     lookaside->TotalAllocates        = 0;
-    lookaside->u2.AllocateMisses     = 0;
+    lookaside->AllocateMisses     = 0;
     lookaside->TotalFrees            = 0;
-    lookaside->u3.FreeMisses         = 0;
+    lookaside->FreeMisses         = 0;
     lookaside->Type                  = type;
     lookaside->Tag                   = tag;
     lookaside->Size                  = size;
-    lookaside->u4.Allocate           = allocate ? allocate : ExAllocatePoolWithTag;
-    lookaside->u5.Free               = free ? free : ExFreePool;
+    lookaside->Allocate           = allocate ? allocate : ExAllocatePoolWithTag;
+    lookaside->Free               = free ? free : ExFreePool;
     lookaside->LastTotalAllocates    = 0;
-    lookaside->u6.LastAllocateMisses = 0;
+    lookaside->LastAllocateMisses = 0;
 
     /* FIXME: insert in global list of lookadside lists */
 }
@@ -2360,8 +2357,8 @@ void WINAPI ExInitializePagedLookasideList(PPAGED_LOOKASIDE_LIST lookaside,
 static void delete_lookaside_list( GENERAL_LOOKASIDE *lookaside )
 {
     void *entry;
-    while ((entry = RtlInterlockedPopEntrySList(&lookaside->u.ListHead)))
-        lookaside->u5.FreeEx(entry, (LOOKASIDE_LIST_EX*)lookaside);
+    while ((entry = RtlInterlockedPopEntrySList(&lookaside->ListHead)))
+        lookaside->FreeEx(entry, (LOOKASIDE_LIST_EX*)lookaside);
 }
 
 /***********************************************************************
@@ -2528,7 +2525,7 @@ POBJECT_TYPE PsThreadType = &thread_type;
  */
 PRKTHREAD WINAPI KeGetCurrentThread(void)
 {
-    struct _KTHREAD *thread = NtCurrentTeb()->Reserved5[1];
+    struct _KTHREAD *thread = NtCurrentTeb()->Instrumentation[1];
 
     if (!thread)
     {
@@ -2541,7 +2538,7 @@ PRKTHREAD WINAPI KeGetCurrentThread(void)
         kernel_object_from_handle( handle, PsThreadType, (void**)&thread );
         if (handle != GetCurrentThread()) NtClose( handle );
 
-        NtCurrentTeb()->Reserved5[1] = thread;
+        NtCurrentTeb()->Instrumentation[1] = thread;
     }
 
     return thread;
@@ -2904,7 +2901,7 @@ PHYSICAL_ADDRESS WINAPI MmGetPhysicalAddress(void *virtual_address)
  */
 PVOID WINAPI MmMapIoSpace( PHYSICAL_ADDRESS PhysicalAddress, DWORD NumberOfBytes, DWORD CacheType )
 {
-    FIXME( "stub: 0x%08lx%08lx, %ld, %ld\n", PhysicalAddress.u.HighPart, PhysicalAddress.u.LowPart, NumberOfBytes, CacheType );
+    FIXME( "stub: 0x%08lx%08lx, %ld, %ld\n", PhysicalAddress.HighPart, PhysicalAddress.LowPart, NumberOfBytes, CacheType );
     return NULL;
 }
 
@@ -3500,7 +3497,15 @@ NTSTATUS WINAPI IoWMIOpenBlock(LPCGUID guid, ULONG desired_access, PVOID *data_b
  */
 NTSTATUS WINAPI PsSetLoadImageNotifyRoutine(PLOAD_IMAGE_NOTIFY_ROUTINE routine)
 {
-    FIXME("routine %p, semi-stub.\n", routine);
+    return PsSetLoadImageNotifyRoutineEx(routine, 0);
+}
+
+/*****************************************************
+ *           PsSetLoadImageNotifyRoutineEx   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsSetLoadImageNotifyRoutineEx(PLOAD_IMAGE_NOTIFY_ROUTINE routine, ULONG_PTR flags)
+{
+    FIXME("routine %p, flags %Ix semi-stub.\n", routine, flags);
 
     if (load_image_notify_routine_count == ARRAY_SIZE(load_image_notify_routines))
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -3525,6 +3530,15 @@ BOOLEAN WINAPI IoSetThreadHardErrorMode(BOOLEAN EnableHardErrors)
 BOOLEAN WINAPI Ke386IoSetAccessProcess(PEPROCESS *process, ULONG flag)
 {
     FIXME("(%p %ld) stub\n", process, flag);
+    return FALSE;
+}
+
+/*****************************************************
+ *           Ke386QueryIoAccessMap  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI Ke386QueryIoAccessMap(ULONG flag, PVOID buffer)
+{
+    FIXME("(%ld %p) stub\n", flag, buffer);
     return FALSE;
 }
 
@@ -3938,8 +3952,8 @@ static HMODULE load_driver( const WCHAR *driver_name, const UNICODE_STRING *keyn
         RtlInitUnicodeString(&module_name, str);
         nt = RtlImageNtHeader(module);
         memset(&info, 0, sizeof(info));
-        info.u.s.ImageAddressingMode = IMAGE_ADDRESSING_MODE_32BIT;
-        info.u.s.SystemModeImage = TRUE;
+        info.ImageAddressingMode = IMAGE_ADDRESSING_MODE_32BIT;
+        info.SystemModeImage = TRUE;
         info.ImageSize = nt->OptionalHeader.SizeOfImage;
         info.ImageBase = module;
 
@@ -4566,6 +4580,12 @@ NTSTATUS WINAPI KdEnableDebugger(void)
     return STATUS_DEBUGGER_INACTIVE;
 }
 
+KPROCESSOR_MODE WINAPI ExGetPreviousMode(void)
+{
+    TRACE("\n");
+    return PsIsSystemThread((PETHREAD)KeGetCurrentThread()) ? KernelMode : UserMode;
+}
+
 #ifdef __x86_64__
 
 void WINAPI KfRaiseIrql(KIRQL new, KIRQL *old)
@@ -4579,6 +4599,25 @@ void WINAPI KeLowerIrql(KIRQL new)
 }
 
 #endif
+
+typedef void (WINAPI *PETW_CLASSIC_CALLBACK)(
+    const GUID *guid, UCHAR control_code, void *enable_context, void *callback_context);
+
+NTSTATUS WINAPI EtwRegisterClassicProvider(const GUID *provider, ULONG type, PETW_CLASSIC_CALLBACK callback,
+                                           void *context, REGHANDLE *handle)
+{
+    FIXME("provider %s, type %lu, enable_callback %p, context %p, handle %p\n", debugstr_guid(provider), type,
+          callback, context, handle);
+
+    *handle = 0xdeadbeef;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI EtwUnregister(REGHANDLE handle)
+{
+    FIXME("handle %I64x\n", handle);
+    return STATUS_SUCCESS;
+}
 
 /*****************************************************
  *           DllMain

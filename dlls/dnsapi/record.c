@@ -199,7 +199,7 @@ static const BYTE *get_name( const BYTE *base, const BYTE *end, const BYTE *ptr,
             return NULL;
         }
     }
-    if (ptr >= end) return NULL;
+    if (ptr > end) return NULL;
     if (out == name) *out++ = '.';
     *out = 0;
     return next ? next : ptr;
@@ -1046,6 +1046,10 @@ static DNS_STATUS extract_rdata( const BYTE *base, const BYTE *end, const BYTE *
         if (!get_name( base, end, pos, name )) return DNS_ERROR_BAD_PACKET;
         if (!(r->Data.SRV.pNameTarget = strdupX( name, in, out ))) return ERROR_NOT_ENOUGH_MEMORY;
         r->wDataLength = sizeof(DNS_SRV_DATAA);
+        if (out == DnsCharSetUnicode)
+            r->wDataLength += (wcslen( (const WCHAR *)r->Data.SRV.pNameTarget ) + 1) * sizeof(WCHAR);
+        else
+            r->wDataLength += strlen( r->Data.SRV.pNameTarget ) + 1;
         break;
 
     case DNS_TYPE_HINFO:

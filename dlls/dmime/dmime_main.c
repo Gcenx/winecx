@@ -34,11 +34,8 @@
 #include "dmusici.h"
 
 #include "dmime_private.h"
-#include "dmobject.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmime);
-
-LONG DMIME_refCount = 0;
 
 typedef struct {
         IClassFactory IClassFactory_iface;
@@ -75,15 +72,11 @@ static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID r
 
 static ULONG WINAPI ClassFactory_AddRef(IClassFactory *iface)
 {
-        DMIME_LockModule();
-
         return 2; /* non-heap based object */
 }
 
 static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
 {
-        DMIME_UnlockModule();
-
         return 1; /* non-heap based object */
 }
 
@@ -103,12 +96,6 @@ static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown
 static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL dolock)
 {
         TRACE("(%d)\n", dolock);
-
-        if (dolock)
-                DMIME_LockModule();
-        else
-                DMIME_UnlockModule();
-
         return S_OK;
 }
 
@@ -135,16 +122,6 @@ static IClassFactoryImpl LyricsTrack_CF = {{&classfactory_vtbl}, create_dmlyrics
 static IClassFactoryImpl SegTriggerTrack_CF = {{&classfactory_vtbl}, create_dmsegtriggertrack};
 static IClassFactoryImpl AudioPath_CF = {{&classfactory_vtbl}, create_dmaudiopath};
 static IClassFactoryImpl WaveTrack_CF = {{&classfactory_vtbl}, create_dmwavetrack};
-
-/******************************************************************
- *		DllCanUnloadNow (DMIME.1)
- *
- *
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-	return DMIME_refCount != 0 ? S_FALSE : S_OK;
-}
 
 
 /******************************************************************

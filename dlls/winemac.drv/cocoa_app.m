@@ -25,6 +25,8 @@
 #import "cocoa_event.h"
 #import "cocoa_window.h"
 
+#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
+
 
 static NSString* const WineAppWaitQueryResponseMode = @"WineAppWaitQueryResponseMode";
 static NSString* const WineWillShowPermissionDialogNotification = @"WineWillShowPermissionDialogNotification";
@@ -36,6 +38,12 @@ static NSString* const WineDidShowPermissionDialogNotification = @"WineDidShowPe
 static NSString* const NSWindowWillStartDraggingNotification = @"NSWindowWillStartDraggingNotification";
 static NSString* const NSWindowDidEndDraggingNotification = @"NSWindowDidEndDraggingNotification";
 
+// Internal distributed notification to handle cooperative app activation in Sonoma.
+static NSString* const WineAppWillActivateNotification = @"WineAppWillActivateNotification";
+static NSString* const WineActivatingAppPIDKey = @"ActivatingAppPID";
+static NSString* const WineActivatingAppPrefixKey = @"ActivatingAppPrefix";
+static NSString* const WineActivatingAppConfigDirKey = @"ActivatingAppConfigDir";
+
 /* CW Hack 22310 */
 // WineAppUserModelIDQuitRequestNotification is sent on the distributed notification center when an
 // app with an AUMID is quit via Cocoa. Any app in the same prefix with a corresponding AUMID should
@@ -45,13 +53,6 @@ static NSString* const WineAUMIDQuitNotificationAUMIDKey = @"AUMID";
 static NSString* const WineAUMIDQuitNotificationSourcePIDKey = @"SourcePID";
 static NSString* const WineAUMIDQuitNotificationWineConfigDirKey = @"WineConfigDir";
 static NSString* const WineAUMIDQuitNotificationWinePrefixKey = @"WinePrefix";
-
-// Internal distributed notification to handle cooperative app activation in Sonoma.
-static NSString* const WineAppWillActivateNotification = @"WineAppWillActivateNotification";
-static NSString* const WineActivatingAppPIDKey = @"ActivatingAppPID";
-static NSString* const WineActivatingAppPrefixKey = @"ActivatingAppPrefix";
-static NSString* const WineActivatingAppConfigDirKey = @"ActivatingAppConfigDir";
-
 
 int macdrv_err_on;
 
@@ -90,8 +91,7 @@ int macdrv_err_on;
  */
 static NSString* WineLocalizedString(unsigned int stringID)
 {
-    NSNumber* key = [NSNumber numberWithUnsignedInt:stringID];
-    return [(NSDictionary*)localized_strings objectForKey:key];
+    return ((NSDictionary*)localized_strings)[@(stringID)];
 }
 
 
@@ -150,11 +150,13 @@ static NSString* WineLocalizedString(unsigned int stringID)
     {
         if (self == [WineApplicationController class])
         {
-            NSDictionary* defaults = [NSDictionary dictionaryWithObjectsAndKeys:
-                                      @"", @"NSQuotedKeystrokeBinding",
-                                      @"", @"NSRepeatCountBinding",
-                                      [NSNumber numberWithBool:NO], @"ApplePressAndHoldEnabled",
-                                      nil];
+            NSDictionary<NSString *, id> *defaults =
+            @{
+                @"NSQuotedKeystrokeBinding" : @"",
+                    @"NSRepeatCountBinding" : @"",
+                @"ApplePressAndHoldEnabled" : @NO
+            };
+
             [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
 
             if ([NSWindow respondsToSelector:@selector(setAllowsAutomaticWindowTabbing:)])
@@ -332,11 +334,6 @@ static NSString* WineLocalizedString(unsigned int stringID)
             }
 #endif
 
-            /* CrossOver Hack #15388 */
-            static BOOL created_main_menu;
-            if (created_main_menu) return;
-            created_main_menu = TRUE;
-
             mainMenu = [[[NSMenu alloc] init] autorelease];
 
             // Application menu
@@ -429,14 +426,15 @@ static NSString* WineLocalizedString(unsigned int stringID)
         {
             if (processEvents)
             {
-                NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
-                NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                                    untilDate:timeout
-                                                       inMode:NSDefaultRunLoopMode
-                                                      dequeue:YES];
-                if (event)
-                    [NSApp sendEvent:event];
-                [pool release];
+                @autoreleasepool
+                {
+                    NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                                        untilDate:timeout
+                                                           inMode:NSDefaultRunLoopMode
+                                                          dequeue:YES];
+                    if (event)
+                        [NSApp sendEvent:event];
+                }
             }
             else
                 [[NSRunLoop currentRunLoop] runMode:WineAppWaitQueryResponseMode beforeDate:timeout];
@@ -634,7 +632,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
                 CGRect* rect;
                 NSScreen* screen;
 
-                primaryScreenHeight = NSHeight([[screens objectAtIndex:0] frame]);
+                primaryScreenHeight = NSHeight([screens[0] frame]);
                 primaryScreenHeightValid = TRUE;
 
                 size = count * sizeof(CGRect);
@@ -672,7 +670,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
         // We don't use -primaryScreenHeight here so there's no chance of having
         // out-of-date cached info.  This method is called infrequently enough
         // that getting the screen height each time is not prohibitively expensive.
-        rect->origin.y = NSMaxY([[[NSScreen screens] objectAtIndex:0] frame]) - NSMaxY(*rect);
+        rect->origin.y = NSMaxY([[NSScreen screens][0] frame]) - NSMaxY(*rect);
     }
 
     - (WineWindow*) frontWineWindow
@@ -930,7 +928,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
         NSNumber* displayIDKey = [NSNumber numberWithUnsignedInt:displayID];
         CGDisplayModeRef originalMode;
 
-        originalMode = (CGDisplayModeRef)[originalDisplayModes objectForKey:displayIDKey];
+        originalMode = (CGDisplayModeRef)originalDisplayModes[displayIDKey];
 
         if (originalMode && [self mode:mode matchesMode:originalMode])
         {
@@ -961,7 +959,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
             CGDisplayModeRef currentMode;
             NSArray* modes;
 
-            currentMode = CGDisplayModeRetain((CGDisplayModeRef)[latentDisplayModes objectForKey:displayIDKey]);
+            currentMode = CGDisplayModeRetain((CGDisplayModeRef)latentDisplayModes[displayIDKey]);
             if (!currentMode)
                 currentMode = CGDisplayCopyDisplayMode(displayID);
             if (!currentMode) // Invalid display ID
@@ -1108,11 +1106,11 @@ static NSString* WineLocalizedString(unsigned int stringID)
 
     - (void) setCursor
     {
-        NSDictionary* frame = [cursorFrames objectAtIndex:cursorFrame];
-        CGImageRef cgimage = (CGImageRef)[frame objectForKey:@"image"];
+        NSDictionary* frame = cursorFrames[cursorFrame];
+        CGImageRef cgimage = (CGImageRef)frame[@"image"];
         CGSize size = CGSizeMake(CGImageGetWidth(cgimage), CGImageGetHeight(cgimage));
         NSImage* image = [[NSImage alloc] initWithCGImage:cgimage size:NSSizeFromCGSize(cgsize_mac_from_win(size))];
-        CFDictionaryRef hotSpotDict = (CFDictionaryRef)[frame objectForKey:@"hotSpot"];
+        CFDictionaryRef hotSpotDict = (CFDictionaryRef)frame[@"hotSpot"];
         CGPoint hotSpot;
 
         if (!CGPointMakeWithDictionaryRepresentation(hotSpotDict, &hotSpot))
@@ -1134,8 +1132,8 @@ static NSString* WineLocalizedString(unsigned int stringID)
             cursorFrame = 0;
         [self setCursor];
 
-        frame = [cursorFrames objectAtIndex:cursorFrame];
-        duration = [[frame objectForKey:@"duration"] doubleValue];
+        frame = cursorFrames[cursorFrame];
+        duration = [frame[@"duration"] doubleValue];
         date = [[theTimer fireDate] dateByAddingTimeInterval:duration];
         [cursorTimer setFireDate:date];
     }
@@ -1154,8 +1152,8 @@ static NSString* WineLocalizedString(unsigned int stringID)
         {
             if ([frames count] > 1)
             {
-                NSDictionary* frame = [frames objectAtIndex:0];
-                NSTimeInterval duration = [[frame objectForKey:@"duration"] doubleValue];
+                NSDictionary* frame = frames[0];
+                NSTimeInterval duration = [frame[@"duration"] doubleValue];
                 NSDate* date = [NSDate dateWithTimeIntervalSinceNow:duration];
                 self.cursorTimer = [[[NSTimer alloc] initWithFireDate:date
                                                              interval:1000000
@@ -1542,16 +1540,6 @@ static NSString* WineLocalizedString(unsigned int stringID)
             {
                 if (self.clippingCursor)
                     [clipCursorHandler clipCursorLocation:&point];
-
-                /* CrossOver Hack #15388 */
-                if (quicken_signin_hack)
-                {
-                    NSRect rect = [targetWindow contentRectForFrameRect:targetWindow.frame];
-                    [self flipRect:&rect];
-                    point.x -= rect.origin.x;
-                    point.y -= rect.origin.y;
-                }
-
                 point = cgpoint_win_from_mac(point);
 
                 event = macdrv_create_event(MOUSE_MOVED_ABSOLUTE, targetWindow);
@@ -1696,15 +1684,6 @@ static NSString* WineLocalizedString(unsigned int stringID)
             if (process)
             {
                 macdrv_event* event;
-
-                /* CrossOver Hack #15388 */
-                if (quicken_signin_hack)
-                {
-                    NSRect rect = [window contentRectForFrameRect:window.frame];
-                    [self flipRect:&rect];
-                    pt.x -= rect.origin.x;
-                    pt.y -= rect.origin.y;
-                }
 
                 pt = cgpoint_win_from_mac(pt);
 
@@ -1959,7 +1938,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
                     [window postKeyEvent:anEvent];
             }
         }
-        else if (!useDragNotifications && type == NSEventTypeAppKitDefined && !quicken_signin_hack) /* CrossOver Hack #15388 */
+        else if (!useDragNotifications && type == NSEventTypeAppKitDefined)
         {
             WineWindow *window = (WineWindow *)[anEvent window];
             short subtype = [anEvent subtype];
@@ -2089,16 +2068,6 @@ static NSString* WineLocalizedString(unsigned int stringID)
                     name:(NSString*)kTISNotifyEnabledKeyboardInputSourcesChanged
                   object:nil];
 
-        if ([NSApplication instancesRespondToSelector:@selector(yieldActivationToApplication:)])
-        {
-            /* App activation cooperation, starting in macOS 14 Sonoma. */
-            [dnc addObserver:self
-                    selector:@selector(otherWineAppWillActivate:)
-                        name:WineAppWillActivateNotification
-                      object:nil
-          suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
-        }
-
         /* CW Hack 22310 */
         [dnc addObserver:self
                 selector:@selector(handleAppUserModelIDQuitRequest:)
@@ -2152,78 +2121,16 @@ static NSString* WineLocalizedString(unsigned int stringID)
             }
             temporarilyIgnoreResignEventsForDialog = FALSE;
         }];
-    }
 
-    /* CW Hack 22310 */
-    - (void) handleAppUserModelIDQuitRequest:(NSNotification *)notification
-    {
-        NSString *aumid;
-        pid_t sourcePID;
-        NSProcessInfo *ourProcess;
-        NSString *ourConfigDir, *otherConfigDir, *ourPrefix, *otherPrefix;
-
-        if (!self.explicitAppUserModelID.length) return;
-
-        sourcePID = [notification.userInfo[WineAUMIDQuitNotificationAUMIDKey] intValue];
-        ourProcess = [NSProcessInfo processInfo];
-
-        // Ignore requests from ourself
-        if (sourcePID == ourProcess.processIdentifier) return;
-
-        aumid = notification.userInfo[WineAUMIDQuitNotificationAUMIDKey];
-        if (![self.explicitAppUserModelID isEqualToString:aumid]) return;
-
-        // AUMID matches. Make sure it's from the same prefix.
-        ourConfigDir = ourProcess.environment[@"WINECONFIGDIR"];
-        otherConfigDir = notification.userInfo[WineAUMIDQuitNotificationWineConfigDirKey];
-        if (ourConfigDir.length && otherConfigDir.length &&
-            ![ourConfigDir isEqualToString:otherConfigDir])
+        if ([NSApplication instancesRespondToSelector:@selector(yieldActivationToApplication:)])
         {
-            return;
+            /* App activation cooperation, starting in macOS 14 Sonoma. */
+            [dnc addObserver:self
+                    selector:@selector(otherWineAppWillActivate:)
+                        name:WineAppWillActivateNotification
+                      object:nil
+          suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
         }
-
-        ourPrefix = ourProcess.environment[@"WINEPREFIX"];
-        otherPrefix = notification.userInfo[WineAUMIDQuitNotificationWinePrefixKey];
-        if (ourPrefix.length && otherPrefix.length &&
-            ![ourPrefix isEqualToString:otherPrefix])
-        {
-            return;
-        }
-
-        terminatingDueToAUMIDRequest = YES;
-        [NSApp terminate:NSApp];
-    }
-
-    /* CW Hack 22310 */
-    - (void) postAppUserModelIDQuitRequest
-    {
-        NSDictionary *userInfo;
-        NSProcessInfo *process;
-        NSString *wineConfigDir, *winePrefix;
-
-        if (!self.explicitAppUserModelID.length) return;
-
-        /* temporarily only supporting this for Steam */
-        if (![self.explicitAppUserModelID isEqualToString:@"Valve.Steam.Client"]) return;
-
-        process = [NSProcessInfo processInfo];
-        wineConfigDir = process.environment[@"WINECONFIGDIR"];
-        if (!wineConfigDir) wineConfigDir = @"";
-        winePrefix = process.environment[@"WINEPREFIX"];
-        if (!winePrefix) winePrefix = @"";
-
-        userInfo = @{
-            WineAUMIDQuitNotificationAUMIDKey: self.explicitAppUserModelID,
-            WineAUMIDQuitNotificationSourcePIDKey: @([NSProcessInfo processInfo].processIdentifier),
-            WineAUMIDQuitNotificationWineConfigDirKey: wineConfigDir,
-            WineAUMIDQuitNotificationWinePrefixKey: winePrefix
-        };
-
-        [[NSDistributedNotificationCenter defaultCenter]
-            postNotificationName:WineAppUserModelIDQuitRequestNotification
-                          object:nil
-                        userInfo:userInfo
-              deliverImmediately:YES];
     }
 
     - (void) otherWineAppWillActivate:(NSNotification *)note
@@ -2311,6 +2218,78 @@ static NSString* WineLocalizedString(unsigned int stringID)
         [NSApp activate];
      }
 
+    /* CW Hack 22310 */
+    - (void) handleAppUserModelIDQuitRequest:(NSNotification *)notification
+    {
+        NSString *aumid;
+        pid_t sourcePID;
+        NSProcessInfo *ourProcess;
+        NSString *ourConfigDir, *otherConfigDir, *ourPrefix, *otherPrefix;
+
+        if (!self.explicitAppUserModelID.length) return;
+
+        sourcePID = [notification.userInfo[WineAUMIDQuitNotificationAUMIDKey] intValue];
+        ourProcess = [NSProcessInfo processInfo];
+
+        // Ignore requests from ourself
+        if (sourcePID == ourProcess.processIdentifier) return;
+
+        aumid = notification.userInfo[WineAUMIDQuitNotificationAUMIDKey];
+        if (![self.explicitAppUserModelID isEqualToString:aumid]) return;
+
+        // AUMID matches. Make sure it's from the same prefix.
+        ourConfigDir = ourProcess.environment[@"WINECONFIGDIR"];
+        otherConfigDir = notification.userInfo[WineAUMIDQuitNotificationWineConfigDirKey];
+        if (ourConfigDir.length && otherConfigDir.length &&
+            ![ourConfigDir isEqualToString:otherConfigDir])
+        {
+            return;
+        }
+
+        ourPrefix = ourProcess.environment[@"WINEPREFIX"];
+        otherPrefix = notification.userInfo[WineAUMIDQuitNotificationWinePrefixKey];
+        if (ourPrefix.length && otherPrefix.length &&
+            ![ourPrefix isEqualToString:otherPrefix])
+        {
+            return;
+        }
+
+        terminatingDueToAUMIDRequest = YES;
+        [NSApp terminate:NSApp];
+    }
+
+    /* CW Hack 22310 */
+    - (void) postAppUserModelIDQuitRequest
+    {
+        NSDictionary *userInfo;
+        NSProcessInfo *process;
+        NSString *wineConfigDir, *winePrefix;
+
+        if (!self.explicitAppUserModelID.length) return;
+
+        /* temporarily only supporting this for Steam */
+        if (![self.explicitAppUserModelID isEqualToString:@"Valve.Steam.Client"]) return;
+
+        process = [NSProcessInfo processInfo];
+        wineConfigDir = process.environment[@"WINECONFIGDIR"];
+        if (!wineConfigDir) wineConfigDir = @"";
+        winePrefix = process.environment[@"WINEPREFIX"];
+        if (!winePrefix) winePrefix = @"";
+
+        userInfo = @{
+            WineAUMIDQuitNotificationAUMIDKey: self.explicitAppUserModelID,
+            WineAUMIDQuitNotificationSourcePIDKey: @([NSProcessInfo processInfo].processIdentifier),
+            WineAUMIDQuitNotificationWineConfigDirKey: wineConfigDir,
+            WineAUMIDQuitNotificationWinePrefixKey: winePrefix
+        };
+
+        [[NSDistributedNotificationCenter defaultCenter]
+            postNotificationName:WineAppUserModelIDQuitRequestNotification
+                          object:nil
+                        userInfo:userInfo
+              deliverImmediately:YES];
+    }
+
     - (BOOL) inputSourceIsInputMethod
     {
         if (!inputSourceIsInputMethodValid)
@@ -2390,7 +2369,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
         latentDisplayModes = [[NSMutableDictionary alloc] init];
         for (displayID in modesToRealize)
         {
-            CGDisplayModeRef mode = (CGDisplayModeRef)[modesToRealize objectForKey:displayID];
+            CGDisplayModeRef mode = (CGDisplayModeRef)modesToRealize[displayID];
             [self setMode:mode forDisplay:[displayID unsignedIntValue]];
         }
 
@@ -2551,34 +2530,34 @@ static NSString* WineLocalizedString(unsigned int stringID)
  */
 static void PerformRequest(void *info)
 {
-    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+@autoreleasepool
+{
     WineApplicationController* controller = [WineApplicationController sharedController];
 
     for (;;)
     {
-        __block dispatch_block_t block;
+        @autoreleasepool
+        {
+            __block dispatch_block_t block;
 
-        dispatch_sync(controller->requestsManipQueue, ^{
-            if ([controller->requests count])
-            {
-                block = (dispatch_block_t)[[controller->requests objectAtIndex:0] retain];
-                [controller->requests removeObjectAtIndex:0];
-            }
-            else
-                block = nil;
-        });
+            dispatch_sync(controller->requestsManipQueue, ^{
+                if ([controller->requests count])
+                {
+                    block = (dispatch_block_t)[controller->requests[0] retain];
+                    [controller->requests removeObjectAtIndex:0];
+                }
+                else
+                    block = nil;
+            });
 
-        if (!block)
-            break;
+            if (!block)
+                break;
 
-        block();
-        [block release];
-
-        [pool release];
-        pool = [[NSAutoreleasePool alloc] init];
+            block();
+            [block release];
+        }
     }
-
-    [pool release];
+}
 }
 
 /***********************************************************************
@@ -2617,13 +2596,12 @@ void LogError(const char* func, NSString* format, ...)
  */
 void LogErrorv(const char* func, NSString* format, va_list args)
 {
-    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
-
+@autoreleasepool
+{
     NSString* message = [[NSString alloc] initWithFormat:format arguments:args];
     fprintf(stderr, "err:%s:%s", func, [message UTF8String]);
     [message release];
-
-    [pool release];
+}
 }
 
 /***********************************************************************

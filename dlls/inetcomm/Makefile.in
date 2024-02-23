@@ -1,11 +1,14 @@
+EXTRADEFS = -D_MIMEOLE_
 MODULE    = inetcomm.dll
 IMPORTLIB = inetcomm
 IMPORTS   = uuid urlmon propsys oleaut32 ole32 ws2_32 user32 advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
+SOURCES = \
 	imaptransport.c \
+	inetcomm.idl \
+	inetcomm.rc \
 	inetcomm_main.c \
 	internettransport.c \
 	mimeintl.c \
@@ -13,7 +16,3 @@ C_SRCS = \
 	pop3transport.c \
 	protocol.c \
 	smtptransport.c
-
-RC_SRCS = inetcomm.rc
-
-IDL_SRCS = inetcomm.idl

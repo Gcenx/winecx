@@ -69,7 +69,10 @@ static nsIClipboardCommands *get_clipboard_commands(HTMLDocumentNode *doc)
     nsIDocShell *doc_shell;
     nsresult nsres;
 
-    nsres = get_nsinterface((nsISupports*)doc->outer_window->nswindow, &IID_nsIDocShell, (void**)&doc_shell);
+    if(!doc->window)
+        return NULL;
+
+    nsres = get_nsinterface((nsISupports*)doc->window->dom_window, &IID_nsIDocShell, (void**)&doc_shell);
     if(NS_FAILED(nsres)) {
         ERR("Could not get nsIDocShell interface\n");
         return NULL;
@@ -438,7 +441,7 @@ static void refresh_proc(task_t *_task)
         IOleCommandTarget_Exec(window->browser->doc->client_cmdtrg, &CGID_ShellDocView, 37, 0, &var, NULL);
     }
 
-    load_uri(task->window, task->window->uri, BINDING_REFRESH|BINDING_NOFRAG);
+    load_uri(window, window->uri, BINDING_REFRESH|BINDING_NOFRAG);
 }
 
 static void refresh_destr(task_t *_task)
@@ -446,7 +449,6 @@ static void refresh_destr(task_t *_task)
     refresh_task_t *task = (refresh_task_t*)_task;
 
     IHTMLWindow2_Release(&task->window->base.IHTMLWindow2_iface);
-    free(task);
 }
 
 HRESULT reload_page(HTMLOuterWindow *window)
@@ -488,10 +490,10 @@ static HRESULT exec_refresh(HTMLDocumentNode *doc, DWORD nCmdexecopt, VARIANT *p
         }
     }
 
-    if(!doc->outer_window)
+    if(!doc->window || !doc->window->base.outer_window)
         return E_UNEXPECTED;
 
-    return reload_page(doc->outer_window);
+    return reload_page(doc->window->base.outer_window);
 }
 
 static HRESULT exec_stop(HTMLDocumentNode *doc, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
@@ -688,12 +690,19 @@ static HRESULT exec_browsemode(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT 
 
 static HRESULT exec_editmode(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
 {
+    HTMLDocumentObj *doc_obj;
+    HRESULT hres;
+
     TRACE("(%p)->(%08lx %p %p)\n", doc, cmdexecopt, in, out);
 
     if(in || out)
         FIXME("unsupported args\n");
 
-    return setup_edit_mode(doc->browser->doc);
+    doc_obj = doc->browser->doc;
+    IUnknown_AddRef(doc_obj->outer_unk);
+    hres = setup_edit_mode(doc_obj);
+    IUnknown_Release(doc_obj->outer_unk);
+    return hres;
 }
 
 static HRESULT exec_htmleditmode(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *in, VARIANT *out)

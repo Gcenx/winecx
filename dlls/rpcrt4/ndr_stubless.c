@@ -849,8 +849,8 @@ static LONG_PTR do_ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORM
     return retval;
 }
 
-LONG_PTR CDECL DECLSPEC_HIDDEN ndr_client_call( PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING pFormat,
-                                                void **stack_top, void **fpu_stack )
+LONG_PTR CDECL ndr_client_call( PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING pFormat,
+                                void **stack_top, void **fpu_stack )
 {
     /* pointer to start of stack where arguments start */
     MIDL_STUB_MESSAGE stubMsg;
@@ -1181,7 +1181,10 @@ __ASM_GLOBAL_FUNC( call_server_func,
 LONG_PTR __cdecl call_server_func(SERVER_ROUTINE func, unsigned char *args, unsigned int stack_size);
 __ASM_GLOBAL_FUNC( call_server_func,
                    "stp x29, x30, [sp, #-16]!\n\t"
+                   __ASM_SEH(".seh_save_fplr_x 16\n\t")
                    "mov x29, sp\n\t"
+                   __ASM_SEH(".seh_set_fp\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
                    "add x9, x2, #15\n\t"
                    "lsr x9, x9, #4\n\t"
                    "sub sp, sp, x9, lsl #4\n\t"
@@ -1362,37 +1365,6 @@ LONG WINAPI NdrStubCall2(
 
     TRACE("Oi_flags = 0x%02x\n", pProcHeader->Oi_flags);
 
-    /* binding */
-    switch (pProcHeader->handle_type)
-    {
-    /* explicit binding: parse additional section */
-    case 0:
-        switch (*pFormat) /* handle_type */
-        {
-        case FC_BIND_PRIMITIVE: /* explicit primitive */
-            pFormat += sizeof(NDR_EHD_PRIMITIVE);
-            break;
-        case FC_BIND_GENERIC: /* explicit generic */
-            pFormat += sizeof(NDR_EHD_GENERIC);
-            break;
-        case FC_BIND_CONTEXT: /* explicit context */
-            pFormat += sizeof(NDR_EHD_CONTEXT);
-            break;
-        default:
-            ERR("bad explicit binding handle type (0x%02x)\n", pProcHeader->handle_type);
-            RpcRaiseException(RPC_X_BAD_STUB_DATA);
-        }
-        break;
-    case FC_BIND_GENERIC: /* implicit generic */
-    case FC_BIND_PRIMITIVE: /* implicit primitive */
-    case FC_CALLBACK_HANDLE: /* implicit callback */
-    case FC_AUTO_HANDLE: /* implicit auto handle */
-        break;
-    default:
-        ERR("bad implicit binding handle type (0x%02x)\n", pProcHeader->handle_type);
-        RpcRaiseException(RPC_X_BAD_STUB_DATA);
-    }
-
     if (pProcHeader->Oi_flags & Oi_OBJECT_PROC)
         NdrStubInitialize(pRpcMsg, &stubMsg, pStubDesc, pChannel);
     else
@@ -1418,6 +1390,44 @@ LONG WINAPI NdrStubCall2(
 
     args = calloc(1, stack_size);
     stubMsg.StackTop = args; /* used by conformance of top-level objects */
+
+    /* binding */
+    switch (pProcHeader->handle_type)
+    {
+    /* explicit binding: parse additional section */
+    case 0:
+        switch (*pFormat) /* handle_type */
+        {
+        case FC_BIND_PRIMITIVE: /* explicit primitive */
+            {
+                const NDR_EHD_PRIMITIVE *pDesc = (const NDR_EHD_PRIMITIVE *)pFormat;
+                if (pDesc->flag)
+                    **(handle_t **)ARG_FROM_OFFSET(stubMsg.StackTop, pDesc->offset) = pRpcMsg->Handle;
+                else
+                    *(handle_t *)ARG_FROM_OFFSET(stubMsg.StackTop, pDesc->offset) = pRpcMsg->Handle;
+                pFormat += sizeof(NDR_EHD_PRIMITIVE);
+                break;
+            }
+        case FC_BIND_GENERIC: /* explicit generic */
+            pFormat += sizeof(NDR_EHD_GENERIC);
+            break;
+        case FC_BIND_CONTEXT: /* explicit context */
+            pFormat += sizeof(NDR_EHD_CONTEXT);
+            break;
+        default:
+            ERR("bad explicit binding handle type (0x%02x)\n", pProcHeader->handle_type);
+            RpcRaiseException(RPC_X_BAD_STUB_DATA);
+        }
+        break;
+    case FC_BIND_GENERIC: /* implicit generic */
+    case FC_BIND_PRIMITIVE: /* implicit primitive */
+    case FC_CALLBACK_HANDLE: /* implicit callback */
+    case FC_AUTO_HANDLE: /* implicit auto handle */
+        break;
+    default:
+        ERR("bad implicit binding handle type (0x%02x)\n", pProcHeader->handle_type);
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    }
 
     /* add the implicit This pointer as the first arg to the function if we
      * are calling an object method */
@@ -1793,8 +1803,8 @@ static void do_ndr_async_client_call( const MIDL_STUB_DESC *pStubDesc, PFORMAT_S
     }
 }
 
-LONG_PTR CDECL DECLSPEC_HIDDEN ndr_async_client_call( PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING pFormat,
-                                                      void **stack_top )
+LONG_PTR CDECL ndr_async_client_call( PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING pFormat,
+                                      void **stack_top )
 {
     LONG_PTR ret = 0;
     const NDR_PROC_HEADER *pProcHeader = (const NDR_PROC_HEADER *)&pFormat[0];
@@ -2215,7 +2225,7 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
 static const RPC_SYNTAX_IDENTIFIER ndr_syntax_id =
     {{0x8a885d04, 0x1ceb, 0x11c9, {0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60}}, {2, 0}};
 
-LONG_PTR CDECL DECLSPEC_HIDDEN ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info,
+LONG_PTR CDECL ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info,
         ULONG proc, void *retval, void **stack_top, void **fpu_stack )
 {
     ULONG_PTR i;
@@ -2277,7 +2287,7 @@ CLIENT_CALL_RETURN WINAPIV NdrClientCall3( MIDL_STUBLESS_PROXY_INFO *info, ULONG
 
 #endif
 
-LONG_PTR CDECL DECLSPEC_HIDDEN ndr64_async_client_call( MIDL_STUBLESS_PROXY_INFO *info,
+LONG_PTR CDECL ndr64_async_client_call( MIDL_STUBLESS_PROXY_INFO *info,
         ULONG proc, void *retval, void **stack_top, void **fpu_stack )
 {
     ULONG_PTR i;

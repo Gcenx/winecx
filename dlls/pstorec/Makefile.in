@@ -3,7 +3,6 @@ IMPORTS   = uuid ole32 shlwapi advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
-	pstorec.c
-
-IDL_SRCS = pstorec_tlb.idl
+SOURCES = \
+	pstorec.c \
+	pstorec_tlb.idl

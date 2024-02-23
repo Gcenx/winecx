@@ -38,6 +38,27 @@
 #include <oleauto.h>
 #include <limits.h>
 
+#define DEFINE_EXPECT(func) \
+    static UINT called_count_ ## func = 0
+
+#define INCREASE_CALL_COUNTER(func) \
+    do { \
+        called_count_ ## func++;     \
+    }while(0)
+
+#define CHECK_CALLED(func) \
+    do { \
+        ok(called_count_ ## func, "expected " #func "\n"); \
+    }while(0)
+
+#define CHECK_NOT_CALLED(func) \
+    do { \
+        ok(!called_count_ ## func, "unexpected " #func "\n"); \
+    }while(0)
+
+#define CLEAR_COUNTER(func) \
+    called_count_ ## func = 0
+
 static HMODULE hmoduleRichEdit;
 static IID *pIID_ITextServices;
 static IID *pIID_ITextHost;
@@ -80,6 +101,8 @@ static ITextServicesVtbl itextServicesStdcallVtbl;
 
 /************************************************************************/
 /* ITextHost implementation for conformance testing. */
+
+DEFINE_EXPECT(ITextHostImpl_TxViewChange);
 
 typedef struct ITextHostTestImpl
 {
@@ -198,6 +221,7 @@ static void __thiscall ITextHostImpl_TxViewChange(ITextHost *iface, BOOL fUpdate
     ITextHostTestImpl *This = impl_from_ITextHost(iface);
     TRACECALL("Call to TxViewChange(%p, fUpdate=%d)\n",
                This, fUpdate);
+    INCREASE_CALL_COUNTER(ITextHostImpl_TxViewChange);
 }
 
 static BOOL __thiscall ITextHostImpl_TxCreateCaret(ITextHost *iface, HBITMAP hbmp, INT xWidth, INT yHeight)
@@ -400,6 +424,8 @@ static HRESULT __thiscall ITextHostImpl_TxGetPropertyBits(ITextHost *iface, DWOR
 
 static int en_vscroll_sent;
 static int en_update_sent;
+static int en_change_sent;
+static int en_selchange_sent;
 static HRESULT __thiscall ITextHostImpl_TxNotify( ITextHost *iface, DWORD code, void *data )
 {
     ITextHostTestImpl *This = impl_from_ITextHost(iface);
@@ -413,6 +439,15 @@ static HRESULT __thiscall ITextHostImpl_TxNotify( ITextHost *iface, DWORD code, 
     case EN_UPDATE:
         en_update_sent++;
         ok( !data, "got %p\n", data );
+        break;
+    case EN_CHANGE:
+        en_change_sent++;
+        todo_wine
+        ok( data != NULL, "got %p\n", data );
+        break;
+    case EN_SELCHANGE:
+        en_selchange_sent++;
+        ok( data != NULL, "got %p\n", data );
         break;
     }
     return S_OK;
@@ -620,7 +655,7 @@ static BOOL init_texthost(ITextServices **txtserv, ITextHost **ret)
     memset(&dummyTextHost->char_format, 0, sizeof(dummyTextHost->char_format));
     dummyTextHost->char_format.cbSize = sizeof(dummyTextHost->char_format);
     dummyTextHost->char_format.dwMask = CFM_ALL2;
-    dummyTextHost->scrollbars = 0;
+    dummyTextHost->scrollbars = ES_AUTOVSCROLL;
     dummyTextHost->props = 0;
     hf = GetStockObject(DEFAULT_GUI_FONT);
     hf_to_cf(hf, &dummyTextHost->char_format);
@@ -753,7 +788,7 @@ static void _check_txgetnaturalsize(HRESULT res, LONG width, LONG height, HDC hd
     RECT expected_rect = rect;
     LONG expected_width, expected_height;
 
-    DrawTextW(hdc, string, -1, &expected_rect, DT_LEFT | DT_CALCRECT | DT_NOCLIP | DT_EDITCONTROL | DT_WORDBREAK);
+    DrawTextW(hdc, string, -1, &expected_rect, DT_LEFT | DT_CALCRECT | DT_NOCLIP | DT_EDITCONTROL);
     expected_width = expected_rect.right - expected_rect.left;
     expected_height = expected_rect.bottom - expected_rect.top;
     ok_(__FILE__,line)(res == S_OK, "ITextServices_TxGetNaturalSize failed: 0x%08lx.\n", res);
@@ -1240,6 +1275,127 @@ static void test_notifications( void )
     ITextHost_Release( host );
 }
 
+static void test_set_selection_message( void )
+{
+    ITextServices *txtserv;
+    ITextHost *host;
+    CHARRANGE range;
+    LRESULT result;
+    HRESULT hr;
+
+    if (!init_texthost(&txtserv, &host))
+        return;
+
+    ITextServices_TxSetText(txtserv, L"");
+
+    if (winetest_debug > 1) trace("TxSendMessage EM_SETEVENTMASK");
+
+    hr = ITextServices_TxSendMessage( txtserv, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_SELCHANGE, &result );
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    if (winetest_debug > 1) trace("TxSendMessage EM_SETSEL 0 20");
+
+    CLEAR_COUNTER(ITextHostImpl_TxViewChange);
+    en_change_sent = 0;
+    en_selchange_sent = 0;
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_SETSEL, 0, 20, &result);
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    CHECK_CALLED(ITextHostImpl_TxViewChange);
+    ok(en_change_sent == 0, "got %d\n", en_change_sent);
+    todo_wine
+    ok(en_selchange_sent == 0, "got %d\n", en_selchange_sent);
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_EXGETSEL, 0, (LPARAM)&range, &result); ok( hr == S_OK, "got %08lx\n", hr ); trace("getsel: %lu, %lu\n", range.cpMin, range.cpMax);
+
+    if (winetest_debug > 1) trace("TxSendMessage EM_SETSELEX 0 20");
+
+    CLEAR_COUNTER(ITextHostImpl_TxViewChange);
+    en_change_sent = 0;
+    en_selchange_sent = 0;
+
+    range.cpMin = 0;
+    range.cpMax = 20;
+    hr = ITextServices_TxSendMessage(txtserv, EM_EXSETSEL, 0, (LPARAM)&range, &result);
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    CHECK_CALLED(ITextHostImpl_TxViewChange);
+    ok(en_change_sent == 0, "got %d\n", en_change_sent);
+    ok(en_selchange_sent == 0, "got %d\n", en_selchange_sent);
+
+    if (winetest_debug > 1) trace("TxSetText");
+
+    CLEAR_COUNTER(ITextHostImpl_TxViewChange);
+    en_change_sent = 0;
+    en_selchange_sent = 0;
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_EXGETSEL, 0, (LPARAM)&range, &result); ok( hr == S_OK, "got %08lx\n", hr ); trace("getsel: %lu, %lu\n", range.cpMin, range.cpMax);
+
+    ITextServices_TxSetText(txtserv, lorem);
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_EXGETSEL, 0, (LPARAM)&range, &result); ok( hr == S_OK, "got %08lx\n", hr ); trace("getsel: %lu, %lu\n", range.cpMin, range.cpMax);
+
+    CHECK_CALLED(ITextHostImpl_TxViewChange);
+    ok(en_change_sent == 1, "got %d\n", en_change_sent);
+    todo_wine
+    ok(en_selchange_sent == 0, "got %d\n", en_selchange_sent);
+
+    if (winetest_debug > 1) trace("TxSendMessage EM_SETSEL 0 20");
+
+    CLEAR_COUNTER(ITextHostImpl_TxViewChange);
+    en_change_sent = 0;
+    en_selchange_sent = 0;
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_SETSEL, 0, 20, &result);
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    CHECK_CALLED(ITextHostImpl_TxViewChange);
+    ok(en_change_sent == 0, "got %d\n", en_change_sent);
+    ok(en_selchange_sent == 1, "got %d\n", en_selchange_sent);
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_EXGETSEL, 0, (LPARAM)&range, &result); ok( hr == S_OK, "got %08lx\n", hr ); trace("getsel: %lu, %lu\n", range.cpMin, range.cpMax);
+
+    if (winetest_debug > 1) trace("TxSendMessage EM_SETSELEX 0 20");
+
+    CLEAR_COUNTER(ITextHostImpl_TxViewChange);
+    en_change_sent = 0;
+    en_selchange_sent = 0;
+
+    range.cpMin = 0;
+    range.cpMax = 20;
+    hr = ITextServices_TxSendMessage(txtserv, EM_EXSETSEL, 0, (LPARAM)&range, &result);
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    CHECK_CALLED(ITextHostImpl_TxViewChange);
+    ok(en_change_sent == 0, "got %d\n", en_change_sent);
+    ok(en_selchange_sent == 0, "got %d\n", en_selchange_sent);
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_EXGETSEL, 0, (LPARAM)&range, &result); ok( hr == S_OK, "got %08lx\n", hr ); trace("getsel: %lu, %lu\n", range.cpMin, range.cpMax);
+
+    if (winetest_debug > 1) trace("release interfaces");
+
+    ITextServices_Release( txtserv );
+    ITextHost_Release( host );
+}
+
+static void test_scrollcaret( void )
+{
+    ITextServices *txtserv;
+    ITextHost *host;
+    LRESULT result;
+    HRESULT hr;
+
+    if (!init_texthost(&txtserv, &host))
+        return;
+
+    hr = ITextServices_TxSendMessage(txtserv, EM_SCROLLCARET, 0, 0, &result);
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    ITextServices_Release( txtserv );
+    ITextHost_Release( host );
+}
+
 START_TEST( txtsrv )
 {
     ITextServices *txtserv;
@@ -1273,6 +1429,8 @@ START_TEST( txtsrv )
         test_default_format();
         test_TxGetScroll();
         test_notifications();
+        test_set_selection_message();
+        test_scrollcaret();
     }
     if (wrapperCodeMem) VirtualFree(wrapperCodeMem, 0, MEM_RELEASE);
 }

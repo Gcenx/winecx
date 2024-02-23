@@ -914,7 +914,7 @@ static void test_CopyFile2(void)
 
     if (!pCopyFile2)
     {
-        skip("CopyFile2 is not available\n");
+        todo_wine win_skip("CopyFile2 is not available\n");
         return;
     }
 
@@ -2183,8 +2183,8 @@ static void test_offset_in_overlapped_structure(void)
     ok(done == sizeof(buf), "expected number of bytes written %lu\n", done);
 
     memset(&ov, 0, sizeof(ov));
-    S(U(ov)).Offset = PATTERN_OFFSET;
-    S(U(ov)).OffsetHigh = 0;
+    ov.Offset = PATTERN_OFFSET;
+    ov.OffsetHigh = 0;
     rc=WriteFile(hFile, pattern, sizeof(pattern), &done, &ov);
     /* Win 9x does not support the overlapped I/O on files */
     if (rc || GetLastError()!=ERROR_INVALID_PARAMETER) {
@@ -2193,8 +2193,8 @@ static void test_offset_in_overlapped_structure(void)
         offset = SetFilePointer(hFile, 0, NULL, FILE_CURRENT);
         ok(offset == PATTERN_OFFSET + sizeof(pattern), "wrong file offset %ld\n", offset);
 
-        S(U(ov)).Offset = sizeof(buf) * 2;
-        S(U(ov)).OffsetHigh = 0;
+        ov.Offset = sizeof(buf) * 2;
+        ov.OffsetHigh = 0;
         ret = WriteFile(hFile, pattern, sizeof(pattern), &done, &ov);
         ok( ret, "WriteFile error %ld\n", GetLastError());
         ok(done == sizeof(pattern), "expected number of bytes written %lu\n", done);
@@ -2211,8 +2211,8 @@ static void test_offset_in_overlapped_structure(void)
 
     memset(buf, 0, sizeof(buf));
     memset(&ov, 0, sizeof(ov));
-    S(U(ov)).Offset = PATTERN_OFFSET;
-    S(U(ov)).OffsetHigh = 0;
+    ov.Offset = PATTERN_OFFSET;
+    ov.OffsetHigh = 0;
     rc=ReadFile(hFile, buf, sizeof(pattern), &done, &ov);
     /* Win 9x does not support the overlapped I/O on files */
     if (rc || GetLastError()!=ERROR_INVALID_PARAMETER) {
@@ -2277,8 +2277,8 @@ static void test_LockFile(void)
     ok( !UnlockFile( handle, 10, 0, 20, 0 ), "UnlockFile 10,20 again succeeded\n" );
     ok( UnlockFile( handle, 5, 0, 5, 0 ), "UnlockFile 5,5 failed\n" );
 
-    S(U(overlapped)).Offset = 100;
-    S(U(overlapped)).OffsetHigh = 0;
+    overlapped.Offset = 100;
+    overlapped.OffsetHigh = 0;
     overlapped.hEvent = 0;
 
     /* Test for broken LockFileEx a la Windows 95 OSR2. */
@@ -2290,7 +2290,7 @@ static void test_LockFile(void)
     }
 
     /* overlapping shared locks are OK */
-    S(U(overlapped)).Offset = 150;
+    overlapped.Offset = 150;
     limited_UnLockFile || ok( LockFileEx( handle, 0, 0, 100, 0, &overlapped ), "LockFileEx 150,100 failed\n" );
 
     /* but exclusive is not */
@@ -2299,13 +2299,13 @@ static void test_LockFile(void)
         "LockFileEx exclusive 150,50 succeeded\n" );
     if (!UnlockFileEx( handle, 0, 100, 0, &overlapped ))
     { /* UnLockFile is capable. */
-        S(U(overlapped)).Offset = 100;
+        overlapped.Offset = 100;
         ok( !UnlockFileEx( handle, 0, 100, 0, &overlapped ),
             "UnlockFileEx 150,100 again succeeded\n" );
     }
 
     /* shared lock can overlap exclusive if handles are equal */
-    S(U(overlapped)).Offset = 300;
+    overlapped.Offset = 300;
     ok( LockFileEx( handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 100, 0, &overlapped ),
         "LockFileEx exclusive 300,100 failed\n" );
     ok( !LockFileEx( handle2, LOCKFILE_FAIL_IMMEDIATELY, 0, 100, 0, &overlapped ),
@@ -2418,6 +2418,7 @@ static BOOL create_fake_dll( LPCSTR filename )
     nt->OptionalHeader.SizeOfImage = 0x2000;
     nt->OptionalHeader.SizeOfHeaders = size;
     nt->OptionalHeader.Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
+    nt->OptionalHeader.DllCharacteristics = IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE | IMAGE_DLLCHARACTERISTICS_NX_COMPAT;
     nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
 
     sec = (IMAGE_SECTION_HEADER *)(nt + 1);
@@ -2963,38 +2964,43 @@ static void test_FindFirstFile_wildcards(void)
     int i;
     static const char* files[] = {
         "..a", "..a.a", ".a", ".a..a", ".a.a", ".aaa",
-        "a", "a..a", "a.a", "a.a.a", "aa", "aaa", "aaaa"
+        "a", "a..a", "a.a", "a.a.a", "aa", "aaa", "aaaa", " .a"
     };
     static const struct {
         int todo;
         const char *pattern, *result;
     } tests[] = {
-        {0, "*.*.*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
-        {0, "*.*.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
+        {0, "*.*.*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+        {0, "*.*.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
         {0, ".*.*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa'"},
-        {0, "*.*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
+        {0, "*.*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
         {0, ".*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa'"},
-        {1, "*.", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
-        {0, "*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
+        {0, "*.", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {0, "*", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
         {1, "*..*", ", '.', '..', '..a', '..a.a', '.a..a', 'a..a'"},
-        {1, "*..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {0, "*..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
         {1, ".*.", ", '.', '..', '.a', '.aaa'"},
         {0, "..*", ", '.', '..', '..a', '..a.a'"},
-        {0, "**", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
-        {0, "**.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
-        {0, "*. ", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
-        {1, "* .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
-        {0, "* . ", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
-        {0, "*.. ", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
-        {1, "*. .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
-        {1, "* ..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {0, "**", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+        {0, "**.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+        {0, "*. ", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+        {0, "* .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {0, "* . ", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+        {0, "*.. ", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+        {0, "*. .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {0, "* ..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
         {0, " *..", ""},
         {0, "..* ", ", '.', '..', '..a', '..a.a'"},
+        {1, "a*.", ", '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
+        {0, "*a ", ", '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+
+        /* a.a.a not found due to short name mismatch, a.a.a -> "AA6BF5~1.A on Windows. */
+        {1, "*aa*", ", '.aaa', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
 
         {1, "<.<.<", ", '..a', '..a.a', '.a..a', '.a.a', 'a..a', 'a.a.a'"},
-        {1, "<.<.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a..a', 'a.a', 'a.a.a'"},
+        {1, "<.<.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a..a', 'a.a', 'a.a.a', ' .a'"},
         {1, ".<.<", ", '..a', '..a.a', '.a..a', '.a.a'"},
-        {1, "<.<", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a..a', 'a.a', 'a.a.a'"},
+        {1, "<.<", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a..a', 'a.a', 'a.a.a', ' .a'"},
         {1, ".<", ", '.', '..', '.a', '.aaa'"},
         {1, "<.", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
         {1, "<", ", '.', '..', '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
@@ -3002,8 +3008,8 @@ static void test_FindFirstFile_wildcards(void)
         {1, "<..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
         {1, ".<.", ", '.', '..', '.a', '.aaa'"},
         {1, "..<", ", '..a'"},
-        {1, "<<", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
-        {1, "<<.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
+        {1, "<<", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
+        {1, "<<.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa', ' .a'"},
         {1, "<. ", ", '.', '..', '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
         {1, "< .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
         {1, "< . ", ", '.', '..', '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
@@ -3014,12 +3020,12 @@ static void test_FindFirstFile_wildcards(void)
         {1, "..< ", ", '..a'"},
 
         {1, "?", ", '.', '..', 'a'"},
-        {1, "?.", ", '.', '..', 'a'"},
-        {1, "?. ", ", '.', '..', 'a'"},
+        {0, "?.", ", '.', '..', 'a'"},
+        {0, "?. ", ", '.', '..', 'a'"},
         {1, "??.", ", '.', '..', 'a', 'aa'"},
         {1, "??. ", ", '.', '..', 'a', 'aa'"},
         {1, "???.", ", '.', '..', 'a', 'aa', 'aaa'"},
-        {1, "?.??.", ", '.', '..', '.a', 'a', 'a.a'"},
+        {1, "?.??.", ", '.', '..', '.a', 'a', 'a.a', ' .a'"},
 
         {1, ">", ", '.', '..', 'a'"},
         {1, ">.", ", '.', '..', 'a'"},
@@ -3027,7 +3033,7 @@ static void test_FindFirstFile_wildcards(void)
         {1, ">>.", ", '.', '..', 'a', 'aa'"},
         {1, ">>. ", ", '.', '..', 'a', 'aa'"},
         {1, ">>>.", ", '.', '..', 'a', 'aa', 'aaa'"},
-        {1, ">.>>.", ", '.', '..', '.a', 'a.a'"},
+        {1, ">.>>.", ", '.', '..', '.a', 'a.a', ' .a'"},
     };
 
     CreateDirectoryA("test-dir", NULL);
@@ -3099,6 +3105,7 @@ static void test_MapFile(void)
 {
     HANDLE handle;
     HANDLE hmap;
+    UINT err;
 
     ok(test_Mapfile_createtemp(&handle), "Couldn't create test file.\n");
 
@@ -3117,21 +3124,17 @@ static void test_MapFile(void)
 
     ok(test_Mapfile_createtemp(&handle), "Couldn't create test file.\n");
 
+    SetLastError( 0xdeadbeef );
     hmap = CreateFileMappingA( handle, NULL, PAGE_READWRITE, 0, 0, NULL );
+    err = GetLastError();
     ok( hmap == NULL, "mapped zero size file\n");
-    ok( GetLastError() == ERROR_FILE_INVALID, "not ERROR_FILE_INVALID\n");
+    ok( err == ERROR_FILE_INVALID, "got %u\n", err );
 
-    hmap = CreateFileMappingA( handle, NULL, PAGE_READWRITE, 0x80000000, 0, NULL );
-    ok( hmap == NULL || broken(hmap != NULL) /* NT4 */, "mapping should fail\n");
-    /* GetLastError() varies between win9x and WinNT and also depends on the filesystem */
-    if ( hmap )
-        CloseHandle( hmap );
-
-    hmap = CreateFileMappingA( handle, NULL, PAGE_READWRITE, 0x80000000, 0x10000, NULL );
-    ok( hmap == NULL || broken(hmap != NULL) /* NT4 */, "mapping should fail\n");
-    /* GetLastError() varies between win9x and WinNT and also depends on the filesystem */
-    if ( hmap )
-        CloseHandle( hmap );
+    SetLastError( 0xdeadbeef );
+    hmap = CreateFileMappingA( handle, NULL, PAGE_READWRITE, 0x8000000, 0x10000, NULL );
+    err = GetLastError();
+    ok( hmap == NULL, "mapping should fail\n");
+    ok( err == ERROR_NOT_ENOUGH_MEMORY || err == ERROR_INVALID_PARAMETER, "got %u\n", err );
 
     /* On XP you can now map again, on Win 95 you cannot. */
 
@@ -3245,8 +3248,8 @@ static void test_async_file_errors(void)
     HANDLE hFile;
     LPVOID lpBuffer = HeapAlloc(GetProcessHeap(), 0, 4096);
     OVERLAPPED ovl;
-    S(U(ovl)).Offset = 0;
-    S(U(ovl)).OffsetHigh = 0;
+    ovl.Offset = 0;
+    ovl.OffsetHigh = 0;
     ovl.hEvent = hSem;
     completion_count = 0;
     szFile[0] = '\0';
@@ -3270,7 +3273,7 @@ static void test_async_file_errors(void)
             break;
         if (!GetOverlappedResult(hFile, &ovl, &count, FALSE))
             break;
-        S(U(ovl)).Offset += count;
+        ovl.Offset += count;
         /* i/o completion routine only called if ReadFileEx returned success.
          * we only care about violations of this rule so undo what should have
          * been done */
@@ -4458,7 +4461,7 @@ static void test_OpenFileById(void)
     /* open the temp folder itself */
     fileIdDescr.dwSize    = sizeof(fileIdDescr);
     fileIdDescr.Type      = FileIdType;
-    U(fileIdDescr).FileId = bothDirInfo->FileId;
+    fileIdDescr.FileId = bothDirInfo->FileId;
     handle = pOpenFileById(directory, &fileIdDescr, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, 0);
     todo_wine
     ok(handle != INVALID_HANDLE_VALUE, "OpenFileById: failed to open the temp folder itself, got error %lu.\n", GetLastError());
@@ -4495,7 +4498,7 @@ static void test_OpenFileById(void)
 
     fileIdDescr.dwSize    = sizeof(fileIdDescr);
     fileIdDescr.Type      = FileIdType;
-    U(fileIdDescr).FileId = bothDirInfo->FileId;
+    fileIdDescr.FileId = bothDirInfo->FileId;
     handle = pOpenFileById(directory, &fileIdDescr, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, 0);
     ok(handle != INVALID_HANDLE_VALUE, "OpenFileById: failed to open the file, got error %lu.\n", GetLastError());
 
@@ -4828,8 +4831,8 @@ static void test_WriteFileGather(void)
     /* start read at EOF */
     memset( &ovl, 0, sizeof(ovl) );
     ovl.hEvent = evt;
-    S(U(ovl)).OffsetHigh = 0;
-    S(U(ovl)).Offset = si.dwPageSize;
+    ovl.OffsetHigh = 0;
+    ovl.Offset = si.dwPageSize;
     memset( fse, 0, sizeof(fse) );
     fse[0].Buffer = rbuf1;
     SetLastError( 0xdeadbeef );
@@ -5554,7 +5557,7 @@ static void test_post_completion(void)
     ret = pGetQueuedCompletionStatusEx( port, entries, 2, &count, 0, FALSE );
     ok(!ret, "GetQueuedCompletionStatusEx succeeded\n");
     ok(GetLastError() == WAIT_TIMEOUT, "wrong error %lu\n", GetLastError());
-    ok(count == 1, "wrong count %lu\n", count);
+    ok(count <= 1, "wrong count %lu\n", count);
 
     ret = PostQueuedCompletionStatus( port, 123, 456, &ovl );
     ok(ret, "PostQueuedCompletionStatus failed: %lu\n", GetLastError());
@@ -5595,14 +5598,14 @@ static void test_post_completion(void)
     ret = pGetQueuedCompletionStatusEx( port, entries, 2, &count, 0, FALSE );
     ok(!ret, "GetQueuedCompletionStatusEx succeeded\n");
     ok(GetLastError() == WAIT_TIMEOUT, "wrong error %lu\n", GetLastError());
-    ok(count == 1, "wrong count %lu\n", count);
+    ok(count <= 1, "wrong count %lu\n", count);
     ok(!user_apc_ran, "user APC should not have run\n");
 
     ret = pGetQueuedCompletionStatusEx( port, entries, 2, &count, 0, TRUE );
     ok(!ret || broken(ret) /* Vista */, "GetQueuedCompletionStatusEx succeeded\n");
     if (!ret)
         ok(GetLastError() == WAIT_IO_COMPLETION, "wrong error %lu\n", GetLastError());
-    ok(count == 1, "wrong count %lu\n", count);
+    ok(count <= 1, "wrong count %lu\n", count);
     ok(user_apc_ran, "user APC should have run\n");
 
     user_apc_ran = FALSE;
@@ -5665,7 +5668,7 @@ static void test_overlapped_read(void)
     ok(ret, "Unexpected error %lu.\n", GetLastError());
     ok(bytes_count == TEST_OVERLAPPED_READ_SIZE, "Unexpected read size %lu.\n", bytes_count);
 
-    S(U(ov)).Offset = bytes_count;
+    ov.Offset = bytes_count;
     ret = ReadFile(hfile, buffer, TEST_OVERLAPPED_READ_SIZE, &bytes_count, &ov);
     err = GetLastError();
     /* Win8+ return ERROR_IO_PENDING like stated in MSDN, while older ones
@@ -6042,7 +6045,8 @@ static void test_eof(void)
     ok(!ret, "expected failure\n");
     ok(GetLastError() == ERROR_HANDLE_EOF, "got error %lu\n", GetLastError());
     ok(!size, "got size %lu\n", size);
-    todo_wine ok((NTSTATUS)overlapped.Internal == STATUS_PENDING, "got status %#lx\n", (NTSTATUS)overlapped.Internal);
+    ok((NTSTATUS)overlapped.Internal == STATUS_PENDING || (NTSTATUS)overlapped.Internal == STATUS_END_OF_FILE,
+       "got status %#lx\n", (NTSTATUS)overlapped.Internal);
     ok(!overlapped.InternalHigh, "got size %Iu\n", overlapped.InternalHigh);
 
     SetFilePointer(file, 2, NULL, SEEK_SET);

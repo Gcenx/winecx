@@ -24,6 +24,8 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winternl.h"
+#include "schannel.h"
+#include "sspi.h"
 
 #include "wine/debug.h"
 #include "winldap_private.h"
@@ -248,10 +250,45 @@ exit:
  */
 ULONG CDECL WLDAP32_ldap_connect( LDAP *ld, struct l_timeval *timeout )
 {
+    QUERYCLIENTCERT *client_cert_callback = CLIENT_CERT_CALLBACK(ld);
+    VERIFYSERVERCERT *server_cert_callback = SERVER_CERT_CALLBACK(ld);
+    int ret;
+
     TRACE( "(%p, %p)\n", ld, timeout );
 
     if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
-    return WLDAP32_LDAP_SUCCESS; /* FIXME: do something, e.g. ping the host */
+    if (CONNECTED(ld)) return WLDAP32_LDAP_SUCCESS;
+
+    if (client_cert_callback)
+        FIXME( "mTLS is not implemented\n" );
+
+    if (timeout && (timeout->tv_sec || timeout->tv_usec)) FIXME( "ignoring timeout\n" );
+    if ((ret = ldap_connect( CTX(ld) ))) return map_error( ret );
+
+    if (server_cert_callback)
+    {
+        CtxtHandle *tls_context;
+        const CERT_CONTEXT *cert;
+
+        if ((ret = ldap_get_option( CTX(ld), LDAP_OPT_X_TLS_SSL_CTX, &tls_context )))
+            return map_error( ret );
+
+        if (QueryContextAttributesA( tls_context, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &cert ) == SEC_E_OK)
+        {
+            if (server_cert_callback( ld, &cert ))
+            {
+                TRACE( "accepted\n" );
+            }
+            else
+            {
+                WARN( "rejected\n" );
+                return WLDAP32_LDAP_SERVER_DOWN;
+            }
+        }
+    }
+
+    CONNECTED(ld) = TRUE;
+    return WLDAP32_LDAP_SUCCESS;
 }
 
 /***********************************************************************
@@ -417,13 +454,12 @@ ULONG CDECL ldap_start_tls_sW( LDAP *ld, ULONG *retval, LDAPMessage **result, LD
     }
 
     if (!ld) return ~0u;
+    if (CONNECTED(ld)) return WLDAP32_LDAP_LOCAL_ERROR;
 
     if (serverctrls && !(serverctrlsU = controlarrayWtoU( serverctrls ))) goto exit;
     if (clientctrls && !(clientctrlsU = controlarrayWtoU( clientctrls ))) goto exit;
-    else
-    {
-        ret = map_error( ldap_start_tls_s( CTX(ld), serverctrlsU, clientctrlsU ) );
-    }
+
+    ret = map_error( ldap_start_tls_s( CTX(ld), serverctrlsU, clientctrlsU ) );
 
 exit:
     controlarrayfreeU( serverctrlsU );

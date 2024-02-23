@@ -87,7 +87,7 @@ static BOOL (WINAPI *pConvertSecurityDescriptorToStringSecurityDescriptorA)(PSEC
                                                                             SECURITY_INFORMATION, LPSTR *, PULONG );
 static BOOL (WINAPI *pSetFileSecurityA)(LPCSTR, SECURITY_INFORMATION,
                                           PSECURITY_DESCRIPTOR);
-static DWORD (WINAPI *pGetNamedSecurityInfoA)(LPSTR, SE_OBJECT_TYPE, SECURITY_INFORMATION,
+static DWORD (WINAPI *pGetNamedSecurityInfoA)(const char *, SE_OBJECT_TYPE, SECURITY_INFORMATION,
                                               PSID*, PSID*, PACL*, PACL*,
                                               PSECURITY_DESCRIPTOR*);
 static DWORD (WINAPI *pSetNamedSecurityInfoA)(LPSTR, SE_OBJECT_TYPE, SECURITY_INFORMATION,
@@ -4782,6 +4782,7 @@ static void test_GetSecurityInfo(void)
     SID_IDENTIFIER_AUTHORITY sia = { SECURITY_NT_AUTHORITY };
     int domain_users_ace_id = -1, admins_ace_id = -1, i;
     DWORD sid_size = sizeof(admin_ptr), l = sizeof(b);
+    SECURITY_ATTRIBUTES sa = {.nLength = sizeof(sa)};
     PSID admin_sid = (PSID) admin_ptr, user_sid;
     char sd[SECURITY_DESCRIPTOR_MIN_LENGTH];
     BOOL owner_defaulted, group_defaulted;
@@ -4795,6 +4796,24 @@ static void test_GetSecurityInfo(void)
     PACL pDacl;
     BYTE flags;
     DWORD ret;
+
+    static const SE_OBJECT_TYPE kernel_types[] =
+    {
+        SE_FILE_OBJECT,
+        SE_KERNEL_OBJECT,
+        SE_WMIGUID_OBJECT,
+    };
+
+    static const SE_OBJECT_TYPE invalid_types[] =
+    {
+        SE_UNKNOWN_OBJECT_TYPE,
+        SE_DS_OBJECT,
+        SE_DS_OBJECT_ALL,
+        SE_PROVIDER_DEFINED_OBJECT,
+        SE_REGISTRY_WOW64_32KEY,
+        SE_REGISTRY_WOW64_64KEY,
+        0xdeadbeef,
+    };
 
     if (!pSetSecurityInfo)
     {
@@ -4984,6 +5003,80 @@ static void test_GetSecurityInfo(void)
            "Builtin Admins ACE has unexpected mask (0x%lx != 0x%x)\n", ace->Mask, PROCESS_ALL_ACCESS);
     }
     LocalFree(pSD);
+
+    ret = GetSecurityInfo(NULL, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+    ok(ret == ERROR_INVALID_HANDLE, "got error %lu\n", ret);
+
+    ret = GetSecurityInfo(GetCurrentProcess(), SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+    ok(!ret, "got error %lu\n", ret);
+    LocalFree(pSD);
+
+    sa.lpSecurityDescriptor = sd;
+    obj = CreateEventA(&sa, TRUE, TRUE, NULL);
+    pDacl = (PACL)&dacl;
+
+    for (size_t i = 0; i < ARRAY_SIZE(kernel_types); ++i)
+    {
+        winetest_push_context("Type %#x", kernel_types[i]);
+
+        ret = GetSecurityInfo(NULL, kernel_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+        ok(ret == ERROR_INVALID_HANDLE, "got error %lu\n", ret);
+
+        ret = GetSecurityInfo(GetCurrentProcess(), kernel_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+        ok(!ret, "got error %lu\n", ret);
+        LocalFree(pSD);
+
+        ret = GetSecurityInfo(obj, kernel_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+        ok(!ret, "got error %lu\n", ret);
+        LocalFree(pSD);
+
+        ret = SetSecurityInfo(NULL, kernel_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, pDacl, NULL);
+        ok(ret == ERROR_INVALID_HANDLE, "got error %lu\n", ret);
+
+        ret = SetSecurityInfo(obj, kernel_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, pDacl, NULL);
+        ok(!ret || ret == ERROR_NO_SECURITY_ON_OBJECT /* win 7 */, "got error %lu\n", ret);
+
+        winetest_pop_context();
+    }
+
+    ret = GetSecurityInfo(GetCurrentProcess(), SE_REGISTRY_KEY,
+            DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+    todo_wine ok(ret == ERROR_INVALID_HANDLE, "got error %lu\n", ret);
+
+    ret = GetSecurityInfo(obj, SE_REGISTRY_KEY,
+            DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+    todo_wine ok(ret == ERROR_INVALID_HANDLE, "got error %lu\n", ret);
+
+    CloseHandle(obj);
+
+    for (size_t i = 0; i < ARRAY_SIZE(invalid_types); ++i)
+    {
+        winetest_push_context("Type %#x", invalid_types[i]);
+
+        ret = GetSecurityInfo(NULL, invalid_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+        ok(ret == ERROR_INVALID_HANDLE, "got error %lu\n", ret);
+
+        ret = GetSecurityInfo((HANDLE)0xdeadbeef, invalid_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &pSD);
+        todo_wine ok(ret == ERROR_INVALID_PARAMETER, "got error %lu\n", ret);
+
+        ret = SetSecurityInfo(NULL, invalid_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, pDacl, NULL);
+        ok(ret == ERROR_INVALID_HANDLE, "got error %lu\n", ret);
+
+        ret = SetSecurityInfo((HANDLE)0xdeadbeef, invalid_types[i],
+                DACL_SECURITY_INFORMATION, NULL, NULL, pDacl, NULL);
+        todo_wine ok(ret == ERROR_INVALID_PARAMETER, "got error %lu\n", ret);
+
+        winetest_pop_context();
+    }
 }
 
 static void test_GetSidSubAuthority(void)
@@ -8091,22 +8184,70 @@ static void test_pseudo_handle_security(void)
     }
 }
 
+static const LUID_AND_ATTRIBUTES *find_privilege(const TOKEN_PRIVILEGES *privs, const LUID *luid)
+{
+    DWORD i;
+
+    for (i = 0; i < privs->PrivilegeCount; ++i)
+    {
+        if (!memcmp(luid, &privs->Privileges[i].Luid, sizeof(LUID)))
+            return &privs->Privileges[i];
+    }
+
+    return NULL;
+}
+
 static void test_duplicate_token(void)
 {
+    const DWORD orig_access = TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_PRIVILEGES;
+    char prev_privs_buffer[128], ret_privs_buffer[1024];
+    TOKEN_PRIVILEGES *prev_privs = (void *)prev_privs_buffer;
+    TOKEN_PRIVILEGES *ret_privs = (void *)ret_privs_buffer;
+    const LUID_AND_ATTRIBUTES *priv;
+    TOKEN_PRIVILEGES privs;
+    SECURITY_QUALITY_OF_SERVICE qos = {.Length = sizeof(qos)};
+    OBJECT_ATTRIBUTES attr = {.Length = sizeof(attr)};
+    SECURITY_IMPERSONATION_LEVEL level;
     HANDLE token, token2;
+    DWORD size;
     BOOL ret;
 
-    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT, &token);
+    ret = OpenProcessToken(GetCurrentProcess(), orig_access, &token);
+    ok(ret, "got error %lu\n", GetLastError());
+
+    /* Disable a privilege, to see if that privilege modification is preserved
+     * in the duplicated tokens. */
+    privs.PrivilegeCount = 1;
+    ret = LookupPrivilegeValueA(NULL, "SeChangeNotifyPrivilege", &privs.Privileges[0].Luid);
+    ok(ret, "got error %lu\n", GetLastError());
+    privs.Privileges[0].Attributes = 0;
+    ret = AdjustTokenPrivileges(token, FALSE, &privs, sizeof(prev_privs_buffer), prev_privs, &size);
     ok(ret, "got error %lu\n", GetLastError());
 
     ret = DuplicateToken(token, SecurityAnonymous, &token2);
     ok(ret, "got error %lu\n", GetLastError());
     TEST_GRANTED_ACCESS(token2, TOKEN_QUERY | TOKEN_IMPERSONATE);
+    ret = GetTokenInformation(token2, TokenImpersonationLevel, &level, sizeof(level), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(level == SecurityAnonymous, "got impersonation level %#x\n", level);
+    ret = GetTokenInformation(token2, TokenPrivileges, ret_privs, sizeof(ret_privs_buffer), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    priv = find_privilege(ret_privs, &privs.Privileges[0].Luid);
+    ok(!!priv, "Privilege should exist\n");
+    todo_wine ok(priv->Attributes == SE_GROUP_MANDATORY, "Got attributes %#lx\n", priv->Attributes);
     CloseHandle(token2);
 
     ret = DuplicateTokenEx(token, 0, NULL, SecurityAnonymous, TokenPrimary, &token2);
     ok(ret, "got error %lu\n", GetLastError());
-    TEST_GRANTED_ACCESS(token2, TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT);
+    TEST_GRANTED_ACCESS(token2, orig_access);
+    ret = GetTokenInformation(token2, TokenImpersonationLevel, &level, sizeof(level), &size);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got error %lu.\n", GetLastError());
+    ret = GetTokenInformation(token2, TokenPrivileges, ret_privs, sizeof(ret_privs_buffer), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    priv = find_privilege(ret_privs, &privs.Privileges[0].Luid);
+    ok(!!priv, "Privilege should exist\n");
+    todo_wine ok(priv->Attributes == SE_GROUP_MANDATORY, "Got attributes %#lx\n", priv->Attributes);
     CloseHandle(token2);
 
     ret = DuplicateTokenEx(token, MAXIMUM_ALLOWED, NULL, SecurityAnonymous, TokenPrimary, &token2);
@@ -8118,6 +8259,57 @@ static void test_duplicate_token(void)
     ok(ret, "got error %lu\n", GetLastError());
     TEST_GRANTED_ACCESS(token2, TOKEN_QUERY_SOURCE);
     CloseHandle(token2);
+
+    ret = DuplicateTokenEx(token, 0, NULL, SecurityIdentification, TokenImpersonation, &token2);
+    ok(ret, "got error %lu\n", GetLastError());
+    TEST_GRANTED_ACCESS(token2, orig_access);
+    ret = GetTokenInformation(token2, TokenImpersonationLevel, &level, sizeof(level), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(level == SecurityIdentification, "got impersonation level %#x\n", level);
+    ret = GetTokenInformation(token2, TokenPrivileges, ret_privs, sizeof(ret_privs_buffer), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    priv = find_privilege(ret_privs, &privs.Privileges[0].Luid);
+    ok(!!priv, "Privilege should exist\n");
+    todo_wine ok(priv->Attributes == SE_GROUP_MANDATORY, "Got attributes %#lx\n", priv->Attributes);
+    CloseHandle(token2);
+
+    ret = NtDuplicateToken(token, 0, &attr, FALSE, TokenImpersonation, &token2);
+    ok(ret == STATUS_SUCCESS, "Got status %#x.\n", ret);
+    TEST_GRANTED_ACCESS(token2, orig_access);
+    ret = GetTokenInformation(token2, TokenImpersonationLevel, &level, sizeof(level), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(level == SecurityAnonymous, "got impersonation level %#x\n", level);
+    ret = GetTokenInformation(token2, TokenPrivileges, ret_privs, sizeof(ret_privs_buffer), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    priv = find_privilege(ret_privs, &privs.Privileges[0].Luid);
+    ok(!!priv, "Privilege should exist\n");
+    todo_wine ok(priv->Attributes == SE_GROUP_MANDATORY, "Got attributes %#lx\n", priv->Attributes);
+    CloseHandle(token2);
+
+    ret = NtDuplicateToken(token, 0, &attr, TRUE, TokenImpersonation, &token2);
+    ok(ret == STATUS_SUCCESS, "Got status %#x.\n", ret);
+    TEST_GRANTED_ACCESS(token2, orig_access);
+    ret = GetTokenInformation(token2, TokenPrivileges, ret_privs, sizeof(ret_privs_buffer), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    priv = find_privilege(ret_privs, &privs.Privileges[0].Luid);
+    todo_wine ok(!priv, "Privilege shouldn't exist\n");
+    CloseHandle(token2);
+
+    qos.ImpersonationLevel = SecurityIdentification;
+    qos.ContextTrackingMode = SECURITY_STATIC_TRACKING;
+    qos.EffectiveOnly = FALSE;
+    attr.SecurityQualityOfService = &qos;
+    ret = NtDuplicateToken(token, 0, &attr, FALSE, TokenImpersonation, &token2);
+    ok(ret == STATUS_SUCCESS, "Got status %#x.\n", ret);
+    TEST_GRANTED_ACCESS(token2, orig_access);
+    ret = GetTokenInformation(token2, TokenImpersonationLevel, &level, sizeof(level), &size);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(level == SecurityIdentification, "got impersonation level %#x\n", level);
+    CloseHandle(token2);
+
+    privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    ret = AdjustTokenPrivileges(token, FALSE, &privs, sizeof(prev_privs_buffer), prev_privs, &size);
+    ok(ret, "got error %lu\n", GetLastError());
 
     CloseHandle(token);
 }
@@ -8560,6 +8752,56 @@ static void test_group_as_file_owner(void)
     ok(ret, "got error %lu\n", GetLastError());
 }
 
+static void test_IsValidSecurityDescriptor(void)
+{
+    SECURITY_DESCRIPTOR *sd;
+    BOOL ret;
+
+    SetLastError(0xdeadbeef);
+    ret = IsValidSecurityDescriptor(NULL);
+    ok(!ret, "Unexpected return value %d.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_SECURITY_DESCR, "Unexpected error %ld.\n", GetLastError());
+
+    sd = calloc(1, SECURITY_DESCRIPTOR_MIN_LENGTH);
+
+    SetLastError(0xdeadbeef);
+    ret = IsValidSecurityDescriptor(sd);
+    ok(!ret, "Unexpected return value %d.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_SECURITY_DESCR, "Unexpected error %ld.\n", GetLastError());
+
+    ret = InitializeSecurityDescriptor(sd, SECURITY_DESCRIPTOR_REVISION);
+    ok(ret, "Unexpected return value %d, error %ld.\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = IsValidSecurityDescriptor(sd);
+    ok(ret, "Unexpected return value %d.\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "Unexpected error %ld.\n", GetLastError());
+
+    free(sd);
+}
+
+static void test_window_security(void)
+{
+    PSECURITY_DESCRIPTOR sd;
+    BOOL present, defaulted;
+    HDESK desktop;
+    DWORD ret;
+    ACL *dacl;
+
+    desktop = GetThreadDesktop(GetCurrentThreadId());
+
+    ret = GetSecurityInfo(desktop, SE_WINDOW_OBJECT,
+            DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &sd);
+    ok(!ret, "got error %lu\n", ret);
+
+    ret = GetSecurityDescriptorDacl(sd, &present, &dacl, &defaulted);
+    ok(ret == TRUE, "got error %lu\n", GetLastError());
+    todo_wine ok(present == TRUE, "got present %d\n", present);
+    ok(defaulted == FALSE, "got defaulted %d\n", defaulted);
+
+    LocalFree(sd);
+}
+
 START_TEST(security)
 {
     init();
@@ -8629,6 +8871,8 @@ START_TEST(security)
     test_GetKernelObjectSecurity();
     test_elevation();
     test_group_as_file_owner();
+    test_IsValidSecurityDescriptor();
+    test_window_security();
 
     /* Must be the last test, modifies process token */
     test_token_security_descriptor();

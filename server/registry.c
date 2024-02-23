@@ -37,10 +37,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if defined(__APPLE__) && defined(__x86_64__)
-#include <sys/utsname.h>
-#endif
-
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "object.h"
@@ -263,7 +259,7 @@ static void dump_value( const struct key_value *value, FILE *f )
         if (((WCHAR *)value->data)[value->len / sizeof(WCHAR) - 1]) break;
         if (value->type != REG_SZ) fprintf( f, "str(%x):", value->type );
         fputc( '\"', f );
-        dump_strW( (WCHAR *)value->data, value->len, f, "\"\"" );
+        dump_strW( (WCHAR *)value->data, value->len - sizeof(WCHAR), f, "\"\"" );
         fprintf( f, "\"\n" );
         return;
 
@@ -1850,38 +1846,29 @@ static WCHAR *format_user_registry_path( const struct sid *sid, struct unicode_s
     return ascii_to_unicode_str( buffer, path );
 }
 
-/* whether to use wow64 for i386 EXEs or launch a 32-bit wine */
-static int needs_wow64(void)
-{
-#if defined(__APPLE__) && defined(__x86_64__)
-    struct utsname name;
-    unsigned major, minor;
-
-    return (uname(&name) == 0 &&
-            sscanf(name.release, "%u.%u", &major, &minor) == 2 &&
-            major >= 19 /* macOS 10.15 Catalina */);
-#else
-    return 0;
-#endif
-}
-
 static void init_supported_machines(void)
 {
     unsigned int count = 0;
 #ifdef __i386__
     if (prefix_type == PREFIX_32BIT) supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
 #elif defined(__x86_64__)
-    if (prefix_type == PREFIX_64BIT || needs_wow64()) supported_machines[count++] = IMAGE_FILE_MACHINE_AMD64;
+    if (prefix_type == PREFIX_64BIT) supported_machines[count++] = IMAGE_FILE_MACHINE_AMD64;
+#ifdef IS_WOW64_BUILD
+    else
+    {
+        supported_machines[count++] = IMAGE_FILE_MACHINE_AMD64;
+        supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
+        wow64_using_32bit_prefix = 1;
+    }
+#endif
     supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
-
-    /* CX HACK 20810: detect when using a 32-bit prefix in Wow64 mode and disable various checks */
-    wow64_using_32bit_prefix = (prefix_type == PREFIX_32BIT) && needs_wow64();
 #elif defined(__arm__)
     if (prefix_type == PREFIX_32BIT) supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;
 #elif defined(__aarch64__)
     if (prefix_type == PREFIX_64BIT)
     {
         supported_machines[count++] = IMAGE_FILE_MACHINE_ARM64;
+        supported_machines[count++] = IMAGE_FILE_MACHINE_AMD64;
         supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
     }
     supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;
@@ -2014,8 +2001,6 @@ void init_registry(void)
             {
             case IMAGE_FILE_MACHINE_I386:  mkdir( "drive_c/windows/syswow64", 0777 ); break;
             case IMAGE_FILE_MACHINE_ARMNT: mkdir( "drive_c/windows/sysarm32", 0777 ); break;
-            case IMAGE_FILE_MACHINE_AMD64: mkdir( "drive_c/windows/sysx8664", 0777 ); break;
-            case IMAGE_FILE_MACHINE_ARM64: mkdir( "drive_c/windows/sysarm64", 0777 ); break;
             }
         }
     }

@@ -30,7 +30,7 @@
 
 #include "wine/debug.h"
 
-extern BOOL WINAPI WIC_DllMain(HINSTANCE, DWORD, LPVOID) DECLSPEC_HIDDEN;
+extern BOOL WINAPI WIC_DllMain(HINSTANCE, DWORD, LPVOID);
 
 HMODULE windowscodecs_module = 0;
 
@@ -44,6 +44,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             windowscodecs_module = hinstDLL;
             break;
         case DLL_PROCESS_DETACH:
+            if (lpvReserved) break;
             ReleaseComponentInfos();
             break;
     }

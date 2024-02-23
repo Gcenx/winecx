@@ -26,6 +26,7 @@
 
 #define EXTERN_GUID DEFINE_GUID
 #include "initguid.h"
+#include "strmif.h"
 #include "wmvcore_private.h"
 
 #include "wmsdk.h"
@@ -544,7 +545,8 @@ static HRESULT WINAPI WMReader_QueryInterface(IWMReader *iface, REFIID iid, void
         *out = &reader->IReferenceClock_iface;
     else
     {
-        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+        FIXME("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+        *out = NULL;
         return E_NOINTERFACE;
     }
 
@@ -1913,7 +1915,7 @@ static HRESULT WINAPI async_reader_create(IWMReader **reader)
     object->IWMReaderTypeNegotiation_iface.lpVtbl = &WMReaderTypeNegotiationVtbl;
     object->refcount = 1;
 
-    if (FAILED(hr = create_sync_reader((IUnknown *)&object->IWMReader_iface,
+    if (FAILED(hr = winegstreamer_create_wm_sync_reader((IUnknown *)&object->IWMReader_iface,
             (void **)&object->reader_inner)))
         goto failed;
 
@@ -1931,7 +1933,7 @@ static HRESULT WINAPI async_reader_create(IWMReader **reader)
     list_init(&object->async_ops);
 
     TRACE("Created async reader %p.\n", object);
-    *reader = (IWMReader *)&object->IWMReader_iface;
+    *reader = &object->IWMReader_iface;
     return S_OK;
 
 failed:

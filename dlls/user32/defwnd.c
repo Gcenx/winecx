@@ -25,6 +25,59 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
+static void default_ime_compositionW( HWND hwnd, WPARAM wparam, LPARAM lparam )
+{
+    WCHAR *buf = NULL;
+    LONG size, i;
+    HIMC himc;
+
+    if (!(lparam & GCS_RESULTSTR) || !(himc = ImmGetContext( hwnd ))) return;
+
+    if ((size = ImmGetCompositionStringW( himc, GCS_RESULTSTR, NULL, 0 )))
+    {
+        if (!(buf = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) size = 0;
+        else size = ImmGetCompositionStringW( himc, GCS_RESULTSTR, buf, size * sizeof(WCHAR) );
+    }
+    ImmReleaseContext( hwnd, himc );
+
+    for (i = 0; i < size / sizeof(WCHAR); i++)
+        SendMessageW( hwnd, WM_IME_CHAR, buf[i], 1 );
+    HeapFree( GetProcessHeap(), 0, buf );
+}
+
+static void default_ime_compositionA( HWND hwnd, WPARAM wparam, LPARAM lparam )
+{
+    unsigned char lead = 0;
+    char *buf = NULL;
+    LONG size, i;
+    HIMC himc;
+
+    if (!(lparam & GCS_RESULTSTR) || !(himc = ImmGetContext( hwnd ))) return;
+
+    if ((size = ImmGetCompositionStringA( himc, GCS_RESULTSTR, NULL, 0 )))
+    {
+        if (!(buf = HeapAlloc( GetProcessHeap(), 0, size ))) size = 0;
+        else size = ImmGetCompositionStringA( himc, GCS_RESULTSTR, buf, size );
+    }
+    ImmReleaseContext( hwnd, himc );
+
+    for (i = 0; i < size; i++)
+    {
+        unsigned char c = buf[i];
+        if (!lead)
+        {
+            if (IsDBCSLeadByte( c )) lead = c;
+            else SendMessageA( hwnd, WM_IME_CHAR, c, 1 );
+        }
+        else
+        {
+            SendMessageA( hwnd, WM_IME_CHAR, MAKEWORD(c, lead), 1 );
+            lead = 0;
+        }
+    }
+
+    HeapFree( GetProcessHeap(), 0, buf );
+}
 
 /***********************************************************************
  *              DefWindowProcA (USER32.@)
@@ -66,42 +119,13 @@ LRESULT WINAPI DefWindowProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         break;
 
     case WM_IME_COMPOSITION:
-        if (lParam & GCS_RESULTSTR)
-        {
-            LONG size, i;
-            unsigned char lead = 0;
-            char *buf = NULL;
-            HIMC himc = ImmGetContext( hwnd );
+    {
+        HWND ime_hwnd = NtUserGetDefaultImeWindow( hwnd );
+        if (!ime_hwnd || ime_hwnd == NtUserGetParent( hwnd )) break;
 
-            if (himc)
-            {
-                if ((size = ImmGetCompositionStringA( himc, GCS_RESULTSTR, NULL, 0 )))
-                {
-                    if (!(buf = HeapAlloc( GetProcessHeap(), 0, size ))) size = 0;
-                    else size = ImmGetCompositionStringA( himc, GCS_RESULTSTR, buf, size );
-                }
-                ImmReleaseContext( hwnd, himc );
-
-                for (i = 0; i < size; i++)
-                {
-                    unsigned char c = buf[i];
-                    if (!lead)
-                    {
-                        if (IsDBCSLeadByte( c ))
-                            lead = c;
-                        else
-                            SendMessageA( hwnd, WM_IME_CHAR, c, 1 );
-                    }
-                    else
-                    {
-                        SendMessageA( hwnd, WM_IME_CHAR, MAKEWORD(c, lead), 1 );
-                        lead = 0;
-                    }
-                }
-                HeapFree( GetProcessHeap(), 0, buf );
-            }
-        }
+        default_ime_compositionA( hwnd, wParam, lParam );
         /* fall through */
+    }
 
     default:
         result = NtUserMessageCall( hwnd, msg, wParam, lParam, 0, NtUserDefWindowProc, TRUE );
@@ -159,27 +183,13 @@ LRESULT WINAPI DefWindowProcW(
         break;
 
     case WM_IME_COMPOSITION:
-        if (lParam & GCS_RESULTSTR)
-        {
-            LONG size, i;
-            WCHAR *buf = NULL;
-            HIMC himc = ImmGetContext( hwnd );
+    {
+        HWND ime_hwnd = NtUserGetDefaultImeWindow( hwnd );
+        if (!ime_hwnd || ime_hwnd == NtUserGetParent( hwnd )) break;
 
-            if (himc)
-            {
-                if ((size = ImmGetCompositionStringW( himc, GCS_RESULTSTR, NULL, 0 )))
-                {
-                    if (!(buf = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) size = 0;
-                    else size = ImmGetCompositionStringW( himc, GCS_RESULTSTR, buf, size * sizeof(WCHAR) );
-                }
-                ImmReleaseContext( hwnd, himc );
-
-                for (i = 0; i < size / sizeof(WCHAR); i++)
-                    SendMessageW( hwnd, WM_IME_CHAR, buf[i], 1 );
-                HeapFree( GetProcessHeap(), 0, buf );
-            }
-        }
+        default_ime_compositionW( hwnd, wParam, lParam );
         /* fall through */
+    }
 
     default:
         result = NtUserMessageCall( hwnd, msg, wParam, lParam, 0, NtUserDefWindowProc, FALSE );

@@ -627,10 +627,7 @@ static BOOL strbuf_ensure_size(strbuf_t *buf, unsigned len)
     new_size = buf->size ? buf->size<<1 : 16;
     if(new_size < len)
         new_size = len;
-    if(buf->buf)
-        new_buf = realloc(buf->buf, new_size*sizeof(WCHAR));
-    else
-        new_buf = malloc(new_size*sizeof(WCHAR));
+    new_buf = realloc(buf->buf, new_size * sizeof(WCHAR));
     if(!new_buf)
         return FALSE;
 
@@ -926,8 +923,10 @@ static HRESULT String_replace(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsi
         jsstr_t *ret_str;
 
         ret_str = jsstr_alloc_len(ret.buf, ret.len);
-        if(!ret_str)
+        if(!ret_str) {
+            free(ret.buf);
             return E_OUTOFMEMORY;
+        }
 
         TRACE("= %s\n", debugstr_jsstr(ret_str));
         *r = jsval_string(ret_str);

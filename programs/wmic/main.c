@@ -19,6 +19,9 @@
 
 #define COBJMACROS
 
+#include <fcntl.h>
+#include <io.h>
+#include <locale.h>
 #include <stdio.h>
 #include "windows.h"
 #include "ocidl.h"
@@ -62,30 +65,25 @@ static const WCHAR *find_class( const WCHAR *alias )
     return NULL;
 }
 
-static int WINAPIV output_string( HANDLE handle, const WCHAR *msg, ... )
+static int WINAPIV output_string( const WCHAR *msg, ... )
 {
-    BOOL output = GetStdHandle(STD_OUTPUT_HANDLE) == handle;
-    static const WCHAR bomW[] = {0xfeff};
+    int count, bom_count = 0;
     static BOOL bom;
     va_list va_args;
-    int len;
-    DWORD count, bom_count = 0;
-    WCHAR buffer[8192];
 
-    va_start( va_args, msg );
-    len = vswprintf( buffer, ARRAY_SIZE(buffer), msg, va_args );
-    va_end( va_args );
-
-    if (!WriteConsoleW( handle, buffer, len, &count, NULL ))
+    if (!bom)
     {
-        if (output && !bom)
+        if (GetFileType((HANDLE)_get_osfhandle( STDOUT_FILENO )) == FILE_TYPE_DISK)
         {
-            WriteFile( handle, bomW, sizeof(bomW), &bom_count, FALSE );
-            bom = TRUE;
+            _setmode( STDOUT_FILENO, _O_U16TEXT );
+            bom_count = wprintf( L"\xfeff" );
         }
-        WriteFile( handle, buffer, len * sizeof(WCHAR), &count, FALSE );
+        bom = TRUE;
     }
 
+    va_start( va_args, msg );
+    count = vwprintf( msg, va_args );
+    va_end( va_args );
     return count + bom_count;
 }
 
@@ -94,17 +92,17 @@ static int output_error( int msg )
     WCHAR buffer[8192];
 
     LoadStringW( GetModuleHandleW(NULL), msg, buffer, ARRAY_SIZE(buffer));
-    return output_string( GetStdHandle(STD_ERROR_HANDLE), L"%s", buffer );
+    return fwprintf( stderr, L"%s", buffer );
 }
 
 static int output_text( const WCHAR *str, ULONG column_width )
 {
-    return output_string( GetStdHandle(STD_OUTPUT_HANDLE), L"%-*s", column_width, str );
+    return output_string( L"%-*s", column_width, str );
 }
 
 static int output_newline( void )
 {
-    return output_string( GetStdHandle(STD_OUTPUT_HANDLE), L"\r\n" );
+    return output_string( L"\n" );
 }
 
 static WCHAR * strip_spaces(WCHAR *start)
@@ -339,6 +337,8 @@ int __cdecl wmain(int argc, WCHAR *argv[])
 {
     const WCHAR *class, *value;
     int i;
+
+    setlocale( LC_ALL, "" );
 
     for (i = 1; i < argc && argv[i][0] == '/'; i++)
         WINE_FIXME( "command line switch %s not supported\n", debugstr_w(argv[i]) );

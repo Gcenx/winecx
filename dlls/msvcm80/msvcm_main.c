@@ -43,3 +43,21 @@ void __cdecl __setusermatherr_m(void *handler)
 {
     FIXME("%p: stub\n", handler);
 }
+
+/* void __cdecl <CrtImplementationDetails>::ThrowModuleLoadException(System.String^) */
+void __cdecl CrtImplementationDetails_ThrowModuleLoadException(void* message)
+{
+    FIXME("%p: stub\n", message);
+}
+
+/* void __cdecl <CrtImplementationDetails>::ThrowModuleLoadException(System.String^, System.Exception^) */
+void __cdecl CrtImplementationDetails_ThrowModuleLoadException_inner(void* message, void* inner)
+{
+    FIXME("%p %p: stub\n", message, inner);
+}
+
+/* void __cdecl <CrtImplementationDetails>::ThrowNestedModuleLoadException(System.Exception^, System.Exception^) */
+void __cdecl CrtImplementationDetails_ThrowNestedModuleLoadException(void* inner, void* nested)
+{
+    FIXME("%p %p: stub\n", inner, nested);
+}

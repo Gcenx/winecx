@@ -1001,6 +1001,17 @@ static void test_debug_loop(int argc, char **argv)
         win_skip("CheckRemoteDebuggerPresent not available, skipping test.\n");
         return;
     }
+    if (sizeof(void *) > sizeof(int))
+    {
+        WCHAR buffer[MAX_PATH];
+        GetSystemWow64DirectoryW( buffer, MAX_PATH );
+        wcscat( buffer, L"\\oleacc.dll" );
+        if (GetFileAttributesW( buffer ) == INVALID_FILE_ATTRIBUTES)
+        {
+            skip("Skipping test on 64bit only configuration\n");
+            return;
+        }
+    }
 
     pid = GetCurrentProcessId();
     ret = DebugActiveProcess(pid);
@@ -1064,6 +1075,173 @@ static void test_debug_loop(int argc, char **argv)
 
     ret = DeleteFileA(blackbox_file);
     ok(ret, "DeleteFileA failed, last error %#lx.\n", GetLastError());
+}
+
+struct find_main_window
+{
+    DWORD       pid;
+    unsigned    count;
+    HWND        windows[5];
+};
+
+static BOOL CALLBACK enum_windows_callback(HWND handle, LPARAM lParam)
+{
+    struct find_main_window* fmw = (struct find_main_window*)lParam;
+    DWORD pid = 0;
+
+    if (GetWindowThreadProcessId(handle, &pid) && fmw->pid == pid &&
+        !GetWindow(handle, GW_OWNER))
+    {
+        ok(fmw->count < ARRAY_SIZE(fmw->windows), "Too many windows\n");
+        if (fmw->count < ARRAY_SIZE(fmw->windows))
+            fmw->windows[fmw->count++] = handle;
+    }
+    return TRUE;
+}
+
+static void close_main_windows(DWORD pid)
+{
+    struct find_main_window fmw = {pid, 0};
+    unsigned i;
+
+    EnumWindows(enum_windows_callback, (LPARAM)&fmw);
+    ok(fmw.count, "no window found\n");
+    for (i = 0; i < fmw.count; i++)
+        PostMessageA(fmw.windows[i], WM_CLOSE, 0, 0);
+}
+
+static void test_debug_loop_wow64(void)
+{
+    WCHAR buffer[MAX_PATH], *p;
+    PROCESS_INFORMATION pi;
+    STARTUPINFOW si;
+    BOOL ret;
+    unsigned order = 0, bp_order = 0, bpwx_order = 0, num_ntdll = 0, num_wow64 = 0;
+
+    /* checking conditions for running this test */
+    if (GetSystemWow64DirectoryW( buffer, ARRAY_SIZE(buffer) ) && sizeof(void*) > sizeof(int) && pGetMappedFileNameW)
+    {
+        wcscat( buffer, L"\\msinfo32.exe" );
+        ret = GetFileAttributesW( buffer ) != INVALID_FILE_ATTRIBUTES;
+    }
+    else ret = FALSE;
+    if (!ret)
+    {
+        skip("Skipping test on incompatible config\n");
+        return;
+    }
+    memset( &si, 0, sizeof(si) );
+    si.cb = sizeof(si);
+    ret = CreateProcessW( NULL, buffer, NULL, NULL, FALSE, DEBUG_PROCESS, NULL, NULL, &si, &pi );
+    ok(ret, "CreateProcess failed, last error %#lx.\n", GetLastError());
+
+    for (;;)
+    {
+        DEBUG_EVENT ev;
+
+        ++order;
+        ret = WaitForDebugEvent( &ev, 2000 );
+        if (!ret) break;
+
+        switch (ev.dwDebugEventCode)
+        {
+        case CREATE_PROCESS_DEBUG_EVENT:
+            break;
+        case LOAD_DLL_DEBUG_EVENT:
+            if (!pGetMappedFileNameW( pi.hProcess, ev.u.LoadDll.lpBaseOfDll, buffer, ARRAY_SIZE(buffer) )) buffer[0] = L'\0';
+            if ((p = wcsrchr( buffer, '\\' ))) p++;
+            else p = buffer;
+            if (!memcmp( p, L"wow64", 5 * sizeof(WCHAR) ))
+            {
+                /* on Win10, wow64cpu's load dll event is received after first exception */
+                ok(bpwx_order == 0, "loaddll for wow64 DLLs should appear before exception\n");
+                num_wow64++;
+            }
+            else if (!wcsicmp( p, L"ntdll.dll" ))
+            {
+                ok(bp_order == 0 && bpwx_order == 0, "loaddll on ntdll should appear before exception\n");
+                num_ntdll++;
+            }
+            break;
+        case EXCEPTION_DEBUG_EVENT:
+            if (ev.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT)
+                bp_order = order;
+            else if (ev.u.Exception.ExceptionRecord.ExceptionCode == STATUS_WX86_BREAKPOINT)
+                bpwx_order = order;
+        }
+        ret = ContinueDebugEvent(ev.dwProcessId, ev.dwThreadId, DBG_CONTINUE);
+        ok(ret, "ContinueDebugEvent failed, last error %#lx.\n", GetLastError());
+        if (!ret) break;
+    }
+
+    /* gracefully terminates msinfo32 */
+    close_main_windows( pi.dwProcessId );
+
+    /* eat up the remaining events... not generating unload dll events in case of process termination */
+    for (;;)
+    {
+        DEBUG_EVENT ev;
+
+        ret = WaitForDebugEvent( &ev, 2000 );
+        if (!ret || ev.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT) break;
+        switch (ev.dwDebugEventCode)
+        {
+        default:
+            ok(0, "Unexpected event: %lu\n", ev.dwDebugEventCode);
+            /* fall through */
+        case EXIT_THREAD_DEBUG_EVENT:
+            ret = ContinueDebugEvent( ev.dwProcessId, ev.dwThreadId, DBG_CONTINUE );
+            ok(ret, "ContinueDebugEvent failed, last error %#lx.\n", GetLastError());
+            break;
+        }
+    }
+
+    ret = WaitForSingleObject( pi.hProcess, 2000 );
+    if (ret != WAIT_OBJECT_0)
+    {
+        DWORD ec;
+        ret = GetExitCodeProcess( pi.hProcess, &ec );
+        ok(ret, "GetExitCodeProcess failed: %lu\n", GetLastError());
+        ok(ec != STILL_ACTIVE, "GetExitCodeProcess still active\n");
+    }
+    for (;;)
+    {
+        DEBUG_EVENT ev;
+
+        ret = WaitForDebugEvent( &ev, 2000 );
+        if (!ret || ev.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT) break;
+        switch (ev.dwDebugEventCode)
+        {
+        default:
+            ok(0, "Unexpected event: %lu\n", ev.dwDebugEventCode);
+            /* fall through */
+        case EXIT_THREAD_DEBUG_EVENT:
+            ret = ContinueDebugEvent( ev.dwProcessId, ev.dwThreadId, DBG_CONTINUE );
+            ok(ret, "ContinueDebugEvent failed, last error %#lx.\n", GetLastError());
+            break;
+        }
+    }
+    ret = CloseHandle( pi.hThread );
+    ok(ret, "CloseHandle failed, last error %#lx.\n", GetLastError());
+    ret = CloseHandle( pi.hProcess );
+    ok(ret, "CloseHandle failed, last error %#lx.\n", GetLastError());
+
+    if (strcmp( winetest_platform, "wine" ) || num_wow64) /* windows or new wine wow */
+    {
+        ok(num_ntdll == 2, "Expecting two ntdll instances\n");
+        ok(num_wow64 >= 3, "Expecting more than 3 wow64*.dll\n");
+    }
+    else /* Wine's old wow, or 32/64 bit only configurations */
+    {
+        ok(num_ntdll == 1, "Expecting one ntdll instances\n");
+        ok(num_wow64 == 0, "Expecting more no wow64*.dll\n");
+    }
+    ok(bp_order, "Expecting 1 bp exceptions\n");
+    todo_wine
+    {
+        ok(bpwx_order, "Expecting 1 bpwx exceptions\n");
+        ok(bp_order < bpwx_order, "Out of order bp exceptions\n");
+    }
 }
 
 static void doChildren(int argc, char **argv)
@@ -2087,6 +2265,7 @@ static void test_kill_on_exit(const char *argv0)
     HANDLE event, debug, thread;
     DWORD exit_code, tid;
     ULONG val;
+    BOOL ret;
 
     event = CreateEventW(&sa, FALSE, FALSE, NULL);
     ok(event != NULL, "CreateEvent failed: %lu\n", GetLastError());
@@ -2158,29 +2337,46 @@ static void test_kill_on_exit(const char *argv0)
     CloseHandle( pi.hThread );
     CloseHandle( thread );
 
-    /* but not on forced exit */
+    /* checking on forced exit */
     status = pNtCreateDebugObject( &debug, DEBUG_ALL_ACCESS, &attr, DEBUG_KILL_ON_CLOSE );
     ok( !status, "NtCreateDebugObject failed %lx\n", status );
     thread = CreateThread(NULL, 0, debug_and_wait, &debug, 0, &tid);
     Sleep( 100 );
     ok( debug != 0, "no debug port\n" );
-    val = 1;
+    val = DEBUG_KILL_ON_CLOSE;
     status = pNtSetInformationDebugObject( debug, DebugObjectKillProcessOnExitInformation,
                                            &val, sizeof(val), NULL );
     ok( status == STATUS_SUCCESS, "NtSetInformationDebugObject failed %lx\n", status );
     TerminateThread( thread, 0 );
-    status = pNtSetInformationDebugObject( debug, DebugObjectKillProcessOnExitInformation,
-                                           &val, sizeof(val), NULL );
-    ok( status == STATUS_SUCCESS, "NtSetInformationDebugObject failed %lx\n", status );
-    WaitForSingleObject( pi.hProcess, 300 );
-    GetExitCodeProcess( pi.hProcess, &exit_code );
-    todo_wine
-    ok( exit_code == STATUS_DEBUGGER_INACTIVE || broken(exit_code == STILL_ACTIVE), /* wow64 */
-        "exit code = %08lx\n", exit_code);
+
+    status = WaitForSingleObject( pi.hProcess, 1500 );
+    if (status != WAIT_OBJECT_0)
+    {
+        todo_wine /* Wine doesn't handle debug port of TerminateThread */
+        ok(broken(sizeof(void*) == sizeof(int)), /* happens consistently on 32bit on Win7, 10 & 11 */
+           "Terminating thread should terminate debuggee\n");
+
+        ret = TerminateProcess( pi.hProcess, 0 );
+        ok(ret, "TerminateProcess failed: %lu\n", GetLastError());
+        CloseHandle( debug );
+    }
+    else
+    {
+        ok(status == WAIT_OBJECT_0, "debuggee didn't terminate %lx\n", status);
+        ret = GetExitCodeProcess( pi.hProcess, &exit_code );
+        ok(ret, "No exit code: %lu\n", GetLastError());
+        todo_wine
+        ok( exit_code == STATUS_DEBUGGER_INACTIVE || broken(exit_code == STILL_ACTIVE), /* wow64 */
+            "exit code = %08lx\n", exit_code);
+        status = pNtSetInformationDebugObject( debug, DebugObjectKillProcessOnExitInformation,
+                                               &val, sizeof(val), NULL );
+        todo_wine
+        ok( status == STATUS_INVALID_HANDLE, "NtSetInformationDebugObject failed %lx\n", status );
+    }
+
     CloseHandle( pi.hProcess );
     CloseHandle( pi.hThread );
     CloseHandle( thread );
-    CloseHandle( debug );
 
     debug = 0;
     thread = CreateThread(NULL, 0, create_debug_port, &debug, 0, &tid);
@@ -2191,10 +2387,13 @@ static void test_kill_on_exit(const char *argv0)
                                            &val, sizeof(val), NULL );
     ok( status == STATUS_SUCCESS, "NtSetInformationDebugObject failed %lx\n", status );
     TerminateThread( thread, 0 );
+    Sleep( 200 );
     status = pNtSetInformationDebugObject( debug, DebugObjectKillProcessOnExitInformation,
                                            &val, sizeof(val), NULL );
-    ok( status == STATUS_SUCCESS, "NtSetInformationDebugObject failed %lx\n", status );
-    CloseHandle( debug );
+    todo_wine
+    ok( status == STATUS_INVALID_HANDLE  || broken( status == STATUS_SUCCESS ),
+        "NtSetInformationDebugObject failed %lx\n", status );
+    if (status != STATUS_INVALID_HANDLE) CloseHandle( debug );
     CloseHandle( thread );
 
     CloseHandle( event );
@@ -2252,6 +2451,7 @@ START_TEST(debugger)
         test_ExitCode();
         test_RemoteDebugger();
         test_debug_loop(myARGC, myARGV);
+        test_debug_loop_wow64();
         test_debug_children(myARGV[0], DEBUG_PROCESS, TRUE, FALSE);
         test_debug_children(myARGV[0], DEBUG_ONLY_THIS_PROCESS, FALSE, FALSE);
         test_debug_children(myARGV[0], DEBUG_PROCESS|DEBUG_ONLY_THIS_PROCESS, FALSE, FALSE);

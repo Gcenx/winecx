@@ -18,18 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "wine/debug.h"
-
-#define COBJMACROS
-
-#include "winbase.h"
-#include "wingdi.h"
-#include "winternl.h"
-
 #include "d3dxof_private.h"
-#include "dxfile.h"
-
-#include <stdio.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dxof_parsing);
 
@@ -80,15 +69,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof_parsing);
 #define TOKEN_ARRAY       52
 
 #define CLSIDFMT "<%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X>"
-
-/* FOURCC to string conversion for debug messages */
-static const char *debugstr_fourcc(DWORD fourcc)
-{
-    if (!fourcc) return "'null'";
-    return wine_dbg_sprintf ("\'%c%c%c%c\'",
-        (char)(fourcc), (char)(fourcc >> 8),
-        (char)(fourcc >> 16), (char)(fourcc >> 24));
-}
 
 static const char* get_primitive_string(DWORD token)
 {

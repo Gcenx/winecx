@@ -29,6 +29,7 @@
 #include "winerror.h"
 #include "winreg.h"
 #include "winnls.h"
+#include "wchar.h"
 
 #include "wine/test.h"
 
@@ -48,6 +49,11 @@ static BOOL (WINAPI *pInternetGetCookieExW)(LPCWSTR,LPCWSTR,LPWSTR,LPDWORD,DWORD
 static BOOL (WINAPI *pInternetGetConnectedStateExA)(LPDWORD,LPSTR,DWORD,DWORD);
 static BOOL (WINAPI *pInternetGetConnectedStateExW)(LPDWORD,LPWSTR,DWORD,DWORD);
 
+#ifndef ERROR_WINHTTP_AUTODETECTION_FAILED
+#define ERROR_WINHTTP_AUTODETECTION_FAILED 12180
+#endif
+
+
 /* ############################### */
 
 static void test_InternetCanonicalizeUrlA(void)
@@ -60,7 +66,7 @@ static void test_InternetCanonicalizeUrlA(void)
 
     /* Acrobat Updater 5 calls this for Adobe Reader 8.1 */
     url = "http://swupmf.adobe.com/manifest/50/win/AdobeUpdater.upd";
-    urllen = lstrlenA(url);
+    urllen = strlen(url);
 
     memset(buffer, '#', sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
@@ -68,8 +74,8 @@ static void test_InternetCanonicalizeUrlA(void)
     SetLastError(0xdeadbeef);
     res = InternetCanonicalizeUrlA(url, buffer, &dwSize, 0);
     ok( !res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER) && (dwSize == (urllen+1)),
-        "got %lu and %lu with size %lu for '%s' (%d)\n",
-        res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
+        "got %lu and %lu with size %lu for '%s' (%Iu)\n",
+        res, GetLastError(), dwSize, buffer, strlen(buffer));
 
 
     /* buffer has no space for the terminating '\0' */
@@ -80,8 +86,8 @@ static void test_InternetCanonicalizeUrlA(void)
     res = InternetCanonicalizeUrlA(url, buffer, &dwSize, 0);
     /* dwSize is nr. of needed bytes with the terminating '\0' */
     ok( !res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER) && (dwSize == (urllen+1)),
-        "got %lu and %lu with size %lu for '%s' (%d)\n",
-        res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
+        "got %lu and %lu with size %lu for '%s' (%Iu)\n",
+        res, GetLastError(), dwSize, buffer, strlen(buffer));
 
     /* buffer has the required size */
     memset(buffer, '#', sizeof(buffer)-1);
@@ -91,8 +97,8 @@ static void test_InternetCanonicalizeUrlA(void)
     res = InternetCanonicalizeUrlA(url, buffer, &dwSize, 0);
     /* dwSize is nr. of copied bytes without the terminating '\0' */
     ok( res && (dwSize == urllen) && (lstrcmpA(url, buffer) == 0),
-        "got %lu and %lu with size %lu for '%s' (%d)\n",
-        res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
+        "got %lu and %lu with size %lu for '%s' (%Iu)\n",
+        res, GetLastError(), dwSize, buffer, strlen(buffer));
 
     memset(buffer, '#', sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
@@ -100,7 +106,7 @@ static void test_InternetCanonicalizeUrlA(void)
     SetLastError(0xdeadbeef);
     res = InternetCanonicalizeUrlA("file:///C:/Program%20Files/Atmel/AVR%20Tools/STK500/STK500.xml", buffer, &dwSize, ICU_DECODE | ICU_NO_ENCODE);
     ok(res, "InternetCanonicalizeUrlA failed %lu\n", GetLastError());
-    ok(dwSize == lstrlenA(buffer), "got %ld expected %d\n", dwSize, lstrlenA(buffer));
+    ok(dwSize == strlen(buffer), "got %ld expected %Iu\n", dwSize, strlen(buffer));
     ok(!lstrcmpA("file://C:\\Program Files\\Atmel\\AVR Tools\\STK500\\STK500.xml", buffer),
        "got %s expected 'file://C:\\Program Files\\Atmel\\AVR Tools\\STK500\\STK500.xml'\n", buffer);
 
@@ -112,8 +118,8 @@ static void test_InternetCanonicalizeUrlA(void)
     res = InternetCanonicalizeUrlA(url, buffer, &dwSize, 0);
     /* dwSize is nr. of copied bytes without the terminating '\0' */
     ok( res && (dwSize == urllen) && (lstrcmpA(url, buffer) == 0),
-        "got %lu and %lu with size %lu for '%s' (%d)\n",
-        res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
+        "got %lu and %lu with size %lu for '%s' (%Iu)\n",
+        res, GetLastError(), dwSize, buffer, strlen(buffer));
 
 
     /* check NULL pointers */
@@ -123,8 +129,8 @@ static void test_InternetCanonicalizeUrlA(void)
     SetLastError(0xdeadbeef);
     res = InternetCanonicalizeUrlA(NULL, buffer, &dwSize, 0);
     ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
-        "got %lu and %lu with size %lu for '%s' (%d)\n",
-        res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
+        "got %lu and %lu with size %lu for '%s' (%Iu)\n",
+        res, GetLastError(), dwSize, buffer, strlen(buffer));
 
     memset(buffer, '#', urllen + 4);
     buffer[urllen + 4] = '\0';
@@ -132,8 +138,8 @@ static void test_InternetCanonicalizeUrlA(void)
     SetLastError(0xdeadbeef);
     res = InternetCanonicalizeUrlA(url, NULL, &dwSize, 0);
     ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
-        "got %lu and %lu with size %lu for '%s' (%d)\n",
-        res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
+        "got %lu and %lu with size %lu for '%s' (%Iu)\n",
+        res, GetLastError(), dwSize, buffer, strlen(buffer));
 
     memset(buffer, '#', urllen + 4);
     buffer[urllen + 4] = '\0';
@@ -141,8 +147,8 @@ static void test_InternetCanonicalizeUrlA(void)
     SetLastError(0xdeadbeef);
     res = InternetCanonicalizeUrlA(url, buffer, NULL, 0);
     ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
-        "got %lu and %lu with size %lu for '%s' (%d)\n",
-        res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
+        "got %lu and %lu with size %lu for '%s' (%Iu)\n",
+        res, GetLastError(), dwSize, buffer, strlen(buffer));
 
     /* test with trailing space */
     dwSize = 256;
@@ -162,17 +168,39 @@ static void test_InternetQueryOptionA(void)
 {
   HINTERNET hinet,hurl;
   DWORD len, val;
+  INTERNET_PROXY_INFOA *pi;
   DWORD err;
   static const char useragent[] = {"Wininet Test"};
+  char proxy[256];
   char *buffer;
-  int retval;
-  BOOL res;
+  BOOL retval, res;
+
+  SetLastError(0xdeadfeed);
+  memset(proxy, 0, sizeof(proxy));
+  res = DetectAutoProxyUrl(proxy, sizeof(proxy), PROXY_AUTO_DETECT_TYPE_DHCP);
+  todo_wine ok((res && proxy[0]) ||
+     (!res && GetLastError() == ERROR_WINHTTP_AUTODETECTION_FAILED && !proxy[0]),
+     "unexpected DHCP proxy result: %d gle %lu proxy %s\n", res, GetLastError(), proxy);
+
+  SetLastError(0xdeadfeed);
+  memset(proxy, 0, sizeof(proxy));
+  res = DetectAutoProxyUrl(proxy, sizeof(proxy), PROXY_AUTO_DETECT_TYPE_DNS_A);
+  todo_wine ok((res && proxy[0]) ||
+     (!res && GetLastError() == ERROR_WINHTTP_AUTODETECTION_FAILED && !proxy[0]) ||
+     broken(!res && GetLastError() == ERROR_NOT_FOUND && !proxy[0]),
+     "unexpected DNS proxy result: %d gle %lu proxy %s\n", res, GetLastError(), proxy);
 
   SetLastError(0xdeadbeef);
   len = 0xdeadbeef;
   retval = InternetQueryOptionA(NULL, INTERNET_OPTION_PROXY, NULL, &len);
   ok(!retval && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Got wrong error %x(%lu)\n", retval, GetLastError());
   ok(len >= sizeof(INTERNET_PROXY_INFOA) && len != 0xdeadbeef,"len = %lu\n", len);
+
+  pi = HeapAlloc(GetProcessHeap(), 0, len);
+  retval = InternetQueryOptionA(NULL, INTERNET_OPTION_PROXY, pi, &len);
+  ok(retval, "Failed (%lu)\n", GetLastError());
+  ok(len >= sizeof(INTERNET_PROXY_INFOA) && len != 0xdeadbeef, "len = %lu\n", len);
+  HeapFree(GetProcessHeap(), 0, pi);
 
   hinet = InternetOpenA(useragent,INTERNET_OPEN_TYPE_DIRECT,NULL,NULL, 0);
   ok((hinet != 0x0),"InternetOpen Failed\n");
@@ -187,7 +215,7 @@ static void test_InternetQueryOptionA(void)
   len=strlen(useragent)+1;
   retval=InternetQueryOptionA(hinet,INTERNET_OPTION_USER_AGENT,NULL,&len);
   err=GetLastError();
-  ok(len == strlen(useragent)+1,"Got wrong user agent length %ld instead of %d\n",len,lstrlenA(useragent));
+  ok(len == strlen(useragent)+1,"Got wrong user agent length %ld instead of %Iu\n",len,strlen(useragent));
   ok(retval == 0,"Got wrong return value %d\n",retval);
   ok(err == ERROR_INSUFFICIENT_BUFFER, "Got wrong error code %ld\n",err);
 
@@ -198,7 +226,7 @@ static void test_InternetQueryOptionA(void)
   if (retval)
   {
       ok(!strcmp(useragent,buffer),"Got wrong user agent string %s instead of %s\n",buffer,useragent);
-      ok(len == strlen(useragent),"Got wrong user agent length %ld instead of %d\n",len,lstrlenA(useragent));
+      ok(len == strlen(useragent),"Got wrong user agent length %ld instead of %Iu\n",len,strlen(useragent));
   }
   HeapFree(GetProcessHeap(),0,buffer);
 
@@ -207,7 +235,7 @@ static void test_InternetQueryOptionA(void)
   buffer=HeapAlloc(GetProcessHeap(),0,100);
   retval=InternetQueryOptionA(hinet,INTERNET_OPTION_USER_AGENT,buffer,&len);
   err=GetLastError();
-  ok(len == strlen(useragent) + 1,"Got wrong user agent length %ld instead of %d\n", len, lstrlenA(useragent) + 1);
+  ok(len == strlen(useragent) + 1,"Got wrong user agent length %ld instead of %Iu\n", len, strlen(useragent) + 1);
   ok(!retval, "Got wrong return value %d\n", retval);
   ok(err == ERROR_INSUFFICIENT_BUFFER, "Got wrong error code %ld\n", err);
   HeapFree(GetProcessHeap(),0,buffer);
@@ -412,7 +440,7 @@ static void test_complicated_cookie(void)
   ret = InternetGetCookieA("http://testing.example.com", NULL, buffer, &len);
   ok(ret == TRUE,"InternetGetCookie failed\n");
   ok(len == 19, "len = %lu\n", len);
-  ok(strlen(buffer) == 18, "strlen(buffer) = %u\n", lstrlenA(buffer));
+  ok(strlen(buffer) == 18, "strlen(buffer) = %Iu\n", strlen(buffer));
   ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
   ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
   ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
@@ -1531,7 +1559,7 @@ static void test_InternetErrorDlg(void)
 
     for(i = INTERNET_ERROR_BASE; i < INTERNET_ERROR_LAST; i++)
     {
-        DWORD expected = ERROR_CANCELLED, expected2 = ERROR_SUCCESS, test_flags = 0, j;
+        DWORD expected = ERROR_CANCELLED, expected2 = ERROR_SUCCESS, broken2, test_flags = 0, j;
 
         for (j = 0; j < ARRAY_SIZE(no_ui_res); ++j)
         {
@@ -1565,20 +1593,30 @@ static void test_InternetErrorDlg(void)
         res = InternetErrorDlg(hwnd, req, i, FLAGS_ERROR_UI_FLAGS_NO_UI, NULL);
 
         /* Handle some special cases */
+        broken2 = expected2;
         switch(i)
         {
         case ERROR_INTERNET_CHG_POST_IS_NON_SECURE:
             if (broken(res == ERROR_CANCELLED)) /* before win10 returns ERROR_CANCELLED */
             {
                 expected = ERROR_CANCELLED;
-                expected2 = ERROR_CANCELLED;
+                expected2 = broken2 = ERROR_CANCELLED;
             }
             break;
+        case ERROR_INTERNET_SEC_CERT_WEAK_SIGNATURE:
+            if (res == ERROR_CANCELLED)
+            {
+                expected = ERROR_CANCELLED;
+                expected2 = ERROR_CANCELLED;
+                broken2 = ERROR_SUCCESS; /* win10 1607 */
+                break;
+            }
+            /* fall through */
         default:
             if(broken(expected == ERROR_CANCELLED && res == ERROR_NOT_SUPPORTED)) /* XP, Win7, Win8 */
             {
                 expected = ERROR_NOT_SUPPORTED;
-                expected2 = ERROR_SUCCESS;
+                expected2 = broken2 = ERROR_SUCCESS;
             }
             break;
         }
@@ -1590,7 +1628,8 @@ static void test_InternetErrorDlg(void)
         ok(res == expected, "Got %ld, expected %ld (%ld)\n", res, expected, i);
 
         res = InternetErrorDlg(NULL, req, i, FLAGS_ERROR_UI_FILTER_FOR_ERRORS | FLAGS_ERROR_UI_FLAGS_NO_UI, NULL);
-        ok(res == expected2, "Got %ld, expected %ld (%ld)\n", res, expected2, i);
+        ok(res == expected2 || broken(res == broken2),
+           "Got %ld, expected %ld (%ld)\n", res, expected2, i);
 
         /* With a null req */
         if(test_flags & FLAG_NEEDREQ)
@@ -1603,7 +1642,8 @@ static void test_InternetErrorDlg(void)
         ok(res == expected, "Got %ld, expected %ld (%ld)\n", res, expected, i);
 
         res = InternetErrorDlg(NULL, NULL, i, FLAGS_ERROR_UI_FILTER_FOR_ERRORS | FLAGS_ERROR_UI_FLAGS_NO_UI, NULL);
-        ok(res == expected2, "Got %ld, expected %ld (%ld)\n", res, expected2, i);
+        ok(res == expected2 || broken(res == broken2),
+           "Got %ld, expected %ld (%ld)\n", res, expected2, i);
     }
 
     res = InternetErrorDlg(NULL, req, 0xdeadbeef, FLAGS_ERROR_UI_FILTER_FOR_ERRORS | FLAGS_ERROR_UI_FLAGS_NO_UI, NULL);
@@ -1668,57 +1708,53 @@ static void test_InternetGetConnectedStateExA(void)
     buffer[0] = 0;
     res = pInternetGetConnectedStateExA(NULL, buffer, sizeof(buffer), 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
-    sz = strlen(buffer);
-    ok(sz > 0, "Expected a connection name\n");
+    ok(buffer[0], "Expected a connection name\n");
 
     buffer[0] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExA(&flags, buffer, sizeof(buffer), 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
+    ok(buffer[0], "Expected a connection name\n");
     sz = strlen(buffer);
-    ok(sz > 0, "Expected a connection name\n");
 
     flags = 0;
     res = pInternetGetConnectedStateExA(&flags, NULL, sizeof(buffer), 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
 
-    /* no space for complete string this time */
-    buffer[0] = 0;
+    /* no space for complete string this time, double-byte characters get truncated */
+    memset(buffer, 'z', sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExA(&flags, buffer, sz, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
-    ok(sz - 1 == strlen(buffer), "Expected %lu bytes, got %u\n", sz - 1, lstrlenA(buffer));
+    ok(sz - 1 == strlen(buffer), "Expected len %lu, got %Iu: %s\n", sz - 1, strlen(buffer), wine_dbgstr_a(buffer));
 
-    buffer[0] = 0;
+    memset(buffer, 'z', sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExA(&flags, buffer, sz / 2, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
-    ok(sz / 2 - 1 == strlen(buffer), "Expected %lu bytes, got %u\n", sz / 2 - 1, lstrlenA(buffer));
+    ok(sz / 2 - 1 == strlen(buffer), "Expected len %lu, got %Iu: %s\n", sz / 2 - 1, strlen(buffer), wine_dbgstr_a(buffer));
 
-    buffer[0] = 0;
-    flags = 0;
-    res = pInternetGetConnectedStateExA(&flags, buffer, 1, 0);
-    ok(res == TRUE, "Expected TRUE, got %d\n", res);
-    ok(flags, "Expected at least one flag set\n");
-    ok(!buffer[0], "Expected 0 bytes, got %u\n", lstrlenA(buffer));
-
-    buffer[0] = 0;
+    memset(buffer, 'z', sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExA(&flags, buffer, 2, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
-    ok(strlen(buffer) == 1, "Expected 1 byte, got %u\n", lstrlenA(buffer));
+    ok(strlen(buffer) == 1, "Expected len 1, got %Iu: %s\n", strlen(buffer), wine_dbgstr_a(buffer));
 
+    memset(buffer, 'z', sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = 0;
     flags = 0;
-    buffer[0] = 0xDE;
     res = pInternetGetConnectedStateExA(&flags, buffer, 1, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
-    ok(!buffer[0], "Expected 0 bytes, got %u\n", lstrlenA(buffer));
+    ok(!buffer[0], "Expected len 0, got %Iu: %s\n", strlen(buffer), wine_dbgstr_a(buffer));
 }
 
 static void test_InternetGetConnectedStateExW(void)
@@ -1736,7 +1772,7 @@ static void test_InternetGetConnectedStateExW(void)
     wcscpy(buffer, L"wine");
     SetLastError(0xdeadbeef);
     res = pInternetGetConnectedStateExW(&flags, buffer, ARRAY_SIZE(buffer), 0);
-    trace("Internet Connection: Flags 0x%02lx - Name '%s'\n", flags, wine_dbgstr_w(buffer));
+    trace("Internet Connection: Flags 0x%02lx - Name %s\n", flags, wine_dbgstr_w(buffer));
     ok (flags & INTERNET_RAS_INSTALLED, "Missing RAS flag\n");
     if(!res) {
         DWORD error = GetLastError();
@@ -1749,6 +1785,11 @@ static void test_InternetGetConnectedStateExW(void)
 
     res = pInternetGetConnectedStateExW(NULL, NULL, 0, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
+
+    SetLastError(0xdeadbeef);
+    res = pInternetGetConnectedStateExW(NULL, NULL, 0, 1);
+    ok(res == FALSE, "Expected TRUE, got %d\n", res);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Unexpected gle %lu\n", GetLastError());
 
     flags = 0;
     res = pInternetGetConnectedStateExW(&flags, NULL, 0, 0);
@@ -1774,16 +1815,15 @@ static void test_InternetGetConnectedStateExW(void)
     buffer[0] = 0;
     res = pInternetGetConnectedStateExW(NULL, buffer, ARRAY_SIZE(buffer), 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
-    sz = lstrlenW(buffer);
-    ok(sz > 0, "Expected a connection name\n");
+    ok(buffer[0], "Expected a connection name\n");
 
     buffer[0] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExW(&flags, buffer, ARRAY_SIZE(buffer), 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
+    ok(buffer[0], "Expected a connection name\n");
     sz = lstrlenW(buffer);
-    ok(sz > 0, "Expected a connection name\n");
 
     flags = 0;
     res = pInternetGetConnectedStateExW(&flags, NULL, ARRAY_SIZE(buffer), 0);
@@ -1791,49 +1831,46 @@ static void test_InternetGetConnectedStateExW(void)
     ok(flags, "Expected at least one flag set\n");
 
     /* no space for complete string this time */
-    buffer[0] = 0;
+    wmemset(buffer, 'z', ARRAY_SIZE(buffer) - 1);
+    buffer[ARRAY_SIZE(buffer) - 1] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExW(&flags, buffer, sz, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
     if (flags & INTERNET_CONNECTION_MODEM)
-        ok(!buffer[0], "Expected 0 bytes, got %u\n", lstrlenW(buffer));
+        ok(!buffer[0], "Expected len 0, got %u: %s\n", lstrlenW(buffer), wine_dbgstr_w(buffer));
     else
-        ok(sz - 1 == lstrlenW(buffer), "Expected %lu bytes, got %u\n", sz - 1, lstrlenW(buffer));
+        ok(sz - 1 == lstrlenW(buffer), "Expected len %lu, got %u: %s\n", sz - 1, lstrlenW(buffer), wine_dbgstr_w(buffer));
 
-    buffer[0] = 0;
+    wmemset(buffer, 'z', ARRAY_SIZE(buffer) - 1);
+    buffer[ARRAY_SIZE(buffer) - 1] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExW(&flags, buffer, sz / 2, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
     if (flags & INTERNET_CONNECTION_MODEM)
-        ok(!buffer[0], "Expected 0 bytes, got %u\n", lstrlenW(buffer));
+        ok(!buffer[0], "Expected len 0, got %u: %s\n", lstrlenW(buffer), wine_dbgstr_w(buffer));
     else
-        ok(sz / 2 - 1 == lstrlenW(buffer), "Expected %lu bytes, got %u\n", sz / 2 - 1, lstrlenW(buffer));
+        ok(sz / 2 - 1 == lstrlenW(buffer), "Expected len %lu, got %u: %s\n", sz / 2 - 1, lstrlenW(buffer), wine_dbgstr_w(buffer));
 
-    buffer[0] = 0;
-    flags = 0;
-    res = pInternetGetConnectedStateExW(&flags, buffer, 1, 0);
-    ok(res == TRUE, "Expected TRUE, got %d\n", res);
-    ok(flags, "Expected at least one flag set\n");
-    ok(!buffer[0], "Expected 0 bytes, got %u\n", lstrlenW(buffer));
-
-    buffer[0] = 0;
+    wmemset(buffer, 'z', ARRAY_SIZE(buffer) - 1);
+    buffer[ARRAY_SIZE(buffer) - 1] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExW(&flags, buffer, 2, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
     if (flags & INTERNET_CONNECTION_MODEM)
-        ok(!buffer[0], "Expected 0 bytes, got %u\n", lstrlenW(buffer));
+        ok(!buffer[0], "Expected len 0, got %u: %s\n", lstrlenW(buffer), wine_dbgstr_w(buffer));
     else
-        ok(lstrlenW(buffer) == 1, "Expected 1 byte, got %u\n", lstrlenW(buffer));
+        ok(lstrlenW(buffer) == 1, "Expected len 1, got %u: %s\n", lstrlenW(buffer), wine_dbgstr_w(buffer));
 
-    buffer[0] = 0xDEAD;
+    wmemset(buffer, 'z', ARRAY_SIZE(buffer) - 1);
+    buffer[ARRAY_SIZE(buffer) - 1] = 0;
     flags = 0;
     res = pInternetGetConnectedStateExW(&flags, buffer, 1, 0);
     ok(res == TRUE, "Expected TRUE, got %d\n", res);
     ok(flags, "Expected at least one flag set\n");
-    ok(!buffer[0], "Expected 0 bytes, got %u\n", lstrlenW(buffer));
+    ok(!buffer[0], "Expected len 0, got %u: %s\n", lstrlenW(buffer), wine_dbgstr_w(buffer));
 }
 
 static void test_format_message(HMODULE hdll)

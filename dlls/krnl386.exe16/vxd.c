@@ -27,7 +27,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -234,7 +233,7 @@ done:
  *		VxDCall7 (KERNEL32.8)
  *		VxDCall8 (KERNEL32.9)
  */
-void WINAPI DECLSPEC_HIDDEN __regs_VxDCall( CONTEXT *context )
+void WINAPI __regs_VxDCall( CONTEXT *context )
 {
     unsigned int i;
     VxDCallProc proc = NULL;
@@ -984,10 +983,7 @@ void WINAPI __wine_vxd_win32s( CONTEXT *context )
         struct Win32sModule *module = moduleTable + context->Ecx;
 
         IMAGE_NT_HEADERS *nt_header = RtlImageNtHeader( (HMODULE)module->baseAddr );
-        IMAGE_SECTION_HEADER *pe_seg = (IMAGE_SECTION_HEADER*)((char *)&nt_header->OptionalHeader +
-                                                         nt_header->FileHeader.SizeOfOptionalHeader);
-
-
+        IMAGE_SECTION_HEADER *pe_seg = IMAGE_FIRST_SECTION( nt_header );
         HFILE image = _lopen(module->pathName, OF_READ);
         BOOL error = (image == HFILE_ERROR);
         UINT i;

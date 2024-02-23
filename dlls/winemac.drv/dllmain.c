@@ -442,8 +442,6 @@ static const kernel_callback kernel_callbacks[] =
     macdrv_dnd_query_drag,
     macdrv_dnd_query_drop,
     macdrv_dnd_query_exited,
-    macdrv_ime_query_char_rect,
-    macdrv_ime_set_text,
     macdrv_regcreateopenkeyexa,
     macdrv_regqueryvalueexa,
     macdrv_regsetvalueexa,
@@ -496,10 +494,4 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
     DisableThreadLibraryCalls(instance);
     macdrv_module = instance;
     return process_attach();
-}
-
-int CDECL wine_notify_icon(DWORD msg, NOTIFYICONDATAW *data)
-{
-    struct notify_icon_params params = { .msg = msg, .data = data };
-    return MACDRV_CALL(notify_icon, &params);
 }

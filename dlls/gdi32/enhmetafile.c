@@ -1680,7 +1680,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 
     case EMR_SETMITERLIMIT:
       {
-        const EMRSETMITERLIMIT *lpSetMiterLimit = (const EMRSETMITERLIMIT *)mr;
+        const struct emr_set_miter_limit *lpSetMiterLimit = (const struct emr_set_miter_limit *)mr;
         SetMiterLimit( hdc, lpSetMiterLimit->eMiterLimit, NULL );
         break;
       }
@@ -1815,7 +1815,6 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     case EMR_CREATEDIBPATTERNBRUSHPT:
       {
         const EMRCREATEDIBPATTERNBRUSHPT *lpCreate = (const EMRCREATEDIBPATTERNBRUSHPT *)mr;
-        LPVOID lpPackedStruct;
 
         /* Check that offsets and data are contained within the record
          * (including checking for wrap-arounds).
@@ -1829,28 +1828,15 @@ BOOL WINAPI PlayEnhMetaFileRecord(
             break;
         }
 
-        /* This is a BITMAPINFO struct followed directly by bitmap bits */
-        lpPackedStruct = HeapAlloc( GetProcessHeap(), 0,
-                                    lpCreate->cbBmi + lpCreate->cbBits );
-        if(!lpPackedStruct)
+        if (lpCreate->offBmi + lpCreate->cbBmi != lpCreate->offBits)
         {
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            ERR("Invalid data in EMR_CREATEDIBPATTERNBRUSHPT record\n");
             break;
         }
 
-        /* Now pack this structure */
-        memcpy( lpPackedStruct,
-                ((const BYTE *)lpCreate) + lpCreate->offBmi,
-                lpCreate->cbBmi );
-        memcpy( ((BYTE*)lpPackedStruct) + lpCreate->cbBmi,
-                ((const BYTE *)lpCreate) + lpCreate->offBits,
-                lpCreate->cbBits );
-
         (handletable->objectHandle)[lpCreate->ihBrush] =
-           CreateDIBPatternBrushPt( lpPackedStruct,
+           CreateDIBPatternBrushPt( (const BYTE *)lpCreate + lpCreate->offBmi,
                                     (UINT)lpCreate->iUsage );
-
-        HeapFree(GetProcessHeap(), 0, lpPackedStruct);
         break;
       }
 
@@ -1868,7 +1854,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
           LONG height = pbi->bmiHeader.biHeight;
 
           hBmp = CreateBitmap(pbi->bmiHeader.biWidth, abs(height), 1, 1, NULL);
-          NtGdiSetDIBits(hdc, hBmp, 0, pbi->bmiHeader.biHeight,
+          SetDIBits(hdc, hBmp, 0, pbi->bmiHeader.biHeight,
               (const BYTE *)mr + pCreateMonoBrush->offBits, pbi, pCreateMonoBrush->iUsage);
         }
         else
@@ -2023,7 +2009,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 	pbi = (const BITMAPINFO *)((const BYTE *)mr + pMaskBlt->offBmiMask);
 	hBmpMask = CreateBitmap(pbi->bmiHeader.biWidth, pbi->bmiHeader.biHeight,
 	             1, 1, NULL);
-	NtGdiSetDIBits(hdc, hBmpMask, 0, pbi->bmiHeader.biHeight,
+	SetDIBits(hdc, hBmpMask, 0, pbi->bmiHeader.biHeight,
 	  (const BYTE *)mr + pMaskBlt->offBitsMask, pbi, pMaskBlt->iUsageMask);
 
 	pbi = (const BITMAPINFO *)((const BYTE *)mr + pMaskBlt->offBmiSrc);
@@ -2076,7 +2062,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 	pbi = (const BITMAPINFO *)((const BYTE *)mr + pPlgBlt->offBmiMask);
 	hBmpMask = CreateBitmap(pbi->bmiHeader.biWidth, pbi->bmiHeader.biHeight,
 	             1, 1, NULL);
-	NtGdiSetDIBits(hdc, hBmpMask, 0, pbi->bmiHeader.biHeight,
+	SetDIBits(hdc, hBmpMask, 0, pbi->bmiHeader.biHeight,
 	  (const BYTE *)mr + pPlgBlt->offBitsMask, pbi, pPlgBlt->iUsageMask);
 
 	pbi = (const BITMAPINFO *)((const BYTE *)mr + pPlgBlt->offBmiSrc);

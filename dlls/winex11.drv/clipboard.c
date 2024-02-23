@@ -1285,7 +1285,7 @@ struct format_entry *import_xdnd_selection( Display *display, Window win, Atom s
     UINT i;
     void *data;
     struct clipboard_format *format;
-    struct format_entry *ret = NULL, *entry;
+    struct format_entry *ret = NULL, *tmp, *entry;
     BOOL have_hdrop = FALSE;
 
     register_x11_formats( targets, count );
@@ -1308,9 +1308,10 @@ struct format_entry *import_xdnd_selection( Display *display, Window win, Atom s
         if (!(data = import_selection( display, win, selection, format, &size ))) continue;
 
         entry_size = (FIELD_OFFSET( struct format_entry, data[size] ) + 7) & ~7;
-        if (buf_size < size + entry_size)
+        if (buf_size < *ret_size + entry_size)
         {
-            if (!(ret = realloc( ret, *ret_size + entry_size + 1024 ))) continue;
+            if (!(tmp = realloc( ret, *ret_size + entry_size + 1024 ))) continue;
+            ret = tmp;
             buf_size = *ret_size + entry_size + 1024; /* extra space for following entries */
         }
         entry = (struct format_entry *)((char *)ret + *ret_size);
@@ -1902,7 +1903,7 @@ static BOOL X11DRV_CLIPBOARD_GetProperty(Display *display, Window w, Atom prop,
 {
     int aformat;
     unsigned long pos = 0, nitems, remain, count;
-    unsigned char *val = NULL, *buffer;
+    unsigned char *val = NULL, *new_val, *buffer;
 
     for (;;)
     {
@@ -1915,15 +1916,13 @@ static BOOL X11DRV_CLIPBOARD_GetProperty(Display *display, Window w, Atom prop,
         }
 
         count = get_property_size( aformat, nitems );
-        *data = realloc( val, pos * sizeof(int) + count + 1 );
-
-        if (!*data)
+        if (!(new_val = realloc( val, pos * sizeof(int) + count + 1 )))
         {
             XFree( buffer );
             free( val );
             return FALSE;
         }
-        val = *data;
+        val = new_val;
         memcpy( (int *)val + pos, buffer, count );
         XFree( buffer );
         if (!remain)
@@ -1941,6 +1940,7 @@ static BOOL X11DRV_CLIPBOARD_GetProperty(Display *display, Window w, Atom prop,
     /* Delete the property on the window now that we are done
      * This will send a PropertyNotify event to the selection owner. */
     XDeleteProperty(display, w, prop);
+    *data = val;
     return TRUE;
 }
 

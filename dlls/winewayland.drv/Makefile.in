@@ -1,0 +1,23 @@
+MODULE = winewayland.drv
+UNIXLIB = winewayland.so
+UNIX_CFLAGS = $(WAYLAND_CLIENT_CFLAGS) $(XKBCOMMON_CFLAGS) $(XKBREGISTRY_CFLAGS)
+UNIX_LIBS = -lwin32u $(WAYLAND_CLIENT_LIBS) $(XKBCOMMON_LIBS) $(XKBREGISTRY_LIBS) $(PTHREAD_LIBS) -lm
+
+SOURCES = \
+	display.c \
+	dllmain.c \
+	pointer-constraints-unstable-v1.xml \
+	relative-pointer-unstable-v1.xml \
+	version.rc \
+	viewporter.xml \
+	vulkan.c \
+	wayland.c \
+	wayland_keyboard.c \
+	wayland_output.c \
+	wayland_pointer.c \
+	wayland_surface.c \
+	waylanddrv_main.c \
+	window.c \
+	window_surface.c \
+	xdg-output-unstable-v1.xml \
+	xdg-shell.xml

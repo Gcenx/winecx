@@ -21,29 +21,76 @@
 #include "dmobject.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmband);
-WINE_DECLARE_DEBUG_CHANNEL(dmfile);
 
+void dump_DMUS_IO_INSTRUMENT(DMUS_IO_INSTRUMENT *inst)
+{
+    TRACE("DMUS_IO_INSTRUMENT: %p\n", inst);
+    TRACE(" - dwPatch: %lu\n", inst->dwPatch);
+    TRACE(" - dwAssignPatch: %lu\n", inst->dwAssignPatch);
+    TRACE(" - dwNoteRanges[0]: %lu\n", inst->dwNoteRanges[0]);
+    TRACE(" - dwNoteRanges[1]: %lu\n", inst->dwNoteRanges[1]);
+    TRACE(" - dwNoteRanges[2]: %lu\n", inst->dwNoteRanges[2]);
+    TRACE(" - dwNoteRanges[3]: %lu\n", inst->dwNoteRanges[3]);
+    TRACE(" - dwPChannel: %lu\n", inst->dwPChannel);
+    TRACE(" - dwFlags: %lx\n", inst->dwFlags);
+    TRACE(" - bPan: %u\n", inst->bPan);
+    TRACE(" - bVolume: %u\n", inst->bVolume);
+    TRACE(" - nTranspose: %d\n", inst->nTranspose);
+    TRACE(" - dwChannelPriority: %lu\n", inst->dwChannelPriority);
+    TRACE(" - nPitchBendRange: %d\n", inst->nPitchBendRange);
+}
 
-/*****************************************************************************
- * IDirectMusicBandImpl implementation
- */
-typedef struct IDirectMusicBandImpl {
+struct instrument_entry
+{
+    struct list entry;
+    DMUS_IO_INSTRUMENT instrument;
+    IDirectMusicCollection *collection;
+
+    IDirectMusicDownloadedInstrument *download;
+    IDirectMusicPort *download_port;
+};
+
+static HRESULT instrument_entry_unload(struct instrument_entry *entry)
+{
+    HRESULT hr;
+
+    if (!entry->download) return S_OK;
+
+    if (FAILED(hr = IDirectMusicPort_UnloadInstrument(entry->download_port, entry->download)))
+        WARN("Failed to unload entry instrument, hr %#lx\n", hr);
+    IDirectMusicDownloadedInstrument_Release(entry->download);
+    entry->download = NULL;
+    IDirectMusicPort_Release(entry->download_port);
+    entry->download_port = NULL;
+
+    return hr;
+}
+
+static void instrument_entry_destroy(struct instrument_entry *entry)
+{
+    instrument_entry_unload(entry);
+    if (entry->collection) IDirectMusicCollection_Release(entry->collection);
+    free(entry);
+}
+
+struct band
+{
     IDirectMusicBand IDirectMusicBand_iface;
     struct dmobject dmobj;
     LONG ref;
-    struct list Instruments;
-} IDirectMusicBandImpl;
+    struct list instruments;
+    IDirectMusicCollection *collection;
+};
 
-static inline IDirectMusicBandImpl *impl_from_IDirectMusicBand(IDirectMusicBand *iface)
+static inline struct band *impl_from_IDirectMusicBand(IDirectMusicBand *iface)
 {
-    return CONTAINING_RECORD(iface, IDirectMusicBandImpl, IDirectMusicBand_iface);
+    return CONTAINING_RECORD(iface, struct band, IDirectMusicBand_iface);
 }
 
-/* DirectMusicBandImpl IDirectMusicBand part: */
-static HRESULT WINAPI IDirectMusicBandImpl_QueryInterface(IDirectMusicBand *iface, REFIID riid,
+static HRESULT WINAPI band_QueryInterface(IDirectMusicBand *iface, REFIID riid,
         void **ret_iface)
 {
-    IDirectMusicBandImpl *This = impl_from_IDirectMusicBand(iface);
+    struct band *This = impl_from_IDirectMusicBand(iface);
 
     TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ret_iface);
 
@@ -64,9 +111,9 @@ static HRESULT WINAPI IDirectMusicBandImpl_QueryInterface(IDirectMusicBand *ifac
     return S_OK;
 }
 
-static ULONG WINAPI IDirectMusicBandImpl_AddRef(IDirectMusicBand *iface)
+static ULONG WINAPI band_AddRef(IDirectMusicBand *iface)
 {
-    IDirectMusicBandImpl *This = impl_from_IDirectMusicBand(iface);
+    struct band *This = impl_from_IDirectMusicBand(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) ref=%ld\n", This, ref);
@@ -74,25 +121,34 @@ static ULONG WINAPI IDirectMusicBandImpl_AddRef(IDirectMusicBand *iface)
     return ref;
 }
 
-static ULONG WINAPI IDirectMusicBandImpl_Release(IDirectMusicBand *iface)
+static ULONG WINAPI band_Release(IDirectMusicBand *iface)
 {
-    IDirectMusicBandImpl *This = impl_from_IDirectMusicBand(iface);
+    struct band *This = impl_from_IDirectMusicBand(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%ld\n", This, ref);
 
-    if (!ref) {
-        HeapFree(GetProcessHeap(), 0, This);
-        DMBAND_UnlockModule();
+    if (!ref)
+    {
+        struct instrument_entry *entry, *next;
+
+        LIST_FOR_EACH_ENTRY_SAFE(entry, next, &This->instruments, struct instrument_entry, entry)
+        {
+            list_remove(&entry->entry);
+            instrument_entry_destroy(entry);
+        }
+
+        if (This->collection) IDirectMusicCollection_Release(This->collection);
+        free(This);
     }
 
     return ref;
 }
 
-static HRESULT WINAPI IDirectMusicBandImpl_CreateSegment(IDirectMusicBand *iface,
+static HRESULT WINAPI band_CreateSegment(IDirectMusicBand *iface,
         IDirectMusicSegment **segment)
 {
-    IDirectMusicBandImpl *This = impl_from_IDirectMusicBand(iface);
+    struct band *This = impl_from_IDirectMusicBand(iface);
     HRESULT hr;
     DMUS_BAND_PARAM bandparam;
 
@@ -113,33 +169,171 @@ static HRESULT WINAPI IDirectMusicBandImpl_CreateSegment(IDirectMusicBand *iface
     return hr;
 }
 
-static HRESULT WINAPI IDirectMusicBandImpl_Download(IDirectMusicBand *iface,
-        IDirectMusicPerformance *pPerformance)
+static HRESULT WINAPI band_Download(IDirectMusicBand *iface,
+        IDirectMusicPerformance *performance)
 {
-        IDirectMusicBandImpl *This = impl_from_IDirectMusicBand(iface);
-	FIXME("(%p, %p): stub\n", This, pPerformance);
-	return S_OK;
+    struct band *This = impl_from_IDirectMusicBand(iface);
+    struct instrument_entry *entry;
+    HRESULT hr = S_OK;
+
+    TRACE("(%p, %p)\n", This, performance);
+
+    LIST_FOR_EACH_ENTRY(entry, &This->instruments, struct instrument_entry, entry)
+    {
+        IDirectMusicCollection *collection;
+        IDirectMusicInstrument *instrument;
+
+        if (FAILED(hr = instrument_entry_unload(entry))) break;
+        if (!(collection = entry->collection) && !(collection = This->collection)) continue;
+
+        if (SUCCEEDED(hr = IDirectMusicCollection_GetInstrument(collection, entry->instrument.dwPatch, &instrument)))
+        {
+            hr = IDirectMusicPerformance_DownloadInstrument(performance, instrument, entry->instrument.dwPChannel,
+                        &entry->download, NULL, 0, &entry->download_port, NULL, NULL);
+            IDirectMusicInstrument_Release(instrument);
+        }
+
+        if (FAILED(hr)) break;
+    }
+
+    if (FAILED(hr)) WARN("Failed to download instruments, hr %#lx\n", hr);
+    return hr;
 }
 
-static HRESULT WINAPI IDirectMusicBandImpl_Unload(IDirectMusicBand *iface,
-        IDirectMusicPerformance *pPerformance)
+static HRESULT WINAPI band_Unload(IDirectMusicBand *iface, IDirectMusicPerformance *performance)
 {
-        IDirectMusicBandImpl *This = impl_from_IDirectMusicBand(iface);
-	FIXME("(%p, %p): stub\n", This, pPerformance);
-	return S_OK;
+    struct band *This = impl_from_IDirectMusicBand(iface);
+    struct instrument_entry *entry;
+    HRESULT hr = S_OK;
+
+	TRACE("(%p, %p)\n", This, performance);
+
+    if (performance) FIXME("performance parameter not implemented\n");
+
+    LIST_FOR_EACH_ENTRY(entry, &This->instruments, struct instrument_entry, entry)
+        if (FAILED(hr = instrument_entry_unload(entry))) break;
+
+    if (FAILED(hr)) WARN("Failed to unload instruments, hr %#lx\n", hr);
+    return hr;
 }
 
-static const IDirectMusicBandVtbl dmband_vtbl = {
-    IDirectMusicBandImpl_QueryInterface,
-    IDirectMusicBandImpl_AddRef,
-    IDirectMusicBandImpl_Release,
-    IDirectMusicBandImpl_CreateSegment,
-    IDirectMusicBandImpl_Download,
-    IDirectMusicBandImpl_Unload
+static const IDirectMusicBandVtbl band_vtbl =
+{
+    band_QueryInterface,
+    band_AddRef,
+    band_Release,
+    band_CreateSegment,
+    band_Download,
+    band_Unload,
 };
 
-/* IDirectMusicBandImpl IDirectMusicObject part: */
-static HRESULT WINAPI band_IDirectMusicObject_ParseDescriptor(IDirectMusicObject *iface,
+static HRESULT parse_lbin_list(struct band *This, IStream *stream, struct chunk_entry *parent)
+{
+    struct chunk_entry chunk = {.parent = parent};
+    IDirectMusicCollection *collection = NULL;
+    struct instrument_entry *entry;
+    DMUS_IO_INSTRUMENT inst = {0};
+    HRESULT hr;
+
+    while ((hr = stream_next_chunk(stream, &chunk)) == S_OK)
+    {
+        switch (MAKE_IDTYPE(chunk.id, chunk.type))
+        {
+        case DMUS_FOURCC_INSTRUMENT_CHUNK:
+        {
+            UINT size = sizeof(inst);
+            if (chunk.size == offsetof(DMUS_IO_INSTRUMENT, nPitchBendRange)) size = chunk.size;
+            if (FAILED(hr = stream_chunk_get_data(stream, &chunk, &inst, size))) break;
+            break;
+        }
+
+        case MAKE_IDTYPE(FOURCC_LIST, DMUS_FOURCC_REF_LIST):
+        {
+            IDirectMusicObject *object;
+            if (FAILED(hr = dmobj_parsereference(stream, &chunk, &object))) break;
+            hr = IDirectMusicObject_QueryInterface(object, &IID_IDirectMusicCollection, (void **)&collection);
+            IDirectMusicObject_Release(object);
+            break;
+        }
+
+        default:
+            FIXME("Ignoring chunk %s %s\n", debugstr_fourcc(chunk.id), debugstr_fourcc(chunk.type));
+            break;
+        }
+
+        if (FAILED(hr)) break;
+    }
+
+    if (FAILED(hr)) return hr;
+
+    if (!(entry = calloc(1, sizeof(*entry)))) return E_OUTOFMEMORY;
+    memcpy(&entry->instrument, &inst, sizeof(DMUS_IO_INSTRUMENT));
+    entry->collection = collection;
+    list_add_tail(&This->instruments, &entry->entry);
+
+    return hr;
+}
+
+static HRESULT parse_lbil_list(struct band *This, IStream *stream, struct chunk_entry *parent)
+{
+    struct chunk_entry chunk = {.parent = parent};
+    HRESULT hr;
+
+    while ((hr = stream_next_chunk(stream, &chunk)) == S_OK)
+    {
+        switch (MAKE_IDTYPE(chunk.id, chunk.type))
+        {
+        case MAKE_IDTYPE(FOURCC_LIST, DMUS_FOURCC_INSTRUMENT_LIST):
+            hr = parse_lbin_list(This, stream, &chunk);
+            break;
+
+        default:
+            FIXME("Ignoring chunk %s %s\n", debugstr_fourcc(chunk.id), debugstr_fourcc(chunk.type));
+            break;
+        }
+
+        if (FAILED(hr)) break;
+    }
+
+    return hr;
+}
+
+static HRESULT parse_dmbd_chunk(struct band *This, IStream *stream, struct chunk_entry *parent)
+{
+    struct chunk_entry chunk = {.parent = parent};
+    HRESULT hr;
+
+    if (FAILED(hr = dmobj_parsedescriptor(stream, parent, &This->dmobj.desc,
+                DMUS_OBJ_OBJECT|DMUS_OBJ_NAME|DMUS_OBJ_NAME_INAM|DMUS_OBJ_CATEGORY|DMUS_OBJ_VERSION))
+                || FAILED(hr = stream_reset_chunk_data(stream, parent)))
+        return hr;
+
+    while ((hr = stream_next_chunk(stream, &chunk)) == S_OK)
+    {
+        switch (MAKE_IDTYPE(chunk.id, chunk.type))
+        {
+        case DMUS_FOURCC_GUID_CHUNK:
+        case DMUS_FOURCC_VERSION_CHUNK:
+        case MAKE_IDTYPE(FOURCC_LIST, DMUS_FOURCC_UNFO_LIST):
+            /* already parsed by dmobj_parsedescriptor */
+            break;
+
+        case MAKE_IDTYPE(FOURCC_LIST, DMUS_FOURCC_INSTRUMENTS_LIST):
+            hr = parse_lbil_list(This, stream, &chunk);
+            break;
+
+        default:
+            FIXME("Ignoring chunk %s %s\n", debugstr_fourcc(chunk.id), debugstr_fourcc(chunk.type));
+            break;
+        }
+
+        if (FAILED(hr)) break;
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI band_object_ParseDescriptor(IDirectMusicObject *iface,
         IStream *stream, DMUS_OBJECTDESC *desc)
 {
     struct chunk_entry riff = {0};
@@ -178,358 +372,159 @@ static HRESULT WINAPI band_IDirectMusicObject_ParseDescriptor(IDirectMusicObject
     return S_OK;
 }
 
-static const IDirectMusicObjectVtbl dmobject_vtbl = {
+static const IDirectMusicObjectVtbl band_object_vtbl =
+{
     dmobj_IDirectMusicObject_QueryInterface,
     dmobj_IDirectMusicObject_AddRef,
     dmobj_IDirectMusicObject_Release,
     dmobj_IDirectMusicObject_GetDescriptor,
     dmobj_IDirectMusicObject_SetDescriptor,
-    band_IDirectMusicObject_ParseDescriptor
+    band_object_ParseDescriptor,
 };
 
-#define DMUS_IO_INSTRUMENT_DX7_SIZE offsetof(DMUS_IO_INSTRUMENT, nPitchBendRange)
-
-/* IDirectMusicBandImpl IPersistStream part: */
-static HRESULT parse_instrument(IDirectMusicBandImpl *This, DMUS_PRIVATE_CHUNK *pChunk,
-        IStream *pStm)
+static inline struct band *impl_from_IPersistStream(IPersistStream *iface)
 {
-  DMUS_PRIVATE_CHUNK Chunk;
-  DWORD ListSize[3], ListCount[3];
-  LARGE_INTEGER liMove; /* used when skipping chunks */
-  HRESULT hr;
-
-  DMUS_IO_INSTRUMENT inst;
-  LPDMUS_PRIVATE_INSTRUMENT pNewInstrument;
-  IDirectMusicObject* pObject = NULL;
-
-  if (pChunk->fccID != DMUS_FOURCC_INSTRUMENT_LIST) {
-    ERR_(dmfile)(": %s chunk should be an INSTRUMENT list\n", debugstr_fourcc (pChunk->fccID));
-    return E_FAIL;
-  }
-
-  ListSize[0] = pChunk->dwSize - sizeof(FOURCC);
-  ListCount[0] = 0;
-
-  do {
-    IStream_Read (pStm, &Chunk, sizeof(FOURCC)+sizeof(DWORD), NULL);
-    ListCount[0] += sizeof(FOURCC) + sizeof(DWORD) + Chunk.dwSize;
-    TRACE_(dmfile)(": %s chunk (size = %ld)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
-    switch (Chunk.fccID) { 
-    case DMUS_FOURCC_INSTRUMENT_CHUNK: {
-      TRACE_(dmfile)(": Instrument chunk\n");
-      if (Chunk.dwSize != sizeof(DMUS_IO_INSTRUMENT) && Chunk.dwSize != DMUS_IO_INSTRUMENT_DX7_SIZE) {
-        ERR_(dmfile)("unexpected size %ld\n", Chunk.dwSize);
-        return E_FAIL;
-      }
-      IStream_Read (pStm, &inst, Chunk.dwSize, NULL);
-      if (Chunk.dwSize != sizeof(DMUS_IO_INSTRUMENT))
-        inst.nPitchBendRange = 0;
-
-      TRACE_(dmfile)(" - dwPatch: %lu\n", inst.dwPatch);
-      TRACE_(dmfile)(" - dwAssignPatch: %lu\n", inst.dwAssignPatch);
-      TRACE_(dmfile)(" - dwNoteRanges[0]: %lu\n", inst.dwNoteRanges[0]);
-      TRACE_(dmfile)(" - dwNoteRanges[1]: %lu\n", inst.dwNoteRanges[1]);
-      TRACE_(dmfile)(" - dwNoteRanges[2]: %lu\n", inst.dwNoteRanges[2]);
-      TRACE_(dmfile)(" - dwNoteRanges[3]: %lu\n", inst.dwNoteRanges[3]);
-      TRACE_(dmfile)(" - dwPChannel: %lu\n", inst.dwPChannel);
-      TRACE_(dmfile)(" - dwFlags: %lx\n", inst.dwFlags);
-      TRACE_(dmfile)(" - bPan: %u\n", inst.bPan);
-      TRACE_(dmfile)(" - bVolume: %u\n", inst.bVolume);
-      TRACE_(dmfile)(" - nTranspose: %d\n", inst.nTranspose);
-      TRACE_(dmfile)(" - dwChannelPriority: %lu\n", inst.dwChannelPriority);
-      TRACE_(dmfile)(" - nPitchBendRange: %d\n", inst.nPitchBendRange);
-      break;
-    } 
-    case FOURCC_LIST: {
-      IStream_Read (pStm, &Chunk.fccID, sizeof(FOURCC), NULL);
-      TRACE_(dmfile)(": LIST chunk of type %s", debugstr_fourcc(Chunk.fccID));
-      ListSize[1] = Chunk.dwSize - sizeof(FOURCC);
-      ListCount[1] = 0;
-      switch (Chunk.fccID) { 
-      case DMUS_FOURCC_REF_LIST: {
-	FIXME_(dmfile)(": DMRF (DM References) list\n");
-        hr = IDirectMusicUtils_IPersistStream_ParseReference(&This->dmobj.IPersistStream_iface,
-                &Chunk, pStm, &pObject);
-	if (FAILED(hr)) {
-	  ERR(": could not load Reference\n");
-	  return hr;
-	}
-	break;						
-      }
-      default: {
-	TRACE_(dmfile)(": unknown (skipping)\n");
-	liMove.QuadPart = Chunk.dwSize - sizeof(FOURCC);
-	IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-	break;						
-      }
-      }	
-      break;
-    }
-    default: {
-      TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
-      liMove.QuadPart = Chunk.dwSize;
-      IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-      break;						
-    }
-    }
-    TRACE_(dmfile)(": ListCount[0] = %ld < ListSize[0] = %ld\n", ListCount[0], ListSize[0]);
-  } while (ListCount[0] < ListSize[0]);
-  
-  /*
-   * @TODO insert pNewInstrument into This
-   */
-  pNewInstrument = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(DMUS_PRIVATE_INSTRUMENT));
-  if (NULL == pNewInstrument) {
-    ERR(": no more memory\n");
-    return  E_OUTOFMEMORY;
-  }
-  memcpy(&pNewInstrument->pInstrument, &inst, sizeof(DMUS_IO_INSTRUMENT));
-  pNewInstrument->ppReferenceCollection = NULL;
-  if (NULL != pObject) {
-    IDirectMusicCollection* pCol = NULL;
-    hr = IDirectMusicObject_QueryInterface (pObject, &IID_IDirectMusicCollection, (void**) &pCol);
-    if (FAILED(hr)) {
-      ERR(": failed to get IDirectMusicCollection Interface from DMObject\n");
-      HeapFree(GetProcessHeap(), 0, pNewInstrument);
-
-      return hr;
-    }
-    pNewInstrument->ppReferenceCollection = pCol;
-    IDirectMusicObject_Release(pObject);
-  }
-  list_add_tail (&This->Instruments, &pNewInstrument->entry);
-
-  return S_OK;
+    return CONTAINING_RECORD(iface, struct band, dmobj.IPersistStream_iface);
 }
 
-static HRESULT parse_instruments_list(IDirectMusicBandImpl *This, DMUS_PRIVATE_CHUNK *pChunk,
-        IStream *pStm)
+static HRESULT WINAPI band_persist_stream_Load(IPersistStream *iface, IStream *stream)
 {
-  HRESULT hr;
-  DMUS_PRIVATE_CHUNK Chunk;
-  DWORD ListSize[3], ListCount[3];
-  LARGE_INTEGER liMove; /* used when skipping chunks */
+    struct band *This = impl_from_IPersistStream(iface);
+    DMUS_OBJECTDESC default_desc =
+    {
+        .dwSize = sizeof(DMUS_OBJECTDESC),
+        .dwValidData = DMUS_OBJ_OBJECT | DMUS_OBJ_CLASS,
+        .guidClass = CLSID_DirectMusicCollection,
+        .guidObject = GUID_DefaultGMCollection,
+    };
+    struct chunk_entry chunk = {0};
+    HRESULT hr;
 
-  if (pChunk->fccID != DMUS_FOURCC_INSTRUMENTS_LIST) {
-    ERR_(dmfile)(": %s chunk should be an INSTRUMENTS list\n", debugstr_fourcc (pChunk->fccID));
-    return E_FAIL;
-  }  
+    TRACE("%p, %p\n", iface, stream);
 
-  ListSize[0] = pChunk->dwSize - sizeof(FOURCC);
-  ListCount[0] = 0;
+    if (This->collection) IDirectMusicCollection_Release(This->collection);
+    if (FAILED(hr = stream_get_object(stream, &default_desc, &IID_IDirectMusicCollection,
+            (void **)&This->collection)))
+        WARN("Failed to load default collection from loader, hr %#lx\n", hr);
 
-  do {
-    IStream_Read (pStm, &Chunk, sizeof(FOURCC)+sizeof(DWORD), NULL);
-    ListCount[0] += sizeof(FOURCC) + sizeof(DWORD) + Chunk.dwSize;
-    TRACE_(dmfile)(": %s chunk (size = %ld)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
-    switch (Chunk.fccID) {
-    case FOURCC_LIST: {
-      IStream_Read (pStm, &Chunk.fccID, sizeof(FOURCC), NULL);
-      TRACE_(dmfile)(": LIST chunk of type %s", debugstr_fourcc(Chunk.fccID));
-      ListSize[1] = Chunk.dwSize - sizeof(FOURCC);
-      ListCount[1] = 0;
-      switch (Chunk.fccID) { 
-      case DMUS_FOURCC_INSTRUMENT_LIST: {
-	TRACE_(dmfile)(": Instrument list\n");
-        hr = parse_instrument(This, &Chunk, pStm);
-	if (FAILED(hr)) return hr;
-	break;
-      }
-      default: {
-	TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
-	liMove.QuadPart = ListSize[1];
-	IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-	break;						
-      }
-      }
-      break;
+    if ((hr = stream_get_chunk(stream, &chunk)) == S_OK)
+    {
+        switch (MAKE_IDTYPE(chunk.id, chunk.type))
+        {
+        case MAKE_IDTYPE(FOURCC_RIFF, DMUS_FOURCC_BAND_FORM):
+            hr = parse_dmbd_chunk(This, stream, &chunk);
+            break;
+
+        default:
+            WARN("Invalid band chunk %s %s\n", debugstr_fourcc(chunk.id), debugstr_fourcc(chunk.type));
+            hr = DMUS_E_UNSUPPORTED_STREAM;
+            break;
+        }
     }
-    default: {
-      TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
-      liMove.QuadPart = Chunk.dwSize;
-      IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-      break;						
-    }
-    }
-    TRACE_(dmfile)(": ListCount[0] = %ld < ListSize[0] = %ld\n", ListCount[0], ListSize[0]);
-  } while (ListCount[0] < ListSize[0]);
 
-  return S_OK;
-}
-
-static HRESULT parse_band_form(IDirectMusicBandImpl *This, DMUS_PRIVATE_CHUNK *pChunk,
-        IStream *pStm)
-{
-  HRESULT hr = E_FAIL;
-  DMUS_PRIVATE_CHUNK Chunk;
-  DWORD StreamSize, StreamCount, ListSize[3], ListCount[3];
-  LARGE_INTEGER liMove; /* used when skipping chunks */
-
-  GUID tmp_guid;
-
-  if (pChunk->fccID != DMUS_FOURCC_BAND_FORM) {
-    ERR_(dmfile)(": %s chunk should be a BAND form\n", debugstr_fourcc (pChunk->fccID));
-    return E_FAIL;
-  }  
-
-  StreamSize = pChunk->dwSize - sizeof(FOURCC);
-  StreamCount = 0;
-
-  do {
-    IStream_Read (pStm, &Chunk, sizeof(FOURCC)+sizeof(DWORD), NULL);
-    StreamCount += sizeof(FOURCC) + sizeof(DWORD) + Chunk.dwSize;
-    TRACE_(dmfile)(": %s chunk (size = %ld)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
-
-    hr = IDirectMusicUtils_IPersistStream_ParseDescGeneric(&Chunk, pStm, &This->dmobj.desc);
+    stream_skip_chunk(stream, &chunk);
     if (FAILED(hr)) return hr;
-    
-    if (hr == S_FALSE) {
-      switch (Chunk.fccID) {
-      case DMUS_FOURCC_GUID_CHUNK: {
-	TRACE_(dmfile)(": GUID\n");
-	IStream_Read (pStm, &tmp_guid, sizeof(GUID), NULL);
-	TRACE_(dmfile)(" - guid: %s\n", debugstr_dmguid(&tmp_guid));
-	break;
-      }
-      case FOURCC_LIST: {
-	IStream_Read (pStm, &Chunk.fccID, sizeof(FOURCC), NULL);
-	TRACE_(dmfile)(": LIST chunk of type %s", debugstr_fourcc(Chunk.fccID));
-	ListSize[0] = Chunk.dwSize - sizeof(FOURCC);
-	ListCount[0] = 0;
-	switch (Chunk.fccID) {
-	case DMUS_FOURCC_UNFO_LIST: { 
-	  TRACE_(dmfile)(": UNFO list\n");
-	  do {
-	    IStream_Read (pStm, &Chunk, sizeof(FOURCC)+sizeof(DWORD), NULL);
-	    ListCount[0] += sizeof(FOURCC) + sizeof(DWORD) + Chunk.dwSize;
-            TRACE_(dmfile)(": %s chunk (size = %ld)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
 
-            hr = IDirectMusicUtils_IPersistStream_ParseUNFOGeneric(&Chunk, pStm, &This->dmobj.desc);
-	    if (FAILED(hr)) return hr;
-	    
-	    if (hr == S_FALSE) {
-	      switch (Chunk.fccID) {
-	      default: {
-		TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
-		liMove.QuadPart = Chunk.dwSize;
-		IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-		break;						
-	      }
-	      }
-	    }
-            TRACE_(dmfile)(": ListCount[0] = %ld < ListSize[0] = %ld\n", ListCount[0], ListSize[0]);
-	  } while (ListCount[0] < ListSize[0]);
-	  break;
-	}
-	case DMUS_FOURCC_INSTRUMENTS_LIST: {
-	  TRACE_(dmfile)(": INSTRUMENTS list\n");
-          hr = parse_instruments_list(This, &Chunk, pStm);
-	  if (FAILED(hr)) return hr;
-	  break;	
-	}
-	default: {
-	  TRACE_(dmfile)(": unknown (skipping)\n");
-	  liMove.QuadPart = Chunk.dwSize - sizeof(FOURCC);
-	  IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-	  break;						
-	}
-	}
-	break;
-      }
-      default: {
-	TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
-	liMove.QuadPart = Chunk.dwSize;
-	IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-	break;						
-      }
-      }
+    if (TRACE_ON(dmband))
+    {
+        struct instrument_entry *entry;
+
+        TRACE("Loaded IDirectMusicBand %p\n", This);
+        dump_DMUS_OBJECTDESC(&This->dmobj.desc);
+
+        TRACE(" - Instruments:\n");
+        LIST_FOR_EACH_ENTRY(entry, &This->instruments, struct instrument_entry, entry)
+        {
+            dump_DMUS_IO_INSTRUMENT(&entry->instrument);
+            TRACE(" - collection: %p\n", entry->collection);
+        }
     }
-    TRACE_(dmfile)(": StreamCount[0] = %ld < StreamSize[0] = %ld\n", StreamCount, StreamSize);
-  } while (StreamCount < StreamSize);  
 
-  return S_OK;
+    return S_OK;
 }
 
-static inline IDirectMusicBandImpl *impl_from_IPersistStream(IPersistStream *iface)
+static const IPersistStreamVtbl band_persist_stream_vtbl =
 {
-    return CONTAINING_RECORD(iface, IDirectMusicBandImpl, dmobj.IPersistStream_iface);
-}
-
-static HRESULT WINAPI IPersistStreamImpl_Load(IPersistStream *iface, IStream *pStm)
-{
-  IDirectMusicBandImpl *This = impl_from_IPersistStream(iface);
-  DMUS_PRIVATE_CHUNK Chunk;
-  LARGE_INTEGER liMove;
-  HRESULT hr;
-  
-  TRACE("(%p,%p): loading\n", This, pStm);
-  
-  IStream_Read (pStm, &Chunk, sizeof(FOURCC)+sizeof(DWORD), NULL);
-  TRACE_(dmfile)(": %s chunk (size = %ld)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
-  switch (Chunk.fccID) {
-  case FOURCC_RIFF: {
-    IStream_Read (pStm, &Chunk.fccID, sizeof(FOURCC), NULL);
-    TRACE_(dmfile)(": %s chunk (size = %ld)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
-    switch (Chunk.fccID) {
-    case DMUS_FOURCC_BAND_FORM: {
-      TRACE_(dmfile)(": Band form\n");
-      hr = parse_band_form(This, &Chunk, pStm);
-      if (FAILED(hr)) return hr;
-      break;    
-    }
-    default: {
-      TRACE_(dmfile)(": unexpected chunk; loading failed)\n");
-      liMove.QuadPart = Chunk.dwSize;
-      IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
-      return E_FAIL;
-    }
-    }
-    TRACE_(dmfile)(": reading finished\n");
-    break;
-  }
-  default: {
-    TRACE_(dmfile)(": unexpected chunk; loading failed)\n");
-    liMove.QuadPart = Chunk.dwSize;
-    IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL); /* skip the rest of the chunk */
-    return E_FAIL;
-  }
-  }
-  
-  return S_OK;
-}
-
-static const IPersistStreamVtbl persiststream_vtbl = {
     dmobj_IPersistStream_QueryInterface,
     dmobj_IPersistStream_AddRef,
     dmobj_IPersistStream_Release,
     unimpl_IPersistStream_GetClassID,
     unimpl_IPersistStream_IsDirty,
-    IPersistStreamImpl_Load,
+    band_persist_stream_Load,
     unimpl_IPersistStream_Save,
-    unimpl_IPersistStream_GetSizeMax
+    unimpl_IPersistStream_GetSizeMax,
 };
 
-/* for ClassFactory */
 HRESULT create_dmband(REFIID lpcGUID, void **ppobj)
 {
-  IDirectMusicBandImpl* obj;
+  struct band* obj;
   HRESULT hr;
 
-  obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusicBandImpl));
-  if (NULL == obj) {
-    *ppobj = NULL;
-    return E_OUTOFMEMORY;
-  }
-  obj->IDirectMusicBand_iface.lpVtbl = &dmband_vtbl;
+  *ppobj = NULL;
+  if (!(obj = calloc(1, sizeof(*obj)))) return E_OUTOFMEMORY;
+  obj->IDirectMusicBand_iface.lpVtbl = &band_vtbl;
   obj->ref = 1;
   dmobject_init(&obj->dmobj, &CLSID_DirectMusicBand, (IUnknown *)&obj->IDirectMusicBand_iface);
-  obj->dmobj.IDirectMusicObject_iface.lpVtbl = &dmobject_vtbl;
-  obj->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
-  list_init (&obj->Instruments);
+  obj->dmobj.IDirectMusicObject_iface.lpVtbl = &band_object_vtbl;
+  obj->dmobj.IPersistStream_iface.lpVtbl = &band_persist_stream_vtbl;
+  list_init(&obj->instruments);
 
-  DMBAND_LockModule();
   hr = IDirectMusicBand_QueryInterface(&obj->IDirectMusicBand_iface, lpcGUID, ppobj);
   IDirectMusicBand_Release(&obj->IDirectMusicBand_iface);
 
   return hr;
+}
+
+HRESULT band_connect_to_collection(IDirectMusicBand *iface, IDirectMusicCollection *collection)
+{
+    struct band *This = impl_from_IDirectMusicBand(iface);
+
+    TRACE("%p, %p\n", iface, collection);
+
+    if (This->collection) IDirectMusicCollection_Release(This->collection);
+    if ((This->collection = collection)) IDirectMusicCollection_AddRef(This->collection);
+
+    return S_OK;
+}
+
+HRESULT band_send_messages(IDirectMusicBand *iface, IDirectMusicPerformance *performance,
+        IDirectMusicGraph *graph, MUSIC_TIME time, DWORD track_id)
+{
+    struct band *This = impl_from_IDirectMusicBand(iface);
+    struct instrument_entry *entry;
+    HRESULT hr = S_OK;
+
+    LIST_FOR_EACH_ENTRY_REV(entry, &This->instruments, struct instrument_entry, entry)
+    {
+        DWORD patch = entry->instrument.dwPatch;
+        DMUS_PATCH_PMSG *msg;
+
+        if (FAILED(hr = IDirectMusicPerformance_AllocPMsg(performance, sizeof(*msg),
+                (DMUS_PMSG **)&msg)))
+            break;
+
+        msg->mtTime = time;
+        msg->dwFlags = DMUS_PMSGF_MUSICTIME;
+        msg->dwPChannel = entry->instrument.dwPChannel;
+        msg->dwVirtualTrackID = track_id;
+        msg->dwType = DMUS_PMSGT_PATCH;
+        msg->dwGroupID = 1;
+        msg->byInstrument = entry->instrument.dwPatch;
+
+        msg->byInstrument = patch & 0x7F;
+        patch >>= 8;
+        msg->byLSB = patch & 0x7f;
+        patch >>= 8;
+        msg->byMSB = patch & 0x7f;
+        patch >>= 8;
+
+        if (FAILED(hr = IDirectMusicGraph_StampPMsg(graph, (DMUS_PMSG *)msg))
+                || FAILED(hr = IDirectMusicPerformance_SendPMsg(performance, (DMUS_PMSG *)msg)))
+        {
+            IDirectMusicPerformance_FreePMsg(performance, (DMUS_PMSG *)msg);
+            break;
+        }
+    }
+
+    return hr;
 }

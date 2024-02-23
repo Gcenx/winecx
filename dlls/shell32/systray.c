@@ -20,8 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -33,7 +31,6 @@
 #include "shell32_main.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(systray);
 
@@ -107,7 +104,7 @@ BOOL WINAPI Shell_NotifyIconA(DWORD dwMessage, PNOTIFYICONDATAA pnid)
             MultiByteToWideChar(CP_ACP, 0, pnid->szInfoTitle, -1, nidW.szInfoTitle, ARRAY_SIZE(nidW.szInfoTitle));
         }
 
-        nidW.u.uTimeout = pnid->u.uTimeout;
+        nidW.uTimeout = pnid->uTimeout;
         nidW.dwInfoFlags = pnid->dwInfoFlags;
     }
     
@@ -184,7 +181,7 @@ BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW nid)
         if (iconinfo.hbmColor)
             cbColourBits = (bmColour.bmPlanes * bmColour.bmWidth * bmColour.bmHeight * bmColour.bmBitsPixel + 15) / 16 * 2;
         cds.cbData = sizeof(*data) + cbMaskBits + cbColourBits;
-        buffer = heap_alloc(cds.cbData);
+        buffer = malloc(cds.cbData);
         if (!buffer)
         {
             DeleteObject(iconinfo.hbmMask);
@@ -234,18 +231,18 @@ noicon:
     {
         lstrcpynW( data->szInfo, nid->szInfo, ARRAY_SIZE(data->szInfo) );
         lstrcpynW( data->szInfoTitle, nid->szInfoTitle, ARRAY_SIZE(data->szInfoTitle));
-        data->u.uTimeout  = nid->u.uTimeout;
+        data->u.uTimeout  = nid->uTimeout;
         data->dwInfoFlags = nid->dwInfoFlags;
     }
     if (data->uFlags & NIF_GUID)
         data->guidItem = nid->guidItem;
     if (dwMessage == NIM_SETVERSION)
-        data->u.uVersion = nid->u.uVersion;
+        data->u.uVersion = nid->uVersion;
     /* FIXME: balloon icon */
 
     cds.lpData = data;
     ret = SendMessageW(tray, WM_COPYDATA, (WPARAM)nid->hWnd, (LPARAM)&cds);
-    if (data != &data_buffer) heap_free( data );
+    if (data != &data_buffer) free(data);
     SetLastError(ret ? S_OK : E_FAIL);
     return ret;
 }

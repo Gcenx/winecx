@@ -17,15 +17,11 @@
  */
 
 typedef struct CSSStyle CSSStyle;
-typedef void *(*style_qi_t)(CSSStyle*,REFIID);
 
 struct CSSStyle {
     DispatchEx dispex;
     IHTMLCSSStyleDeclaration IHTMLCSSStyleDeclaration_iface;
     IHTMLCSSStyleDeclaration2 IHTMLCSSStyleDeclaration2_iface;
-
-    LONG ref;
-    style_qi_t qi;
 
     nsIDOMCSSStyleDeclaration *nsstyle;
 };
@@ -151,16 +147,23 @@ typedef enum {
     STYLEID_MAX_VALUE
 } styleid_t;
 
-HRESULT HTMLStyle_Create(HTMLElement*,HTMLStyle**) DECLSPEC_HIDDEN;
-HRESULT create_computed_style(nsIDOMCSSStyleDeclaration*,compat_mode_t,IHTMLCSSStyleDeclaration**) DECLSPEC_HIDDEN;
-void init_css_style(CSSStyle*,nsIDOMCSSStyleDeclaration*,style_qi_t,
-                    dispex_static_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
+HRESULT HTMLStyle_Create(HTMLElement*,HTMLStyle**);
+HRESULT create_computed_style(nsIDOMCSSStyleDeclaration*,compat_mode_t,IHTMLCSSStyleDeclaration**);
+void init_css_style(CSSStyle*,nsIDOMCSSStyleDeclaration*,dispex_static_data_t*,compat_mode_t);
 
-void CSSStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode) DECLSPEC_HIDDEN;
-extern const dispex_static_data_vtbl_t CSSStyle_dispex_vtbl DECLSPEC_HIDDEN;
+void *CSSStyle_query_interface(DispatchEx*,REFIID);
+void CSSStyle_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*);
+void CSSStyle_unlink(DispatchEx*);
+void CSSStyle_destructor(DispatchEx*);
+HRESULT CSSStyle_get_dispid(DispatchEx*,BSTR,DWORD,DISPID*);
+void CSSStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode);
 
-HRESULT get_style_property(CSSStyle*,styleid_t,BSTR*) DECLSPEC_HIDDEN;
-HRESULT get_style_property_var(CSSStyle*,styleid_t,VARIANT*) DECLSPEC_HIDDEN;
+HRESULT get_style_property(CSSStyle*,styleid_t,BSTR*);
+HRESULT get_style_property_var(CSSStyle*,styleid_t,VARIANT*);
 
-HRESULT get_elem_style(HTMLElement*,styleid_t,BSTR*) DECLSPEC_HIDDEN;
-HRESULT set_elem_style(HTMLElement*,styleid_t,const WCHAR*) DECLSPEC_HIDDEN;
+HRESULT get_elem_style(HTMLElement*,styleid_t,BSTR*);
+HRESULT set_elem_style(HTMLElement*,styleid_t,const WCHAR*);
+
+#define CSSSTYLE_DISPEX_VTBL_ENTRIES           \
+    .destructor        = CSSStyle_destructor,  \
+    .get_dispid        = CSSStyle_get_dispid

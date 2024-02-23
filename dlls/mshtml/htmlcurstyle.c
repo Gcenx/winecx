@@ -72,20 +72,6 @@ static inline HTMLCurrentStyle *impl_from_IHTMLCurrentStyle4(IHTMLCurrentStyle4 
     return CONTAINING_RECORD(iface, HTMLCurrentStyle, IHTMLCurrentStyle4_iface);
 }
 
-static void *HTMLCurrentStyle_QI(CSSStyle *css_style, REFIID riid)
-{
-    HTMLCurrentStyle *This = CONTAINING_RECORD(css_style, HTMLCurrentStyle, css_style);
-    if(IsEqualGUID(&IID_IHTMLCurrentStyle, riid))
-        return &This->IHTMLCurrentStyle_iface;
-    if(IsEqualGUID(&IID_IHTMLCurrentStyle2, riid))
-        return &This->IHTMLCurrentStyle2_iface;
-    if(IsEqualGUID(&IID_IHTMLCurrentStyle3, riid))
-        return &This->IHTMLCurrentStyle3_iface;
-    if(IsEqualGUID(&IID_IHTMLCurrentStyle4, riid))
-        return &This->IHTMLCurrentStyle4_iface;
-    return NULL;
-}
-
 static HRESULT WINAPI HTMLCurrentStyle_QueryInterface(IHTMLCurrentStyle *iface, REFIID riid, void **ppv)
 {
     HTMLCurrentStyle *This = impl_from_IHTMLCurrentStyle(iface);
@@ -1292,6 +1278,54 @@ static const IHTMLCurrentStyle4Vtbl HTMLCurrentStyle4Vtbl = {
     HTMLCurrentStyle4_get_maxWidth
 };
 
+static inline HTMLCurrentStyle *impl_from_DispatchEx(DispatchEx *dispex)
+{
+    return CONTAINING_RECORD(dispex, HTMLCurrentStyle, css_style.dispex);
+}
+
+static void *HTMLCurrentStyle_query_interface(DispatchEx *dispex, REFIID riid)
+{
+    HTMLCurrentStyle *This = impl_from_DispatchEx(dispex);
+
+    if(IsEqualGUID(&IID_IHTMLCurrentStyle, riid))
+        return &This->IHTMLCurrentStyle_iface;
+    if(IsEqualGUID(&IID_IHTMLCurrentStyle2, riid))
+        return &This->IHTMLCurrentStyle2_iface;
+    if(IsEqualGUID(&IID_IHTMLCurrentStyle3, riid))
+        return &This->IHTMLCurrentStyle3_iface;
+    if(IsEqualGUID(&IID_IHTMLCurrentStyle4, riid))
+        return &This->IHTMLCurrentStyle4_iface;
+    return CSSStyle_query_interface(&This->css_style.dispex, riid);
+}
+
+static void HTMLCurrentStyle_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
+{
+    HTMLCurrentStyle *This = impl_from_DispatchEx(dispex);
+    CSSStyle_traverse(&This->css_style.dispex, cb);
+
+    if(This->elem)
+        note_cc_edge((nsISupports*)&This->elem->node.IHTMLDOMNode_iface, "elem", cb);
+}
+
+static void HTMLCurrentStyle_unlink(DispatchEx *dispex)
+{
+    HTMLCurrentStyle *This = impl_from_DispatchEx(dispex);
+    CSSStyle_unlink(&This->css_style.dispex);
+
+    if(This->elem) {
+        HTMLElement *elem = This->elem;
+        This->elem = NULL;
+        IHTMLDOMNode_Release(&elem->node.IHTMLDOMNode_iface);
+    }
+}
+
+static const dispex_static_data_vtbl_t HTMLCurrentStyle_dispex_vtbl = {
+    CSSSTYLE_DISPEX_VTBL_ENTRIES,
+    .query_interface   = HTMLCurrentStyle_query_interface,
+    .traverse          = HTMLCurrentStyle_traverse,
+    .unlink            = HTMLCurrentStyle_unlink
+};
+
 static const tid_t HTMLCurrentStyle_iface_tids[] = {
     IHTMLCurrentStyle_tid,
     IHTMLCurrentStyle2_tid,
@@ -1300,8 +1334,8 @@ static const tid_t HTMLCurrentStyle_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLCurrentStyle_dispex = {
-    L"MSCurrentStyleCSSProperties",
-    &CSSStyle_dispex_vtbl,
+    "MSCurrentStyleCSSProperties",
+    &HTMLCurrentStyle_dispex_vtbl,
     DispHTMLCurrentStyle_tid,
     HTMLCurrentStyle_iface_tids,
     CSSStyle_init_dispex_info
@@ -1356,8 +1390,7 @@ HRESULT HTMLCurrentStyle_Create(HTMLElement *elem, IHTMLCurrentStyle **p)
     ret->IHTMLCurrentStyle3_iface.lpVtbl = &HTMLCurrentStyle3Vtbl;
     ret->IHTMLCurrentStyle4_iface.lpVtbl = &HTMLCurrentStyle4Vtbl;
 
-    init_css_style(&ret->css_style, nsstyle, HTMLCurrentStyle_QI, &HTMLCurrentStyle_dispex,
-                   dispex_compat_mode(&elem->node.event_target.dispex));
+    init_css_style(&ret->css_style, nsstyle, &HTMLCurrentStyle_dispex, dispex_compat_mode(&elem->node.event_target.dispex));
     nsIDOMCSSStyleDeclaration_Release(nsstyle);
 
     IHTMLElement_AddRef(&elem->IHTMLElement_iface);

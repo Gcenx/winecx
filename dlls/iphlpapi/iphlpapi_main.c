@@ -20,6 +20,7 @@
  */
 #include <stdarg.h>
 
+#define IPHLPAPI_DLL_LINKAGE
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -32,7 +33,6 @@
 #include "fltdefs.h"
 #include "ifdef.h"
 #include "netioapi.h"
-#include "tcpestats.h"
 #include "ip2string.h"
 #include "netiodef.h"
 #include "icmpapi.h"
@@ -128,14 +128,15 @@ DWORD WINAPI AddIPAddress(IPAddr Address, IPMask IpMask, DWORD IfIndex, PULONG N
  * RETURNS
  *  Success: TRUE
  *  Failure: FALSE
- *
- * FIXME
- *  Stub, returns FALSE.
  */
 BOOL WINAPI CancelIPChangeNotify(LPOVERLAPPED overlapped)
 {
-  FIXME("(overlapped %p): stub\n", overlapped);
-  return FALSE;
+    DWORD err;
+
+    TRACE("overlapped %p.\n", overlapped);
+
+    if ((err = NsiCancelChangeNotification( overlapped ))) SetLastError( err );
+    return !err;
 }
 
 
@@ -1018,7 +1019,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
             luid = (family == AF_INET) ? &key4->luid : &key6->luid;
             if (luid->Value != aa->Luid.Value) continue;
 
-            if (flags & GAA_FLAG_INCLUDE_ALL_GATEWAYS)
+            if (flags & GAA_FLAG_INCLUDE_GATEWAYS)
             {
                 memset( &sockaddr, 0, sizeof(sockaddr) );
                 if (family == AF_INET)
@@ -1268,7 +1269,7 @@ static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADD
         if (err) goto err;
     }
 
-    if (flags & (GAA_FLAG_INCLUDE_ALL_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX))
+    if (flags & (GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX))
     {
         err = call_families( gateway_and_prefix_addresses_alloc, aa, family, flags );
         if (err) goto err;
@@ -3787,16 +3788,12 @@ DWORD WINAPI IpRenewAddress(PIP_ADAPTER_INDEX_MAP AdapterInfo)
  * RETURNS
  *  Success: NO_ERROR
  *  Failure: error code from winerror.h
- *
- * FIXME
- *  Stub, returns ERROR_NOT_SUPPORTED.
  */
 DWORD WINAPI NotifyAddrChange(PHANDLE Handle, LPOVERLAPPED overlapped)
 {
-  FIXME("(Handle %p, overlapped %p): stub\n", Handle, overlapped);
-  if (Handle) *Handle = INVALID_HANDLE_VALUE;
-  if (overlapped) ((IO_STATUS_BLOCK *) overlapped)->Status = STATUS_PENDING;
-  return ERROR_IO_PENDING;
+    TRACE("Handle %p, overlapped %p.\n", Handle, overlapped);
+
+    return NsiRequestChangeNotification(0, &NPI_MS_IPV4_MODULEID, NSI_IP_UNICAST_TABLE, overlapped, Handle);
 }
 
 
@@ -4029,6 +4026,19 @@ DWORD WINAPI SetTcpEntry(PMIB_TCPROW pTcpRow)
 {
   FIXME("(pTcpRow %p): stub\n", pTcpRow);
   return 0;
+}
+
+/***********************************************************************
+ *    GetPerTcpConnectionEStats (IPHLPAPI.@)
+ */
+ULONG WINAPI GetPerTcpConnectionEStats(MIB_TCPROW *row, TCP_ESTATS_TYPE stats, UCHAR *rw, ULONG rw_version,
+                                       ULONG rw_size, UCHAR *ro_static, ULONG ro_static_version,
+                                       ULONG ro_static_size, UCHAR *ro_dynamic, ULONG ro_dynamic_version,
+                                       ULONG ro_dynamic_size)
+{
+    FIXME( "(%p, %d, %p, %ld, %ld, %p, %ld, %ld, %p, %ld, %ld): stub\n", row, stats, rw, rw_version, rw_size,
+           ro_static, ro_static_version, ro_static_size, ro_dynamic, ro_dynamic_version, ro_dynamic_size );
+    return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
 /******************************************************************
@@ -4565,7 +4575,12 @@ struct icmp_handle_data
  */
 BOOL WINAPI IcmpCloseHandle( HANDLE handle )
 {
-    struct icmp_handle_data *data = (struct icmp_handle_data *)handle;
+    struct icmp_handle_data *data;
+
+    if (handle == NULL || handle == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    data = (struct icmp_handle_data *)handle;
 
     CloseHandle( data->nsi_device );
     heap_free( data );
@@ -4744,4 +4759,13 @@ DWORD WINAPI Icmp6SendEcho2( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_ro
            apc_routine, apc_ctxt, src, dst, request, request_size, opts, reply, reply_size, timeout );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;
+}
+
+/***********************************************************************
+ *    GetCurrentThreadCompartmentId (IPHLPAPI.@)
+ */
+NET_IF_COMPARTMENT_ID WINAPI GetCurrentThreadCompartmentId( void )
+{
+    FIXME( "stub\n" );
+    return NET_IF_COMPARTMENT_ID_PRIMARY;
 }

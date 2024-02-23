@@ -176,7 +176,7 @@ typedef struct node{
 /* Linked list prepend function. */
 static void log_state(GraphicsState data, node ** log)
 {
-    node * new_entry = HeapAlloc(GetProcessHeap(), 0, sizeof(node));
+    node * new_entry = malloc(sizeof(node));
 
     new_entry->data = data;
     new_entry->next = *log;
@@ -209,7 +209,7 @@ static void check_no_duplicates(node * log)
     temp = orig;
     do{
         temp2 = temp->next;
-        HeapFree(GetProcessHeap(), 0, temp);
+        free(temp);
         temp = temp2;
     }while(temp);
 
@@ -1341,6 +1341,8 @@ static void test_GdipDrawImagePointsRect(void)
     ptf[3].Y = 10;
     status = GdipDrawImagePointsRect(graphics, (GpImage*)bm, ptf, 4, 0, 0, 10, 10, UnitPixel, NULL, NULL, NULL);
     expect(NotImplemented, status);
+    status = GdipDrawImagePointsRect(graphics, (GpImage*)bm, ptf, 5, 0, 0, 10, 10, UnitPixel, NULL, NULL, NULL);
+    expect(InvalidParameter, status);
     status = GdipDrawImagePointsRect(graphics, (GpImage*)bm, ptf, 2, 0, 0, 10, 10, UnitPixel, NULL, NULL, NULL);
     expect(InvalidParameter, status);
     status = GdipDrawImagePointsRect(graphics, (GpImage*)bm, ptf, 3, 0, 0, 10, 10, UnitPixel, NULL, NULL, NULL);
@@ -1826,6 +1828,8 @@ static void test_Get_Release_DC(void)
     /* GdipMeasureString */
     status = GdipResetClip(graphics);
     expect(ObjectBusy, status);
+    status = GdipResetPageTransform(graphics);
+    expect(ObjectBusy, status);
     status = GdipResetWorldTransform(graphics);
     expect(ObjectBusy, status);
     /* GdipRestoreGraphics */
@@ -1841,6 +1845,8 @@ static void test_Get_Release_DC(void)
     status = GdipSetInterpolationMode(graphics, InterpolationModeDefault);
     expect(ObjectBusy, status);
     status = GdipSetPageScale(graphics, 1.0);
+    expect(ObjectBusy, status);
+    status = GdipSetPageScale(graphics, 0.0);
     expect(ObjectBusy, status);
     status = GdipSetPageUnit(graphics, UnitWorld);
     expect(ObjectBusy, status);
@@ -3197,6 +3203,7 @@ static void test_string_functions(void)
     HDC hdc = GetDC( hwnd );
     const WCHAR teststring[] = L"MM M\nM";
     const WCHAR teststring2[] = L"j";
+    const WCHAR teststring3[] = L"MM M\r\nM\0";
     REAL char_width, char_height;
     INT codepointsfitted, linesfilled;
     GpStringFormat *format;
@@ -3267,6 +3274,12 @@ static void test_string_functions(void)
 
     status = GdipMeasureString(graphics, teststring, 6, font, &rc, NULL, &bounds, &codepointsfitted, NULL);
     expect(Ok, status);
+
+    /* new line handling */
+    status = GdipMeasureString(graphics, teststring3, -1, font, &rc, NULL, &bounds, &codepointsfitted, &linesfilled);
+    expect(Ok, status);
+    expect(7, codepointsfitted);
+    expect(2, linesfilled);
 
     status = GdipMeasureString(graphics, teststring, 1, font, &rc, NULL, &char_bounds, &codepointsfitted, &linesfilled);
     expect(Ok, status);
@@ -4049,6 +4062,91 @@ static void test_transform(void)
     }
 }
 
+static void test_set_page_transform(void)
+{
+    static const struct
+    {
+        GpUnit unit;
+        BOOL isInvalid;
+    } td_unit[] =
+    {
+        {UnitWorld, TRUE},
+        {UnitDisplay},
+        {UnitPixel},
+        {UnitPoint},
+        {UnitInch},
+        {UnitDocument},
+        {UnitMillimeter},
+        {UnitMillimeter + 1, TRUE},
+    };
+    static const struct {
+        REAL scale;
+        BOOL isInvalid;
+    } td_scale[] =
+    {
+        {-1.0, TRUE},
+        {0.0, TRUE},
+        {0.5},
+        {1.0},
+        {2.0},
+    };
+    GpStatus status;
+    GpGraphics *graphics;
+    HDC hdc = GetDC( hwnd );
+    GpUnit unit;
+    REAL scale;
+    UINT i;
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+
+    for (i = 0; i < ARRAY_SIZE(td_unit); i++)
+    {
+        winetest_push_context("%u", i);
+        status = GdipSetPageUnit(graphics, td_unit[i].unit);
+        expect(td_unit[i].isInvalid ? InvalidParameter : Ok, status);
+        if (status == Ok)
+        {
+            status = GdipGetPageUnit(graphics, &unit);
+            expect(Ok, status);
+            expect(td_unit[i].unit, unit);
+        }
+        winetest_pop_context();
+    }
+
+    for (i = 0; i < ARRAY_SIZE(td_scale); i++)
+    {
+        winetest_push_context("%u", i);
+        status = GdipSetPageScale(graphics, td_scale[i].scale);
+        expect(td_scale[i].isInvalid ? InvalidParameter : Ok, status);
+        if (status == Ok)
+        {
+            status = GdipGetPageScale(graphics, &scale);
+            expect(Ok, status);
+            expectf_(td_scale[i].scale, scale, 0);
+        }
+        winetest_pop_context();
+    }
+
+    status = GdipGetPageUnit(graphics, &unit);
+    expect(Ok, status);
+    expect(UnitMillimeter, unit);
+    status = GdipGetPageScale(graphics, &scale);
+    expect(Ok, status);
+    expectf_(2.0, scale, 0);
+    status = GdipResetPageTransform(graphics);
+    expect(Ok, status);
+    status = GdipGetPageUnit(graphics, &unit);
+    expect(Ok, status);
+    expect(UnitDisplay, unit);
+    status = GdipGetPageScale(graphics, &scale);
+    expect(Ok, status);
+    expectf_(1.0, scale, 0);
+
+    GdipDeleteGraphics(graphics);
+    ReleaseDC(hwnd, hdc);
+}
+
 static void test_pen_thickness(void)
 {
     static const struct test_data
@@ -4672,7 +4770,7 @@ static void test_measure_string(void)
 
     set_rect_empty(&rect);
     rect.Height = height;
-    rect.Width = width_2 - 0.05;
+    rect.Width = width_2 - 0.006;
     set_rect_empty(&bounds);
     status = GdipMeasureString(graphics, string, -1, font, &rect, format, &bounds, &glyphs, &lines);
     expect(Ok, status);
@@ -4681,6 +4779,19 @@ static void test_measure_string(void)
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
     expectf_(width_1, bounds.Width, 0.01);
+    expectf(height, bounds.Height);
+
+    set_rect_empty(&rect);
+    rect.Height = height;
+    rect.Width = width_2 - 0.004;
+    set_rect_empty(&bounds);
+    status = GdipMeasureString(graphics, string, -1, font, &rect, format, &bounds, &glyphs, &lines);
+    expect(Ok, status);
+    expect(2, glyphs);
+    expect(1, lines);
+    expectf(0.0, bounds.X);
+    expectf(0.0, bounds.Y);
+    expectf_(width_2, bounds.Width, 0.01);
     expectf(height, bounds.Height);
 
     /* Default (Near) alignment */
@@ -7100,19 +7211,19 @@ static HDC create_printer_dc(void)
     if (!pOpenPrinterA(buffer, &hprn, NULL)) goto done;
 
     pGetPrinterA(hprn, 2, NULL, 0, &len);
-    pbuf = HeapAlloc(GetProcessHeap(), 0, len);
+    pbuf = malloc(len);
     if (!pGetPrinterA(hprn, 2, (LPBYTE)pbuf, len, &len)) goto done;
 
     pGetPrinterDriverA(hprn, NULL, 3, NULL, 0, &len);
-    dbuf = HeapAlloc(GetProcessHeap(), 0, len);
+    dbuf = malloc(len);
     if (!pGetPrinterDriverA(hprn, NULL, 3, (LPBYTE)dbuf, len, &len)) goto done;
 
     hdc = CreateDCA(dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, pbuf->pDevMode);
     trace("hdc %p for driver '%s' printer '%s' port '%s'\n", hdc,
           dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName);
 done:
-    HeapFree(GetProcessHeap(), 0, dbuf);
-    HeapFree(GetProcessHeap(), 0, pbuf);
+    free(dbuf);
+    free(pbuf);
     if (hprn) pClosePrinter(hprn);
     if (winspool) FreeLibrary(winspool);
     return hdc;
@@ -7266,6 +7377,7 @@ START_TEST(graphics)
     test_measure_string();
     test_font_height_scaling();
     test_transform();
+    test_set_page_transform();
     test_pen_thickness();
     test_GdipMeasureString();
     test_constructor_destructor();

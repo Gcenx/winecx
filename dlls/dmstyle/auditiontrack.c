@@ -77,10 +77,7 @@ static ULONG WINAPI audition_track_Release(IDirectMusicTrack8 *iface)
 
     TRACE("(%p) ref=%ld\n", This, ref);
 
-    if (!ref) {
-        HeapFree(GetProcessHeap(), 0, This);
-        DMSTYLE_UnlockModule();
-    }
+    if (!ref) free(This);
 
     return ref;
 }
@@ -321,18 +318,14 @@ HRESULT create_dmauditiontrack(REFIID lpcGUID, void **ppobj)
     IDirectMusicAuditionTrack *track;
     HRESULT hr;
 
-    track = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*track));
-    if (!track) {
-        *ppobj = NULL;
-        return E_OUTOFMEMORY;
-    }
+    *ppobj = NULL;
+    if (!(track = calloc(1, sizeof(*track)))) return E_OUTOFMEMORY;
     track->IDirectMusicTrack8_iface.lpVtbl = &dmtrack8_vtbl;
     track->ref = 1;
     dmobject_init(&track->dmobj, &CLSID_DirectMusicAuditionTrack,
                   (IUnknown *)&track->IDirectMusicTrack8_iface);
     track->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
 
-    DMSTYLE_LockModule();
     hr = IDirectMusicTrack8_QueryInterface(&track->IDirectMusicTrack8_iface, lpcGUID, ppobj);
     IDirectMusicTrack8_Release(&track->IDirectMusicTrack8_iface);
 

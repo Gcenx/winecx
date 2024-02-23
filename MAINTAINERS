@@ -29,7 +29,8 @@ Maintainers List
 		-----------------------------------
 
 ARM, ARM64
-M:	André Zwing <nerv@dawncrow.de>
+M:	Alexandre Julliard <julliard@winehq.org>
+P:	André Zwing <nerv@dawncrow.de>
 F:	dlls/dbghelp/cpu_arm*
 F:	dlls/msvcrt/except_arm.c
 F:	dlls/ntdll/signal_arm*
@@ -37,6 +38,7 @@ F:	programs/winedbg/be_arm*
 
 Audio I/O
 P:	Andrew Eikum <coldpie@fastmail.com>
+P:	Huw Davies <huw@codeweavers.com>
 F:	dlls/dsound/
 F:	dlls/mmdevapi/
 F:	dlls/winealsa.drv/
@@ -72,6 +74,7 @@ P:	Matteo Bruni <mbruni@codeweavers.com>
 F:	dlls/d3d10core/
 F:	dlls/d3d11/
 F:	dlls/d3d12/
+F:	dlls/d3d12core/
 F:	dlls/d3d8/
 F:	dlls/d3d9/
 F:	dlls/d3drm/
@@ -181,8 +184,12 @@ F:	dlls/win32u/rawinput.c
 F:	server/queue.c
 
 Input methods
-M:	Aric Stewart <aric@codeweavers.com>
+M:	Rémi Bernon <rbernon@codeweavers.com>
+P:	Aric Stewart <aric@codeweavers.com>
 F:	dlls/imm32/
+F:	dlls/win32u/imm.c
+F:	dlls/winemac.drv/ime.c
+F:	dlls/winex11.drv/ime.c
 
 JavaScript
 M:	Jacek Caban <jacek@codeweavers.com>
@@ -203,7 +210,7 @@ P:	Andrew Eikum <coldpie@fastmail.com>
 F:	dlls/*.acm/
 F:	dlls/msacm32/
 
-Media Foundation transforms
+Media Foundation GStreamer backend
 M:	Rémi Bernon <rbernon@codeweavers.com>
 P:	Nikolay Sivov <nsivov@codeweavers.com>
 P:	Zebediah Figura <z.figura12@gmail.com>
@@ -211,6 +218,8 @@ F:	dlls/mf/tests/transform.c
 F:	dlls/winegstreamer/aac_decoder.c
 F:	dlls/winegstreamer/color_convert.c
 F:	dlls/winegstreamer/h264_decoder.c
+F:	dlls/winegstreamer/media_source.c
+F:	dlls/winegstreamer/mfplat.c
 F:	dlls/winegstreamer/resampler.c
 F:	dlls/winegstreamer/video_decoder.c
 F:	dlls/winegstreamer/video_processor.c
@@ -364,6 +373,7 @@ F:	dlls/wmvcore/
 Windows Media Foundation
 M:	Nikolay Sivov <nsivov@codeweavers.com>
 P:	Rémi Bernon <rbernon@codeweavers.com>
+F:	dlls/evr/
 F:	dlls/mf/
 F:	dlls/mferror/
 F:	dlls/mfmediaengine/
@@ -393,10 +403,6 @@ F:	dlls/winhttp/
 WinINet
 P:	Jacek Caban <jacek@codeweavers.com>
 F:	dlls/wininet/
-
-WPcap
-M:	André Zwing <nerv@dawncrow.de>
-F:	dlls/wpcap/
 
 X11 Driver
 M:	Alexandre Julliard <julliard@winehq.org>

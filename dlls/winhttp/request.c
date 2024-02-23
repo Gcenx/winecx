@@ -218,7 +218,6 @@ static DWORD queue_task( struct queue *queue, TASK_CALLBACK task, struct task_he
     if (!callback_running)
     {
         release_object( obj );
-        free( task_hdr );
         ERR( "Submiting threadpool callback failed, err %lu.\n", GetLastError() );
         return ERROR_OUTOFMEMORY;
     }
@@ -735,15 +734,15 @@ static DWORD query_headers( struct request *request, DWORD level, const WCHAR *n
     if (!header || (request_only && !header->is_request)) return ERROR_WINHTTP_HEADER_NOT_FOUND;
     if (level & WINHTTP_QUERY_FLAG_NUMBER)
     {
-        if (!buffer || sizeof(int) > *buflen) ret = ERROR_INSUFFICIENT_BUFFER;
+        if (!buffer || sizeof(DWORD) > *buflen) ret = ERROR_INSUFFICIENT_BUFFER;
         else
         {
-            int *number = buffer;
-            *number = wcstol( header->value, NULL, 10 );
-            TRACE("returning number: %d\n", *number);
+            DWORD *number = buffer;
+            *number = wcstoul( header->value, NULL, 10 );
+            TRACE("returning number: %lu\n", *number);
             ret = ERROR_SUCCESS;
         }
-        *buflen = sizeof(int);
+        *buflen = sizeof(DWORD);
     }
     else if (level & WINHTTP_QUERY_FLAG_SYSTEMTIME)
     {
@@ -2217,8 +2216,10 @@ static DWORD send_request( struct request *request, const WCHAR *headers, DWORD 
     struct connect *connect = request->connect;
     struct session *session = connect->session;
     DWORD ret, len, buflen, content_length;
+    WCHAR encoding[20];
     char *wire_req;
     int bytes_sent;
+    BOOL chunked;
 
     TRACE( "request state %d.\n", request->state );
 
@@ -2246,7 +2247,11 @@ static DWORD send_request( struct request *request, const WCHAR *headers, DWORD 
     if (request->creds[TARGET_SERVER][SCHEME_BASIC].username)
         do_authorization( request, WINHTTP_AUTH_TARGET_SERVER, WINHTTP_AUTH_SCHEME_BASIC );
 
-    if (total_len || (request->verb && (!wcscmp( request->verb, L"POST" ) || !wcscmp( request->verb, L"PUT" ))))
+    buflen = sizeof(encoding);
+    chunked = !query_headers( request, WINHTTP_QUERY_FLAG_REQUEST_HEADERS | WINHTTP_QUERY_TRANSFER_ENCODING,
+                              NULL, encoding, &buflen, NULL ) && !wcsicmp( encoding, L"chunked" );
+    if (!chunked && (total_len || (request->verb && (!wcscmp( request->verb, L"POST" )
+                               || !wcscmp( request->verb, L"PUT" )))))
     {
         WCHAR length[21]; /* decimal long int + null */
         swprintf( length, ARRAY_SIZE(length), L"%ld", total_len );
@@ -2312,7 +2317,7 @@ static DWORD send_request( struct request *request, const WCHAR *headers, DWORD 
                        | WINHTTP_QUERY_FLAG_NUMBER, NULL, &content_length, &buflen, NULL ))
         content_length = total_len;
 
-    if (content_length <= optional_len)
+    if (!chunked && content_length <= optional_len)
     {
         netconn_set_timeout( request->netconn, FALSE, request->receive_response_timeout );
         request->read_reply_status = read_reply( request );
@@ -5494,6 +5499,7 @@ static DWORD request_get_codepage( struct winhttp_request *request, UINT *codepa
         if (!(buffer = malloc( size ))) return ERROR_OUTOFMEMORY;
         if (!WinHttpQueryHeaders( request->hrequest, WINHTTP_QUERY_CONTENT_TYPE, NULL, buffer, &size, NULL ))
         {
+            free( buffer );
             return GetLastError();
         }
         if ((p = wcsstr( buffer, L"charset" )))

@@ -32,7 +32,6 @@
 #include "winbase.h"
 
 #include "ntf.h"
-#include "psdrv.h"
 #include "unixlib.h"
 #include "ntgdi.h"
 #include "ddk/winddi.h"
@@ -76,16 +75,23 @@ struct printer_info
 {
     struct list entry;
     const WCHAR *name;
-    PSDRV_DEVMODE *devmode;
+    const PSDRV_DEVMODE *devmode;
 };
 
 static struct list printer_info_list = LIST_INIT(printer_info_list);
+
+struct band_info
+{
+    BOOL graphics_flag;
+    BOOL text_flag;
+    RECT graphics_rect;
+};
 
 typedef struct
 {
     struct gdi_physdev dev;
     PSDRV_DEVMODE *devmode;
-    struct printer_info *pi;
+    const struct printer_info *pi;
 
     /* builtin font info */
     BOOL builtin;
@@ -215,7 +221,7 @@ static void dump_devmode(const DEVMODEW *dm)
     TRACE("dmPelsHeight %u\n", (unsigned int)dm->dmPelsHeight);
 }
 
-static INT CDECL get_device_caps(PHYSDEV dev, INT cap)
+static INT get_device_caps(PHYSDEV dev, INT cap)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
 
@@ -301,7 +307,7 @@ static inline int paper_size_from_points(float size)
     return size * 254 / 72;
 }
 
-static const struct input_slot *unix_find_slot(const struct printer_info *pi,
+static const struct input_slot *find_slot(const struct printer_info *pi,
         const DEVMODEW *dm)
 {
     const struct input_slot *slot = (const struct input_slot *)pi->devmode->data;
@@ -315,7 +321,7 @@ static const struct input_slot *unix_find_slot(const struct printer_info *pi,
     return NULL;
 }
 
-static const struct page_size *unix_find_pagesize(const struct printer_info *pi,
+static const struct page_size *find_pagesize(const struct printer_info *pi,
         const DEVMODEW *dm)
 {
     const struct page_size *page;
@@ -333,7 +339,7 @@ static const struct page_size *unix_find_pagesize(const struct printer_info *pi,
 }
 
 static void merge_devmodes(PSDRV_DEVMODE *dm1, const DEVMODEW *dm2,
-        struct printer_info *pi)
+        const struct printer_info *pi)
 {
     /* some sanity checks here on dm2 */
 
@@ -351,7 +357,7 @@ static void merge_devmodes(PSDRV_DEVMODE *dm1, const DEVMODEW *dm2,
     /* NB PaperWidth is always < PaperLength */
     if (dm2->dmFields & DM_PAPERSIZE)
     {
-        const struct page_size *page = unix_find_pagesize(pi, dm2);
+        const struct page_size *page = find_pagesize(pi, dm2);
 
         if (page)
         {
@@ -408,7 +414,7 @@ static void merge_devmodes(PSDRV_DEVMODE *dm1, const DEVMODEW *dm2,
 
     if (dm2->dmFields & DM_DEFAULTSOURCE)
     {
-        const struct input_slot *slot = unix_find_slot(pi, dm2);
+        const struct input_slot *slot = find_slot(pi, dm2);
 
         if (slot)
             dm1->dmPublic.dmDefaultSource = dm2->dmDefaultSource;
@@ -507,7 +513,7 @@ static void update_dev_caps(PSDRV_PDEVICE *pdev)
     }
 
     if (pdev->devmode->dmPublic.dmFields & DM_PAPERSIZE) {
-        page = unix_find_pagesize(pdev->pi, &pdev->devmode->dmPublic);
+        page = find_pagesize(pdev->pi, &pdev->devmode->dmPublic);
 
         if (!page)
         {
@@ -567,7 +573,7 @@ static void update_dev_caps(PSDRV_PDEVICE *pdev)
             pdev->horz_res, pdev->vert_res);
 }
 
-static BOOL CDECL reset_dc(PHYSDEV dev, const DEVMODEW *devmode)
+static BOOL reset_dc(PHYSDEV dev, const DEVMODEW *devmode)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
 
@@ -608,7 +614,7 @@ const struct glyph_info *uv_metrics(WCHAR wch, const struct font_data *font)
     return needle;
 }
 
-static int CDECL ext_escape(PHYSDEV dev, int escape, int input_size, const void *input,
+static int ext_escape(PHYSDEV dev, int escape, int input_size, const void *input,
         int output_size, void *output)
 {
     TRACE("%p,%d,%d,%p,%d,%p\n",
@@ -714,11 +720,11 @@ static int CDECL ext_escape(PHYSDEV dev, int escape, int input_size, const void 
     }
     case BANDINFO:
     {
-        BANDINFOSTRUCT  *ibi = (BANDINFOSTRUCT*)input;
-        BANDINFOSTRUCT  *obi = (BANDINFOSTRUCT*)output;
+        struct band_info *ibi = (struct band_info *)input;
+        struct band_info *obi = (struct band_info *)output;
 
-        FIXME("BANDINFO(graphics %d, text %d, rect %s), stub!\n", ibi->GraphicsFlag,
-                ibi->TextFlag, wine_dbgstr_rect(&ibi->GraphicsRect));
+        FIXME("BANDINFO(graphics %d, text %d, rect %s), stub!\n", ibi->graphics_flag,
+                ibi->text_flag, wine_dbgstr_rect(&ibi->graphics_rect));
         *obi = *ibi;
         return 1;
     }
@@ -1002,7 +1008,7 @@ static struct font_data *find_font_data(const char *name)
     return NULL;
 }
 
-static struct font_data *find_builtin_font(PSDRV_DEVMODE *devmode,
+static struct font_data *find_builtin_font(const PSDRV_DEVMODE *devmode,
         const WCHAR *facename, BOOL it, BOOL bd)
 {
     struct installed_font *installed_font;
@@ -1102,7 +1108,7 @@ static BOOL select_builtin_font(PSDRV_PDEVICE *pdev, HFONT hfont, LOGFONTW *plf)
     return TRUE;
 }
 
-static HFONT CDECL select_font(PHYSDEV dev, HFONT hfont, UINT *aa_flags)
+static HFONT select_font(PHYSDEV dev, HFONT hfont, UINT *aa_flags)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
     PHYSDEV next = GET_NEXT_PHYSDEV(dev, pSelectFont);
@@ -1216,7 +1222,7 @@ static UINT get_font_metric(const struct font_data *font,
     return DEVICE_FONTTYPE;
 }
 
-static BOOL CDECL enum_fonts(PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc, LPARAM lp)
+static BOOL enum_fonts(PHYSDEV dev, LPLOGFONTW plf, font_enum_proc proc, LPARAM lp)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
     PHYSDEV next = GET_NEXT_PHYSDEV(dev, pEnumFonts);
@@ -1276,7 +1282,7 @@ static BOOL CDECL enum_fonts(PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc, LP
     return ret;
 }
 
-static BOOL CDECL get_char_width(PHYSDEV dev, UINT first, UINT count, const WCHAR *chars, INT *buffer)
+static BOOL get_char_width(PHYSDEV dev, UINT first, UINT count, const WCHAR *chars, INT *buffer)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
     UINT i, c;
@@ -1303,7 +1309,7 @@ static BOOL CDECL get_char_width(PHYSDEV dev, UINT first, UINT count, const WCHA
     return TRUE;
 }
 
-static BOOL CDECL get_text_metrics(PHYSDEV dev, TEXTMETRICW *metrics)
+static BOOL get_text_metrics(PHYSDEV dev, TEXTMETRICW *metrics)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
 
@@ -1317,7 +1323,7 @@ static BOOL CDECL get_text_metrics(PHYSDEV dev, TEXTMETRICW *metrics)
     return TRUE;
 }
 
-static BOOL CDECL get_text_extent_ex_point(PHYSDEV dev, const WCHAR *str, int count, int *dx)
+static BOOL get_text_extent_ex_point(PHYSDEV dev, const WCHAR *str, int count, int *dx)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
     int             i;
@@ -1398,7 +1404,7 @@ static PSDRV_PDEVICE *create_physdev(HDC hdc, const WCHAR *device,
     return pdev;
 }
 
-static BOOL CDECL create_dc(PHYSDEV *dev, const WCHAR *device,
+static BOOL create_dc(PHYSDEV *dev, const WCHAR *device,
         const WCHAR *output, const DEVMODEW *devmode)
 {
     PSDRV_PDEVICE *pdev;
@@ -1411,7 +1417,7 @@ static BOOL CDECL create_dc(PHYSDEV *dev, const WCHAR *device,
     return TRUE;
 }
 
-static BOOL CDECL create_compatible_dc(PHYSDEV orig, PHYSDEV *dev)
+static BOOL create_compatible_dc(PHYSDEV orig, PHYSDEV *dev)
 {
     PSDRV_PDEVICE *pdev, *orig_dev = get_psdrv_dev(orig);
 
@@ -1421,7 +1427,7 @@ static BOOL CDECL create_compatible_dc(PHYSDEV orig, PHYSDEV *dev)
     return TRUE;
 }
 
-static BOOL CDECL delete_dc(PHYSDEV dev)
+static BOOL delete_dc(PHYSDEV dev)
 {
     PSDRV_PDEVICE *pdev = get_psdrv_dev(dev);
 

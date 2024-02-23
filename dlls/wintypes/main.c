@@ -27,21 +27,12 @@
 #include "objbase.h"
 
 #include "activation.h"
+#include "rometadataresolution.h"
 
 #define WIDL_using_Windows_Foundation_Metadata
 #include "windows.foundation.metadata.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wintypes);
-
-static const char *debugstr_hstring(HSTRING hstr)
-{
-    const WCHAR *str;
-    UINT32 len;
-    if (hstr && !((ULONG_PTR)hstr >> 16))
-        return "(invalid)";
-    str = WindowsGetStringRawBuffer(hstr, &len);
-    return wine_dbgstr_wn(str, len);
-}
 
 struct wintypes
 {
@@ -352,6 +343,13 @@ HRESULT WINAPI DllGetActivationFactory(HSTRING classid, IActivationFactory **fac
     TRACE("classid %s, factory %p.\n", debugstr_hstring(classid), factory);
     *factory = &wintypes.IActivationFactory_iface;
     IUnknown_AddRef(*factory);
+    return S_OK;
+}
+
+HRESULT WINAPI RoIsApiContractMajorVersionPresent(const WCHAR *name, UINT16 major, BOOL *result)
+{
+    FIXME("name %s, major %u, result %p\n", debugstr_w(name), major, result);
+    *result = FALSE;
     return S_OK;
 }
 

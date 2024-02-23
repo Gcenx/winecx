@@ -51,8 +51,8 @@ static HRESULT(WINAPI *pIConnectionPoint_InvokeWithCancel)(IConnectionPoint*,DIS
 static HRESULT(WINAPI *pConnectToConnectionPoint)(IUnknown*,REFIID,BOOL,IUnknown*, LPDWORD,IConnectionPoint **);
 static HRESULT(WINAPI *pSHPropertyBag_ReadLONG)(IPropertyBag *,LPCWSTR,LPLONG);
 static LONG   (WINAPI *pSHSetWindowBits)(HWND, INT, UINT, UINT);
-static INT    (WINAPI *pSHFormatDateTimeA)(const FILETIME UNALIGNED*, DWORD*, LPSTR, UINT);
-static INT    (WINAPI *pSHFormatDateTimeW)(const FILETIME UNALIGNED*, DWORD*, LPWSTR, UINT);
+static INT    (WINAPI *pSHFormatDateTimeA)(const FILETIME*, DWORD*, LPSTR, UINT);
+static INT    (WINAPI *pSHFormatDateTimeW)(const FILETIME*, DWORD*, LPWSTR, UINT);
 static DWORD  (WINAPI *pSHGetObjectCompatFlags)(IUnknown*, const CLSID*);
 static BOOL   (WINAPI *pGUIDFromStringA)(LPSTR, CLSID *);
 static HRESULT (WINAPI *pIUnknown_QueryServiceExec)(IUnknown*, REFIID, const GUID*, DWORD, DWORD, VARIANT*, VARIANT*);
@@ -1666,18 +1666,24 @@ static void test_SHSetWindowBits(void)
     UnregisterClassA("Shlwapi test class", GetModuleHandleA(NULL));
 }
 
-static void test_SHFormatDateTimeA(void)
+static void test_SHFormatDateTimeA(const SYSTEMTIME *st)
 {
-    FILETIME UNALIGNED filetime;
+    FILETIME filetime;
+    FILETIME filetimeCheck;
+    SYSTEMTIME universalSystemTime;
     CHAR buff[100], buff2[100], buff3[100];
-    SYSTEMTIME st;
+    BOOL dstMatch;
     DWORD flags;
     INT ret;
 
-    GetLocalTime(&st);
-    SystemTimeToFileTime(&st, &filetime);
     /* SHFormatDateTime expects input as utc */
-    LocalFileTimeToFileTime(&filetime, &filetime);
+    TzSpecificLocalTimeToSystemTime(NULL, st, &universalSystemTime);
+    SystemTimeToFileTime(&universalSystemTime, &filetime);
+
+    SystemTimeToFileTime(st, &filetimeCheck);
+    LocalFileTimeToFileTime(&filetimeCheck, &filetimeCheck);
+    dstMatch = (filetime.dwHighDateTime == filetimeCheck.dwHighDateTime) &&
+               (filetime.dwLowDateTime == filetimeCheck.dwLowDateTime);
 
     /* no way to get required buffer length here */
     ret = pSHFormatDateTimeA(&filetime, NULL, NULL, 0);
@@ -1731,36 +1737,39 @@ static void test_SHFormatDateTimeA(void)
     flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff2, sizeof(buff2));
+    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, TIME_NOSECONDS | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
-    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+    ok(lstrcmpA(buff, buff2) == 0 || broken(!dstMatch) /* pre Windows 7 */,
+        "expected (%s), got (%s)\n", buff2, buff);
 
     flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2));
+    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
-    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+    ok(lstrcmpA(buff, buff2) == 0 || broken(!dstMatch) /* pre Windows 7 */,
+        "expected (%s), got (%s)\n", buff2, buff);
 
     /* both time flags */
     flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGTIME | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2));
+    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
-    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+    ok(lstrcmpA(buff, buff2) == 0 || broken(!dstMatch) /* pre Windows 7 */,
+        "expected (%s), got (%s)\n", buff2, buff);
 
     flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTDATE;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
+    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_SHORTDATE | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
     flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
@@ -1768,7 +1777,7 @@ static void test_SHFormatDateTimeA(void)
     flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE | FDTF_SHORTDATE;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
@@ -1776,12 +1785,12 @@ static void test_SHFormatDateTimeA(void)
     flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d, length %d\n", ret, lstrlenA(buff)+1);
-    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff3, sizeof(buff3));
+    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, TIME_NOSECONDS | LOCALE_USE_CP_ACP, st, NULL, buff3, sizeof(buff3));
     ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
-    ok(lstrcmpA(buff3, buff + lstrlenA(buff) - lstrlenA(buff3)) == 0,
+    ok(lstrcmpA(buff3, buff + lstrlenA(buff) - lstrlenA(buff3)) == 0 || broken(!dstMatch) /* pre Windows 7 */,
        "expected (%s), got (%s) for time part\n",
        buff3, buff + lstrlenA(buff) - lstrlenA(buff3));
-    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     buff[lstrlenA(buff2)] = '\0';
     ok(lstrcmpA(buff2, buff) == 0, "expected (%s) got (%s) for date part\n",
@@ -1790,12 +1799,12 @@ static void test_SHFormatDateTimeA(void)
     flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE | FDTF_LONGTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &st, NULL, buff3, sizeof(buff3));
+    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, LOCALE_USE_CP_ACP, st, NULL, buff3, sizeof(buff3));
     ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
-    ok(lstrcmpA(buff3, buff + lstrlenA(buff) - lstrlenA(buff3)) == 0,
+    ok(lstrcmpA(buff3, buff + lstrlenA(buff) - lstrlenA(buff3)) == 0 || broken(!dstMatch) /* pre Windows 7 */,
        "expected (%s), got (%s) for time part\n",
        buff3, buff + lstrlenA(buff) - lstrlenA(buff3));
-    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_LONGDATE | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     buff[lstrlenA(buff2)] = '\0';
     ok(lstrcmpA(buff2, buff) == 0, "expected (%s) got (%s) for date part\n",
@@ -1804,29 +1813,32 @@ static void test_SHFormatDateTimeA(void)
     flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTDATE | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
+    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_SHORTDATE | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     strcat(buff2, " ");
-    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff3, sizeof(buff3));
+    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, TIME_NOSECONDS | LOCALE_USE_CP_ACP, st, NULL, buff3, sizeof(buff3));
     ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
     strcat(buff2, buff3);
-    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+    ok(lstrcmpA(buff, buff2) == 0 || broken(!dstMatch) /* pre Windows 7 */,
+        "expected (%s), got (%s)\n", buff2, buff);
 
     flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTDATE | FDTF_LONGTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
-    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
+    ret = GetDateFormatA(LOCALE_USER_DEFAULT, DATE_SHORTDATE | LOCALE_USE_CP_ACP, st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     strcat(buff2, " ");
-    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &st, NULL, buff3, sizeof(buff3));
+    ret = GetTimeFormatA(LOCALE_USER_DEFAULT, LOCALE_USE_CP_ACP, st, NULL, buff3, sizeof(buff3));
     ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
     strcat(buff2, buff3);
-    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+    ok(lstrcmpA(buff, buff2) == 0 || broken(!dstMatch) /* pre Windows 7 */,
+        "expected (%s), got (%s)\n", buff2, buff);
 }
 
 static void test_SHFormatDateTimeW(void)
 {
-    FILETIME UNALIGNED filetime;
+    FILETIME filetime;
+    SYSTEMTIME universalSystemTime;
     WCHAR buff[100], buff2[100], buff3[100], *p1, *p2;
     SYSTEMTIME st;
     DWORD flags;
@@ -1842,9 +1854,9 @@ if (0)
 }
 
     GetLocalTime(&st);
-    SystemTimeToFileTime(&st, &filetime);
     /* SHFormatDateTime expects input as utc */
-    LocalFileTimeToFileTime(&filetime, &filetime);
+    TzSpecificLocalTimeToSystemTime(NULL, &st, &universalSystemTime);
+    SystemTimeToFileTime(&universalSystemTime, &filetime);
 
     /* no way to get required buffer length here */
     SetLastError(0xdeadbeef);
@@ -3109,6 +3121,8 @@ static void test_DllGetVersion(void)
 
 START_TEST(ordinal)
 {
+    SYSTEMTIME st;
+    static const SYSTEMTIME february = {2023, 2, 2, 14, 12, 0, 0, 0};
     char **argv;
     int argc;
 
@@ -3136,7 +3150,15 @@ START_TEST(ordinal)
     test_IConnectionPoint();
     test_SHPropertyBag_ReadLONG();
     test_SHSetWindowBits();
-    test_SHFormatDateTimeA();
+
+    GetLocalTime(&st);
+    test_SHFormatDateTimeA(&st);
+    /* Test how the locale and code page interact for date formatting by
+     * repeating the tests with a February date which in French contains an
+     * e-acute that can only be represented in some code pages.
+     */
+    test_SHFormatDateTimeA(&february);
+
     test_SHFormatDateTimeW();
     test_SHGetObjectCompatFlags();
     test_IUnknown_QueryServiceExec();

@@ -75,16 +75,8 @@ static void notify_travellog_update(HTMLDocumentObj *doc)
 
 void set_current_uri(HTMLOuterWindow *window, IUri *uri)
 {
-    if(window->uri) {
-        IUri_Release(window->uri);
-        window->uri = NULL;
-    }
-
-    if(window->uri_nofrag) {
-        IUri_Release(window->uri_nofrag);
-        window->uri_nofrag = NULL;
-    }
-
+    unlink_ref(&window->uri);
+    unlink_ref(&window->uri_nofrag);
     SysFreeString(window->url);
     window->url = NULL;
 
@@ -208,6 +200,8 @@ static void set_progress_proc(task_t *_task)
 
     TRACE("(%p)\n", doc);
 
+    IUnknown_AddRef(doc->outer_unk);
+
     if(doc->client)
         IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&olecmd);
 
@@ -238,6 +232,12 @@ static void set_progress_proc(task_t *_task)
                     hostinfo.cbSize, hostinfo.dwFlags, hostinfo.dwDoubleClick,
                     debugstr_w(hostinfo.pchHostCss), debugstr_w(hostinfo.pchHostNS));
     }
+
+    IUnknown_Release(doc->outer_unk);
+}
+
+static void set_progress_destr(task_t *_task)
+{
 }
 
 static void set_downloading_proc(task_t *_task)
@@ -248,13 +248,14 @@ static void set_downloading_proc(task_t *_task)
 
     TRACE("(%p)\n", doc);
 
+    IUnknown_AddRef(doc->outer_unk);
     set_statustext(doc, IDS_STATUS_DOWNLOADINGFROM, task->url);
 
     if(task->set_download)
         set_download_state(doc, 1);
 
     if(!doc->client)
-        return;
+        goto done;
 
     if(doc->view_sink)
         IAdviseSink_OnViewChange(doc->view_sink, DVASPECT_CONTENT, -1);
@@ -268,6 +269,9 @@ static void set_downloading_proc(task_t *_task)
             IDropTarget_Release(drop_target);
         }
     }
+
+done:
+    IUnknown_Release(doc->outer_unk);
 }
 
 static void set_downloading_task_destr(task_t *_task)
@@ -275,7 +279,6 @@ static void set_downloading_task_destr(task_t *_task)
     download_proc_task_t *task = (download_proc_task_t*)_task;
 
     CoTaskMemFree(task->url);
-    free(task);
 }
 
 void prepare_for_binding(HTMLDocumentObj *This, IMoniker *mon, DWORD flags)
@@ -338,15 +341,11 @@ HRESULT set_moniker(HTMLOuterWindow *window, IMoniker *mon, IUri *nav_uri, IBind
         BOOL set_download)
 {
     download_proc_task_t *download_task;
-    HTMLDocumentObj *doc_obj = NULL;
     nsChannelBSC *bscallback;
     nsWineURI *nsuri;
     LPOLESTR url;
     IUri *uri;
     HRESULT hres;
-
-    if(is_main_content_window(window))
-        doc_obj = window->browser->doc;
 
     hres = IMoniker_GetDisplayName(mon, pibc, NULL, &url);
     if(FAILED(hres)) {
@@ -371,12 +370,15 @@ HRESULT set_moniker(HTMLOuterWindow *window, IMoniker *mon, IUri *nav_uri, IBind
     hres = create_doc_uri(uri, &nsuri);
     if(!nav_uri)
         IUri_Release(uri);
-    if(SUCCEEDED(hres)) {
-        if(async_bsc)
-            bscallback = async_bsc;
-        else
-            hres = create_channelbsc(mon, NULL, NULL, 0, TRUE, &bscallback);
+    if(FAILED(hres)) {
+        CoTaskMemFree(url);
+        return hres;
     }
+
+    if(async_bsc)
+        bscallback = async_bsc;
+    else
+        hres = create_channelbsc(mon, NULL, NULL, 0, TRUE, &bscallback);
 
     if(SUCCEEDED(hres)) {
         if(window->base.inner_window->doc)
@@ -384,7 +386,6 @@ HRESULT set_moniker(HTMLOuterWindow *window, IMoniker *mon, IUri *nav_uri, IBind
         abort_window_bindings(window->base.inner_window);
 
         hres = load_nsuri(window, nsuri, NULL, bscallback, LOAD_FLAGS_BYPASS_CACHE);
-        nsISupports_Release((nsISupports*)nsuri); /* FIXME */
         if(SUCCEEDED(hres)) {
             hres = create_pending_window(window, bscallback);
             TRACE("pending window for %p %p %p\n", window, bscallback, window->pending_window);
@@ -392,13 +393,16 @@ HRESULT set_moniker(HTMLOuterWindow *window, IMoniker *mon, IUri *nav_uri, IBind
         if(bscallback != async_bsc)
             IBindStatusCallback_Release(&bscallback->bsc.IBindStatusCallback_iface);
     }
+    nsISupports_Release((nsISupports*)nsuri); /* FIXME */
 
     if(FAILED(hres)) {
         CoTaskMemFree(url);
         return hres;
     }
 
-    if(doc_obj) {
+    if(is_main_content_window(window)) {
+        HTMLDocumentObj *doc_obj = window->browser->doc;
+
         HTMLDocument_LockContainer(doc_obj, TRUE);
 
         if(doc_obj->frame) {
@@ -406,7 +410,7 @@ HRESULT set_moniker(HTMLOuterWindow *window, IMoniker *mon, IUri *nav_uri, IBind
 
             task = malloc(sizeof(docobj_task_t));
             task->doc = doc_obj;
-            hres = push_task(&task->header, set_progress_proc, NULL, doc_obj->task_magic);
+            hres = push_task(&task->header, set_progress_proc, set_progress_destr, doc_obj->task_magic);
             if(FAILED(hres)) {
                 CoTaskMemFree(url);
                 return hres;
@@ -428,45 +432,45 @@ HRESULT set_moniker(HTMLOuterWindow *window, IMoniker *mon, IUri *nav_uri, IBind
 
 static void notif_readystate(HTMLOuterWindow *window)
 {
+    HTMLInnerWindow *inner_window = window->base.inner_window;
+    HTMLFrameBase *frame_element = window->frame_element;
     DOMEvent *event;
     HRESULT hres;
 
     window->readystate_pending = FALSE;
 
+    IHTMLWindow2_AddRef(&inner_window->base.IHTMLWindow2_iface);
+    if(frame_element)
+        IHTMLDOMNode_AddRef(&frame_element->element.node.IHTMLDOMNode_iface);
+
     if(is_main_content_window(window))
         call_property_onchanged(&window->browser->doc->cp_container, DISPID_READYSTATE);
 
-    hres = create_document_event(window->base.inner_window->doc, EVENTID_READYSTATECHANGE, &event);
+    hres = create_document_event(inner_window->doc, EVENTID_READYSTATECHANGE, &event);
     if(SUCCEEDED(hres)) {
         event->no_event_obj = TRUE;
-        dispatch_event(&window->base.inner_window->doc->node.event_target, event);
+        dispatch_event(&inner_window->doc->node.event_target, event);
         IDOMEvent_Release(&event->IDOMEvent_iface);
     }
+    IHTMLWindow2_Release(&inner_window->base.IHTMLWindow2_iface);
 
-    if(window->frame_element) {
-        hres = create_document_event(window->frame_element->element.node.doc, EVENTID_READYSTATECHANGE, &event);
+    if(frame_element) {
+        hres = create_document_event(frame_element->element.node.doc, EVENTID_READYSTATECHANGE, &event);
         if(SUCCEEDED(hres)) {
-            dispatch_event(&window->frame_element->element.node.event_target, event);
+            dispatch_event(&frame_element->element.node.event_target, event);
             IDOMEvent_Release(&event->IDOMEvent_iface);
         }
+        IHTMLDOMNode_Release(&frame_element->element.node.IHTMLDOMNode_iface);
     }
 }
 
-typedef struct {
-    task_t header;
-    HTMLOuterWindow *window;
-} readystate_task_t;
-
-static void notif_readystate_proc(task_t *_task)
+static void notif_readystate_proc(event_task_t *task)
 {
-    readystate_task_t *task = (readystate_task_t*)_task;
-    notif_readystate(task->window);
+    notif_readystate(task->window->base.outer_window);
 }
 
-static void notif_readystate_destr(task_t *_task)
+static void notif_readystate_destr(event_task_t *task)
 {
-    readystate_task_t *task = (readystate_task_t*)_task;
-    IHTMLWindow2_Release(&task->window->base.IHTMLWindow2_iface);
 }
 
 void set_ready_state(HTMLOuterWindow *window, READYSTATE readystate)
@@ -476,7 +480,7 @@ void set_ready_state(HTMLOuterWindow *window, READYSTATE readystate)
     window->readystate = readystate;
 
     if(window->readystate_locked) {
-        readystate_task_t *task;
+        event_task_t *task;
         HRESULT hres;
 
         if(window->readystate_pending || prev_state == readystate)
@@ -486,10 +490,7 @@ void set_ready_state(HTMLOuterWindow *window, READYSTATE readystate)
         if(!task)
             return;
 
-        IHTMLWindow2_AddRef(&window->base.IHTMLWindow2_iface);
-        task->window = window;
-
-        hres = push_task(&task->header, notif_readystate_proc, notif_readystate_destr, window->task_magic);
+        hres = push_event_task(task, window->base.inner_window, notif_readystate_proc, notif_readystate_destr, window->task_magic);
         if(SUCCEEDED(hres))
             window->readystate_pending = TRUE;
         return;

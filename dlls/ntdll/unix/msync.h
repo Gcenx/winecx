@@ -19,32 +19,32 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-extern int do_msync(void) DECLSPEC_HIDDEN;
-extern void msync_init(void) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_close( HANDLE handle ) DECLSPEC_HIDDEN;
+extern int do_msync(void);
+extern void msync_init(void);
+extern NTSTATUS msync_close( HANDLE handle );
 
 extern NTSTATUS msync_create_semaphore(HANDLE *handle, ACCESS_MASK access,
-    const OBJECT_ATTRIBUTES *attr, LONG initial, LONG max) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_release_semaphore( HANDLE handle, ULONG count, ULONG *prev ) DECLSPEC_HIDDEN;
+    const OBJECT_ATTRIBUTES *attr, LONG initial, LONG max);
+extern NTSTATUS msync_release_semaphore( HANDLE handle, ULONG count, ULONG *prev );
 extern NTSTATUS msync_open_semaphore( HANDLE *handle, ACCESS_MASK access,
-    const OBJECT_ATTRIBUTES *attr ) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_query_semaphore( HANDLE handle, void *info, ULONG *ret_len ) DECLSPEC_HIDDEN;
+    const OBJECT_ATTRIBUTES *attr );
+extern NTSTATUS msync_query_semaphore( HANDLE handle, void *info, ULONG *ret_len );
 extern NTSTATUS msync_create_event( HANDLE *handle, ACCESS_MASK access,
-    const OBJECT_ATTRIBUTES *attr, EVENT_TYPE type, BOOLEAN initial ) DECLSPEC_HIDDEN;
+    const OBJECT_ATTRIBUTES *attr, EVENT_TYPE type, BOOLEAN initial );
 extern NTSTATUS msync_open_event( HANDLE *handle, ACCESS_MASK access,
-    const OBJECT_ATTRIBUTES *attr ) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_set_event( HANDLE handle, LONG *prev ) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_reset_event( HANDLE handle, LONG *prev ) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_pulse_event( HANDLE handle, LONG *prev ) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_query_event( HANDLE handle, void *info, ULONG *ret_len ) DECLSPEC_HIDDEN;
+    const OBJECT_ATTRIBUTES *attr );
+extern NTSTATUS msync_set_event( HANDLE handle, LONG *prev );
+extern NTSTATUS msync_reset_event( HANDLE handle, LONG *prev );
+extern NTSTATUS msync_pulse_event( HANDLE handle, LONG *prev );
+extern NTSTATUS msync_query_event( HANDLE handle, void *info, ULONG *ret_len );
 extern NTSTATUS msync_create_mutex( HANDLE *handle, ACCESS_MASK access,
-    const OBJECT_ATTRIBUTES *attr, BOOLEAN initial ) DECLSPEC_HIDDEN;
+    const OBJECT_ATTRIBUTES *attr, BOOLEAN initial );
 extern NTSTATUS msync_open_mutex( HANDLE *handle, ACCESS_MASK access,
-    const OBJECT_ATTRIBUTES *attr ) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_release_mutex( HANDLE handle, LONG *prev ) DECLSPEC_HIDDEN;
-extern NTSTATUS msync_query_mutex( HANDLE handle, void *info, ULONG *ret_len ) DECLSPEC_HIDDEN;
+    const OBJECT_ATTRIBUTES *attr );
+extern NTSTATUS msync_release_mutex( HANDLE handle, LONG *prev );
+extern NTSTATUS msync_query_mutex( HANDLE handle, void *info, ULONG *ret_len );
 
 extern NTSTATUS msync_wait_objects( DWORD count, const HANDLE *handles, BOOLEAN wait_any,
-                                    BOOLEAN alertable, const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
+                                    BOOLEAN alertable, const LARGE_INTEGER *timeout );
 extern NTSTATUS msync_signal_and_wait( HANDLE signal, HANDLE wait,
-    BOOLEAN alertable, const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
+    BOOLEAN alertable, const LARGE_INTEGER *timeout );

@@ -23,12 +23,12 @@
 #include <winuser.h>
 #include <winternl.h>
 
-extern HINSTANCE WINSPOOL_hInstance DECLSPEC_HIDDEN;
+extern HINSTANCE WINSPOOL_hInstance;
 
-extern PRINTPROVIDOR * backend DECLSPEC_HIDDEN;
-extern BOOL load_backend(void) DECLSPEC_HIDDEN;
+extern PRINTPROVIDOR * backend;
+extern BOOL load_backend(void);
 
-extern void WINSPOOL_LoadSystemPrinters(void) DECLSPEC_HIDDEN;
+extern void WINSPOOL_LoadSystemPrinters(void);
 
 #define IDS_CAPTION       10
 #define IDS_FILE_EXISTS   11
@@ -72,4 +72,5 @@ enum cups_funcs
     unix_enum_printers,
     unix_get_default_page_size,
     unix_get_ppd,
+    unix_funcs_count,
 };

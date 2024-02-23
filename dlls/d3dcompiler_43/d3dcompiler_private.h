@@ -25,7 +25,6 @@
 #include "wine/debug.h"
 #include "wine/list.h"
 #include "wine/rbtree.h"
-#include "wine/heap.h"
 
 #define COBJMACROS
 #include "windef.h"
@@ -38,6 +37,8 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include <vkd3d_shader.h>
+
 /*
  * This doesn't belong here, but for some functions it is possible to return that value,
  * see http://msdn.microsoft.com/en-us/library/bb205278%28v=VS.85%29.aspx
@@ -46,9 +47,9 @@
 #define D3DERR_INVALIDCALL 0x8876086c
 
 /* TRACE helper functions */
-const char *debug_d3dcompiler_d3d_blob_part(D3D_BLOB_PART part) DECLSPEC_HIDDEN;
-const char *debug_d3dcompiler_shader_variable_class(D3D_SHADER_VARIABLE_CLASS c) DECLSPEC_HIDDEN;
-const char *debug_d3dcompiler_shader_variable_type(D3D_SHADER_VARIABLE_TYPE t) DECLSPEC_HIDDEN;
+const char *debug_d3dcompiler_d3d_blob_part(D3D_BLOB_PART part);
+const char *debug_d3dcompiler_shader_variable_class(D3D_SHADER_VARIABLE_CLASS c);
+const char *debug_d3dcompiler_shader_variable_type(D3D_SHADER_VARIABLE_TYPE t);
 
 enum shader_type
 {
@@ -151,23 +152,6 @@ struct bwriter_shader
     unsigned int            num_instrs, instr_alloc_size;
 };
 
-static inline void *d3dcompiler_alloc(SIZE_T size)
-{
-    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-}
-
-static inline void *d3dcompiler_realloc(void *ptr, SIZE_T size)
-{
-    if (!ptr)
-        return d3dcompiler_alloc(size);
-    return HeapReAlloc(GetProcessHeap(), 0, ptr, size);
-}
-
-static inline BOOL d3dcompiler_free(void *ptr)
-{
-    return HeapFree(GetProcessHeap(), 0, ptr);
-}
-
 struct asm_parser;
 
 /* This structure is only used in asmshader.y, but since the .l file accesses the semantic types
@@ -219,14 +203,14 @@ struct asmparser_backend
             const struct src_regs *srcs, int expectednsrcs);
 };
 
-struct instruction *alloc_instr(unsigned int srcs) DECLSPEC_HIDDEN;
-BOOL add_instruction(struct bwriter_shader *shader, struct instruction *instr) DECLSPEC_HIDDEN;
-BOOL add_constF(struct bwriter_shader *shader, uint32_t reg, float x, float y, float z, float w) DECLSPEC_HIDDEN;
-BOOL add_constI(struct bwriter_shader *shader, uint32_t reg, int x, int y, int z, int w) DECLSPEC_HIDDEN;
-BOOL add_constB(struct bwriter_shader *shader, uint32_t reg, BOOL x) DECLSPEC_HIDDEN;
+struct instruction *alloc_instr(unsigned int srcs);
+BOOL add_instruction(struct bwriter_shader *shader, struct instruction *instr);
+BOOL add_constF(struct bwriter_shader *shader, uint32_t reg, float x, float y, float z, float w);
+BOOL add_constI(struct bwriter_shader *shader, uint32_t reg, int x, int y, int z, int w);
+BOOL add_constB(struct bwriter_shader *shader, uint32_t reg, BOOL x);
 BOOL record_declaration(struct bwriter_shader *shader, uint32_t usage, uint32_t usage_idx,
-        uint32_t mod, BOOL output, uint32_t regnum, uint32_t writemask, BOOL builtin) DECLSPEC_HIDDEN;
-BOOL record_sampler(struct bwriter_shader *shader, uint32_t samptype, uint32_t mod, uint32_t regnum) DECLSPEC_HIDDEN;
+        uint32_t mod, BOOL output, uint32_t regnum, uint32_t writemask, BOOL builtin);
+BOOL record_sampler(struct bwriter_shader *shader, uint32_t samptype, uint32_t mod, uint32_t regnum);
 
 #define MESSAGEBUFFER_INITIAL_SIZE 256
 
@@ -258,23 +242,23 @@ struct asm_parser
     unsigned int line_no;
 };
 
-extern struct asm_parser asm_ctx DECLSPEC_HIDDEN;
+extern struct asm_parser asm_ctx;
 
-void create_vs10_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_vs11_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_vs20_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_vs2x_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_vs30_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps10_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps11_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps12_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps13_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps14_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps20_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps2x_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
-void create_ps30_parser(struct asm_parser *ret) DECLSPEC_HIDDEN;
+void create_vs10_parser(struct asm_parser *ret);
+void create_vs11_parser(struct asm_parser *ret);
+void create_vs20_parser(struct asm_parser *ret);
+void create_vs2x_parser(struct asm_parser *ret);
+void create_vs30_parser(struct asm_parser *ret);
+void create_ps10_parser(struct asm_parser *ret);
+void create_ps11_parser(struct asm_parser *ret);
+void create_ps12_parser(struct asm_parser *ret);
+void create_ps13_parser(struct asm_parser *ret);
+void create_ps14_parser(struct asm_parser *ret);
+void create_ps20_parser(struct asm_parser *ret);
+void create_ps2x_parser(struct asm_parser *ret);
+void create_ps30_parser(struct asm_parser *ret);
 
-struct bwriter_shader *parse_asm_shader(char **messages) DECLSPEC_HIDDEN;
+struct bwriter_shader *parse_asm_shader(char **messages);
 
 #ifdef __GNUC__
 #define PRINTF_ATTR(fmt,args) __attribute__((format (printf,fmt,args)))
@@ -282,8 +266,8 @@ struct bwriter_shader *parse_asm_shader(char **messages) DECLSPEC_HIDDEN;
 #define PRINTF_ATTR(fmt,args)
 #endif
 
-void compilation_message(struct compilation_messages *msg, const char *fmt, va_list args) DECLSPEC_HIDDEN;
-void WINAPIV asmparser_message(struct asm_parser *ctx, const char *fmt, ...) PRINTF_ATTR(2,3) DECLSPEC_HIDDEN;
+void compilation_message(struct compilation_messages *msg, const char *fmt, va_list args);
+void WINAPIV asmparser_message(struct asm_parser *ctx, const char *fmt, ...) PRINTF_ATTR(2,3);
 static inline void set_parse_status(enum parse_status *current, enum parse_status update)
 {
     if (update == PARSE_ERR)
@@ -293,13 +277,13 @@ static inline void set_parse_status(enum parse_status *current, enum parse_statu
 }
 
 /* Debug utility routines */
-const char *debug_print_srcmod(uint32_t mod) DECLSPEC_HIDDEN;
-const char *debug_print_dstmod(uint32_t mod) DECLSPEC_HIDDEN;
-const char *debug_print_shift(uint32_t shift) DECLSPEC_HIDDEN;
-const char *debug_print_dstreg(const struct shader_reg *reg) DECLSPEC_HIDDEN;
-const char *debug_print_srcreg(const struct shader_reg *reg) DECLSPEC_HIDDEN;
-const char *debug_print_comp(uint32_t comp) DECLSPEC_HIDDEN;
-const char *debug_print_opcode(uint32_t opcode) DECLSPEC_HIDDEN;
+const char *debug_print_srcmod(uint32_t mod);
+const char *debug_print_dstmod(uint32_t mod);
+const char *debug_print_shift(uint32_t shift);
+const char *debug_print_dstreg(const struct shader_reg *reg);
+const char *debug_print_srcreg(const struct shader_reg *reg);
+const char *debug_print_comp(uint32_t comp);
+const char *debug_print_opcode(uint32_t opcode);
 
 /* Used to signal an incorrect swizzle/writemask */
 #define SWIZZLE_ERR ~0U
@@ -528,9 +512,11 @@ enum bwriterdeclusage
 #define T2_REG          4
 #define T3_REG          5
 
-struct bwriter_shader *SlAssembleShader(const char *text, char **messages) DECLSPEC_HIDDEN;
-HRESULT shader_write_bytecode(const struct bwriter_shader *shader, uint32_t **result, uint32_t *size) DECLSPEC_HIDDEN;
-void SlDeleteShader(struct bwriter_shader *shader) DECLSPEC_HIDDEN;
+struct bwriter_shader *SlAssembleShader(const char *text, char **messages);
+HRESULT shader_write_bytecode(const struct bwriter_shader *shader, uint32_t **result, uint32_t *size);
+void SlDeleteShader(struct bwriter_shader *shader);
+
+#define DXBC_HEADER_SIZE (8 * sizeof(uint32_t))
 
 #define MAKE_TAG(ch0, ch1, ch2, ch3) \
     ((DWORD)(ch0) | ((DWORD)(ch1) << 8) | \
@@ -548,31 +534,5 @@ void SlDeleteShader(struct bwriter_shader *shader) DECLSPEC_HIDDEN;
 #define TAG_STAT MAKE_TAG('S', 'T', 'A', 'T')
 #define TAG_XNAP MAKE_TAG('X', 'N', 'A', 'P')
 #define TAG_XNAS MAKE_TAG('X', 'N', 'A', 'S')
-
-struct dxbc_section
-{
-    DWORD tag;
-    const char *data;
-    DWORD data_size;
-};
-
-struct dxbc
-{
-    UINT size;
-    UINT count;
-    struct dxbc_section *sections;
-};
-
-HRESULT dxbc_write_blob(struct dxbc *dxbc, ID3DBlob **blob) DECLSPEC_HIDDEN;
-void dxbc_destroy(struct dxbc *dxbc) DECLSPEC_HIDDEN;
-HRESULT dxbc_parse(const char *data, SIZE_T data_size, struct dxbc *dxbc) DECLSPEC_HIDDEN;
-HRESULT dxbc_add_section(struct dxbc *dxbc, DWORD tag, const char *data, size_t data_size) DECLSPEC_HIDDEN;
-HRESULT dxbc_init(struct dxbc *dxbc, unsigned int size) DECLSPEC_HIDDEN;
-
-static inline void write_u32(char **ptr, uint32_t u32)
-{
-    memcpy(*ptr, &u32, sizeof(u32));
-    *ptr += sizeof(u32);
-}
 
 #endif /* __WINE_D3DCOMPILER_PRIVATE_H */

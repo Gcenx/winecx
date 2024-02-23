@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <windef.h>
 #include <winerror.h>
+#include <winsock.h>
 #include <sspi.h>
 #include <rpc.h>
 #include <sasl.h>
@@ -220,6 +221,21 @@ static int fill_auth_identity( const sasl_interact_t *prompts, SEC_WINNT_AUTH_ID
     return SASL_OK;
 }
 
+static ULONG get_key_size( CtxtHandle *ctx )
+{
+    SecPkgContext_SessionKey key;
+    if (QueryContextAttributesA( ctx, SECPKG_ATTR_SESSION_KEY, &key )) return 0;
+    FreeContextBuffer( key.SessionKey );
+    return key.SessionKeyLength * 8;
+}
+
+static ULONG get_trailer_size( CtxtHandle *ctx )
+{
+    SecPkgContext_Sizes sizes;
+    if (QueryContextAttributesA( ctx, SECPKG_ATTR_SIZES, &sizes )) return 0;
+    return sizes.cbSecurityTrailer;
+}
+
 int sasl_client_start( sasl_conn_t *handle, const char *mechlist, sasl_interact_t **prompts,
                        const char **clientout, unsigned int *clientoutlen, const char **mech )
 {
@@ -253,7 +269,13 @@ int sasl_client_start( sasl_conn_t *handle, const char *mechlist, sasl_interact_
         *clientout = out_bufs[0].pvBuffer;
         *clientoutlen = out_bufs[0].cbBuffer;
         *mech = "GSS-SPNEGO";
-        return (status == SEC_I_CONTINUE_NEEDED) ? SASL_CONTINUE : SASL_OK;
+        if (status == SEC_I_CONTINUE_NEEDED) return SASL_CONTINUE;
+        else
+        {
+            conn->ssf = get_key_size( &conn->ctxt_handle );
+            conn->trailer_size = get_trailer_size( &conn->ctxt_handle );
+            return SASL_OK;
+        }
     }
 
     return SASL_FAIL;
@@ -287,18 +309,8 @@ int sasl_client_step( sasl_conn_t *handle, const char *serverin, unsigned int se
         if (status == SEC_I_CONTINUE_NEEDED) return SASL_CONTINUE;
         else
         {
-            SecPkgContext_KeyInfoA key;
-            SecPkgContext_Sizes sizes;
-
-            status = QueryContextAttributesA( &conn->ctxt_handle, SECPKG_ATTR_KEY_INFO, &key );
-            if (status != SEC_E_OK) return SASL_FAIL;
-            FreeContextBuffer( key.sSignatureAlgorithmName );
-            FreeContextBuffer( key.sEncryptAlgorithmName );
-            conn->ssf = key.KeySize;
-
-            status = QueryContextAttributesA( &conn->ctxt_handle, SECPKG_ATTR_SIZES, &sizes );
-            if (status != SEC_E_OK) return SASL_FAIL;
-            conn->trailer_size = sizes.cbSecurityTrailer;
+            conn->ssf = get_key_size( &conn->ctxt_handle );
+            conn->trailer_size = get_trailer_size( &conn->ctxt_handle );
             return SASL_OK;
         }
     }

@@ -164,10 +164,10 @@ TW_UINT16 SANE_ImageLayoutSet (pTW_IDENTITY pOrigin,
             img->Frame.Right.Whole, img->Frame.Right.Frac,
             img->Frame.Bottom.Whole, img->Frame.Bottom.Frac);
 
-    tlx = img->Frame.Left.Whole   * 65536 + img->Frame.Left.Frac;
-    tly = img->Frame.Top.Whole    * 65536 + img->Frame.Top.Frac;
-    brx = img->Frame.Right.Whole  * 65536 + img->Frame.Right.Frac;
-    bry = img->Frame.Bottom.Whole * 65536 + img->Frame.Bottom.Frac;
+    tlx = convert_twain_res_to_sane( img->Frame.Left );
+    tly = convert_twain_res_to_sane( img->Frame.Top );
+    brx = convert_twain_res_to_sane( img->Frame.Right );
+    bry = convert_twain_res_to_sane( img->Frame.Bottom );
 
     twrc = sane_option_set_scan_area( tlx, tly, brx, bry, &changed );
     if (twrc != TWRC_SUCCESS)
@@ -301,10 +301,11 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
     BITMAPINFOHEADER *header = NULL;
     int dib_bytes;
     int dib_bytes_per_line;
-    BYTE *line;
+    BYTE *line, color_buffer;
     RGBQUAD *colors;
+    RGBTRIPLE *pixels;
     int color_size = 0;
-    int i;
+    int i, j;
     BYTE *p;
 
     TRACE("DG_IMAGE/DAT_IMAGENATIVEXFER/MSG_GET\n");
@@ -334,10 +335,8 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
         switch (activeDS.frame_params.format)
         {
         case FMT_GRAY:
-            if (activeDS.frame_params.depth == 8)
-                color_size = (1 << 8) * sizeof(*colors);
-            else if (activeDS.frame_params.depth == 1)
-                ;
+            if (activeDS.frame_params.depth == 8 || activeDS.frame_params.depth == 1)
+                color_size = (1 << activeDS.frame_params.depth) * sizeof(*colors);
             else
             {
                 FIXME("For NATIVE, we support only 1 bit monochrome and 8 bit Grayscale, not %d\n", activeDS.frame_params.depth);
@@ -404,8 +403,15 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
         {
             colors = (RGBQUAD *) p;
             p += color_size;
-            for (i = 0; i < (color_size / sizeof(*colors)); i++)
-                colors[i].rgbBlue = colors[i].rgbRed = colors[i].rgbGreen = i;
+            if (activeDS.frame_params.depth == 1)
+            {
+                /* Sane uses 1 to represent minimum intensity (black) and 0 for maximum (white) */
+                colors[0].rgbBlue = colors[0].rgbRed = colors[0].rgbGreen = 255;
+                colors[1].rgbBlue = colors[1].rgbRed = colors[1].rgbGreen = 0;
+            }
+            else
+                for (i = 0; i < (color_size / sizeof(*colors)); i++)
+                    colors[i].rgbBlue = colors[i].rgbRed = colors[i].rgbGreen = i;
         }
 
 
@@ -425,6 +431,17 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
             twRC = SANE_CALL( read_data, &params );
             if (twRC != TWCC_SUCCESS) break;
             if (retlen < activeDS.frame_params.bytes_per_line) break;
+            /* TWAIN: for 24 bit color DIBs, the pixels are stored in BGR order */
+            if (activeDS.frame_params.format == FMT_RGB && activeDS.frame_params.depth == 8)
+            {
+                pixels = (RGBTRIPLE *) line;
+                for (j = 0; j < activeDS.frame_params.pixels_per_line; ++j)
+                {
+                    color_buffer = pixels[j].rgbtRed;
+                    pixels[j].rgbtRed = pixels[j].rgbtBlue;
+                    pixels[j].rgbtBlue = color_buffer;
+                }
+            }
             line -= dib_bytes_per_line;
         }
         activeDS.progressWnd = ScanningDialogBox(activeDS.progressWnd, -1);

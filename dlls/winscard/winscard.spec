@@ -5,13 +5,13 @@
 @ stdcall SCardAccessStartedEvent()
 @ stdcall SCardAddReaderToGroupA(long str str)
 @ stdcall SCardAddReaderToGroupW(long wstr wstr)
-@ stub SCardBeginTransaction
+@ stdcall SCardBeginTransaction(long)
 @ stdcall SCardCancel(long)
-@ stub SCardConnectA
-@ stub SCardConnectW
-@ stub SCardControl
-@ stub SCardDisconnect
-@ stub SCardEndTransaction
+@ stdcall SCardConnectA(long str long long ptr ptr)
+@ stdcall SCardConnectW(long wstr long long ptr ptr)
+@ stdcall SCardControl(long long ptr long ptr long ptr)
+@ stdcall SCardDisconnect(long long)
+@ stdcall SCardEndTransaction(long long)
 @ stdcall SCardEstablishContext(long ptr ptr ptr)
 @ stub SCardForgetCardTypeA
 @ stub SCardForgetCardTypeW
@@ -19,14 +19,14 @@
 @ stub SCardForgetReaderGroupA
 @ stub SCardForgetReaderGroupW
 @ stub SCardForgetReaderW
-@ stub SCardFreeMemory
-@ stub SCardGetAttrib
+@ stdcall SCardFreeMemory(long ptr)
+@ stdcall SCardGetAttrib(long long ptr ptr)
 @ stub SCardGetCardTypeProviderNameA
 @ stub SCardGetCardTypeProviderNameW
 @ stub SCardGetProviderIdA
 @ stub SCardGetProviderIdW
-@ stub SCardGetStatusChangeA
-@ stub SCardGetStatusChangeW
+@ stdcall SCardGetStatusChangeA(long long ptr long)
+@ stdcall SCardGetStatusChangeW(long long ptr long)
 @ stub SCardIntroduceCardTypeA
 @ stub SCardIntroduceCardTypeW
 @ stub SCardIntroduceReaderA
@@ -38,26 +38,26 @@
 @ stub SCardListCardsW
 @ stub SCardListInterfacesA
 @ stub SCardListInterfacesW
-@ stub SCardListReaderGroupsA
-@ stub SCardListReaderGroupsW
+@ stdcall SCardListReaderGroupsA(long ptr ptr)
+@ stdcall SCardListReaderGroupsW(long ptr ptr)
 @ stdcall SCardListReadersA(long str ptr ptr)
 @ stdcall SCardListReadersW(long wstr ptr ptr)
 @ stub SCardLocateCardsA
 @ stub SCardLocateCardsByATRA
 @ stub SCardLocateCardsByATRW
 @ stub SCardLocateCardsW
-@ stub SCardReconnect
+@ stdcall SCardReconnect(long long long long ptr)
 @ stdcall SCardReleaseContext(long)
 @ stdcall SCardReleaseStartedEvent()
 @ stub SCardRemoveReaderFromGroupA
 @ stub SCardRemoveReaderFromGroupW
-@ stub SCardSetAttrib
+@ stdcall SCardSetAttrib(long long ptr long)
 @ stub SCardSetCardTypeProviderNameA
 @ stub SCardSetCardTypeProviderNameW
 @ stub SCardState
 @ stdcall SCardStatusA(long str ptr ptr ptr ptr ptr)
 @ stdcall SCardStatusW(long wstr ptr ptr ptr ptr ptr)
-@ stub SCardTransmit
+@ stdcall SCardTransmit(long ptr ptr long ptr ptr ptr)
 @ extern g_rgSCardRawPci
 @ extern g_rgSCardT0Pci
 @ extern g_rgSCardT1Pci

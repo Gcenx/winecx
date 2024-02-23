@@ -90,6 +90,7 @@ typedef unsigned char MSVCRT_bool;
 
 typedef struct cs_queue
 {
+    void *ctx;
     struct cs_queue *next;
     BOOL free;
     int unknown;
@@ -97,7 +98,6 @@ typedef struct cs_queue
 
 typedef struct
 {
-    ULONG_PTR unk_thread_id;
     cs_queue unk_active;
     void *unknown[2];
     cs_queue *head;
@@ -183,6 +183,10 @@ typedef struct _UnrealizedChore
     void *unk[6];
 } _UnrealizedChore;
 
+typedef struct {
+    MSVCRT_bool *cancelling;
+} _Cancellation_beacon;
+
 static char* (CDECL *p_setlocale)(int category, const char* locale);
 static struct MSVCRT_lconv* (CDECL *p_localeconv)(void);
 static size_t (CDECL *p_wcstombs_s)(size_t *ret, char* dest, size_t sz, const wchar_t* src, size_t max);
@@ -247,6 +251,7 @@ static void (__thiscall *p__Condition_variable_notify_all)(_Condition_variable*)
 
 static Context* (__cdecl *p_Context_CurrentContext)(void);
 static _Context* (__cdecl *p__Context__CurrentContext)(_Context*);
+static MSVCRT_bool (__cdecl *p_Context_IsCurrentTaskCollectionCanceling)(void);
 
 static _StructuredTaskCollection* (__thiscall *p__StructuredTaskCollection_ctor)(_StructuredTaskCollection*, void*);
 static void (__thiscall *p__StructuredTaskCollection_dtor)(_StructuredTaskCollection*);
@@ -254,6 +259,9 @@ static void (__thiscall *p__StructuredTaskCollection__Schedule)(_StructuredTaskC
 static int (__stdcall *p__StructuredTaskCollection__RunAndWait)(_StructuredTaskCollection*, _UnrealizedChore*);
 static void (__thiscall *p__StructuredTaskCollection__Cancel)(_StructuredTaskCollection*);
 static MSVCRT_bool (__thiscall *p__StructuredTaskCollection__IsCanceling)(_StructuredTaskCollection*);
+
+static _Cancellation_beacon* (__thiscall *p__Cancellation_beacon_ctor)(_Cancellation_beacon*);
+static void (__thiscall *p__Cancellation_beacon_dtor)(_Cancellation_beacon*);
 
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(module,y)
 #define SET(x,y) do { SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y); } while(0)
@@ -310,6 +318,7 @@ static BOOL init(void)
     SET(p__Context__CurrentContext, "?_CurrentContext@_Context@details@Concurrency@@SA?AV123@XZ");
     SET(p_strcmp, "strcmp");
     SET(p_strncmp, "strncmp");
+    SET(p_Context_IsCurrentTaskCollectionCanceling, "?IsCurrentTaskCollectionCanceling@Context@Concurrency@@SA_NXZ");
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p__StructuredTaskCollection_ctor,
                 "??0_StructuredTaskCollection@details@Concurrency@@QEAA@PEAV_CancellationTokenState@12@@Z");
@@ -355,6 +364,10 @@ static BOOL init(void)
                 "?notify_all@_Condition_variable@details@Concurrency@@QEAAXXZ");
         SET(p_Context_CurrentContext,
                 "?CurrentContext@Context@Concurrency@@SAPEAV12@XZ");
+        SET(p__Cancellation_beacon_ctor,
+                "??0_Cancellation_beacon@details@Concurrency@@QEAA@XZ");
+        SET(p__Cancellation_beacon_dtor,
+                "??1_Cancellation_beacon@details@Concurrency@@QEAA@XZ");
     } else {
 #ifdef __arm__
         SET(p__StructuredTaskCollection_ctor,
@@ -399,6 +412,10 @@ static BOOL init(void)
                 "?notify_one@_Condition_variable@details@Concurrency@@QAAXXZ");
         SET(p__Condition_variable_notify_all,
                 "?notify_all@_Condition_variable@details@Concurrency@@QAAXXZ");
+        SET(p__Cancellation_beacon_ctor,
+                "??0_Cancellation_beacon@details@Concurrency@@QAA@XZ");
+        SET(p__Cancellation_beacon_dtor,
+                "??1_Cancellation_beacon@details@Concurrency@@QAA@XZ");
 #else
         SET(p__StructuredTaskCollection_ctor,
                 "??0_StructuredTaskCollection@details@Concurrency@@QAE@PAV_CancellationTokenState@12@@Z");
@@ -442,6 +459,10 @@ static BOOL init(void)
                 "?notify_one@_Condition_variable@details@Concurrency@@QAEXXZ");
         SET(p__Condition_variable_notify_all,
                 "?notify_all@_Condition_variable@details@Concurrency@@QAEXXZ");
+        SET(p__Cancellation_beacon_ctor,
+                "??0_Cancellation_beacon@details@Concurrency@@QAE@XZ");
+        SET(p__Cancellation_beacon_dtor,
+                "??1_Cancellation_beacon@details@Concurrency@@QAE@XZ");
 #endif
         SET(p_Context_CurrentContext,
                 "?CurrentContext@Context@Concurrency@@SAPAV12@XZ");
@@ -595,6 +616,14 @@ static void test____lc_locale_name_func(void)
                     i, j, wine_dbgstr_w(lc_names[j]), wine_dbgstr_w(lc_names[1]));
         }
     }
+
+    p_setlocale(LC_ALL, "zh-Hans");
+    lc_names = p____lc_locale_name_func();
+    ok(!lstrcmpW(lc_names[1], L"zh-Hans"), "lc_names[1] expected zh-Hans got %s\n", wine_dbgstr_w(lc_names[1]));
+
+    p_setlocale(LC_ALL, "zh-Hant");
+    lc_names = p____lc_locale_name_func();
+    ok(!lstrcmpW(lc_names[1], L"zh-Hant"), "lc_names[1] expected zh-Hant got %s\n", wine_dbgstr_w(lc_names[1]));
 
     p_setlocale(LC_ALL, "C");
     lc_names = p____lc_locale_name_func();
@@ -1358,6 +1387,7 @@ struct chore
 static void __cdecl chore_proc(_UnrealizedChore *_this)
 {
     struct chore *chore = CONTAINING_RECORD(_this, struct chore, chore);
+    _Cancellation_beacon beacon, beacon2;
 
     if (chore->start_event)
     {
@@ -1380,6 +1410,16 @@ static void __cdecl chore_proc(_UnrealizedChore *_this)
                 p__StructuredTaskCollection__IsCanceling,
                 chore->chore.task_collection);
         ok(!canceling, "Task is already canceling\n");
+
+        ok(!p_Context_IsCurrentTaskCollectionCanceling(),
+                "IsCurrentTaskCollectionCanceling returned TRUE\n");
+
+        call_func1(p__Cancellation_beacon_ctor, &beacon);
+        ok(!*beacon.cancelling, "beacon signalled %x\n", *beacon.cancelling);
+
+        call_func1(p__Cancellation_beacon_ctor, &beacon2);
+        ok(beacon.cancelling != beacon2.cancelling, "beacons point to the same data\n");
+        ok(!*beacon.cancelling, "beacon signalled %x\n", *beacon.cancelling);
     }
 
     if (!chore->wait_event)
@@ -1403,7 +1443,19 @@ static void __cdecl chore_proc(_UnrealizedChore *_this)
         MSVCRT_bool canceling = call_func1(
                 p__StructuredTaskCollection__IsCanceling,
                 chore->chore.task_collection);
-        todo_wine ok(canceling, "Task is not canceling\n");
+        ok(canceling, "Task is not canceling\n");
+
+        ok(p_Context_IsCurrentTaskCollectionCanceling(),
+                "IsCurrentTaskCollectionCanceling returned FALSE\n");
+
+        ok(*beacon.cancelling == 1, "beacon not signalled (%x)\n", *beacon.cancelling);
+        call_func1(p__Cancellation_beacon_dtor, &beacon);
+        ok(*beacon2.cancelling == 1, "beacon not signalled (%x)\n", *beacon2.cancelling);
+        call_func1(p__Cancellation_beacon_dtor, &beacon2);
+
+        call_func1(p__Cancellation_beacon_ctor, &beacon);
+        ok(*beacon.cancelling == 1, "beacon not signalled (%x)\n", *beacon.cancelling);
+        call_func1(p__Cancellation_beacon_dtor, &beacon);
     }
 }
 
@@ -1418,6 +1470,7 @@ static void test_StructuredTaskCollection(void)
     HANDLE chore_start_evt, chore_evt1, chore_evt2;
     _StructuredTaskCollection task_coll;
     struct chore chore1, chore2;
+    _Cancellation_beacon beacon;
     DWORD main_thread_id;
     Context *context;
     int status;
@@ -1428,11 +1481,7 @@ static void test_StructuredTaskCollection(void)
     context = p_Context_CurrentContext();
 
     memset(&task_coll, 0x55, sizeof(task_coll));
-    if (!call_func2(p__StructuredTaskCollection_ctor, &task_coll, NULL))
-    {
-        skip("_StructuredTaskCollection constructor not implemented\n");
-        return;
-    }
+    call_func2(p__StructuredTaskCollection_ctor, &task_coll, NULL);
     todo_wine ok(task_coll.unk2 == 0x1fffffff,
             "_StructuredTaskCollection ctor set wrong unk2: 0x%x != 0x1fffffff\n", task_coll.unk2);
     ok(task_coll.unk3 == NULL,
@@ -1581,13 +1630,34 @@ static void test_StructuredTaskCollection(void)
     ret = WaitForSingleObject(chore_evt1, 5000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
 
+    ok(!p_Context_IsCurrentTaskCollectionCanceling(),
+            "IsCurrentTaskCollectionCanceling returned TRUE\n");
+    call_func1(p__Cancellation_beacon_ctor, &beacon);
+    ok(!*beacon.cancelling, "beacon signalled\n");
+
     call_func1(p__StructuredTaskCollection__Cancel, &task_coll);
+    ok(!p_Context_IsCurrentTaskCollectionCanceling(),
+            "IsCurrentTaskCollectionCanceling returned TRUE\n");
+    ok(!*beacon.cancelling, "beacon signalled\n");
 
     b = SetEvent(chore_evt2);
     ok(b, "SetEvent failed\n");
+    ok(!*beacon.cancelling, "beacon signalled\n");
 
     status = p__StructuredTaskCollection__RunAndWait(&task_coll, NULL);
-    todo_wine ok(status == 2, "_StructuredTaskCollection::_RunAndWait failed: %d\n", status);
+    ok(status == 2, "_StructuredTaskCollection::_RunAndWait failed: %d\n", status);
+    ok(!*beacon.cancelling, "beacon signalled\n");
+    call_func1(p__Cancellation_beacon_dtor, &beacon);
+    call_func1(p__StructuredTaskCollection_dtor, &task_coll);
+
+    /* cancel task collection without scheduled tasks */
+    call_func2(p__StructuredTaskCollection_ctor, &task_coll, NULL);
+    call_func1(p__StructuredTaskCollection__Cancel, &task_coll);
+    ok(task_coll.context == context, "Unexpected context: %p != %p\n", task_coll.context, context);
+    chore_ctor(&chore1);
+    status = p__StructuredTaskCollection__RunAndWait(&task_coll, NULL);
+    ok(status == 2, "_StructuredTaskCollection::_RunAndWait failed: %d\n", status);
+    ok(!chore1.executed, "Canceled collection executed chore\n");
     call_func1(p__StructuredTaskCollection_dtor, &task_coll);
 
     CloseHandle(chore_start_evt);

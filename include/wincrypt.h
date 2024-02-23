@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 #include <bcrypt.h>
-/* FIXME: #include <ncrypt.h> */
+#include <ncrypt.h>
 
 #ifndef WINADVAPI
 #ifdef _ADVAPI32_
@@ -793,7 +793,7 @@ typedef struct _CRYPT_SMIME_CAPABILITIES {
 
 typedef struct _VTableProvStruc {
     DWORD    Version;
-#ifdef WINE_STRICT_PROTOTYPES
+#ifndef WINE_NO_STRICT_PROTOTYPES
     BOOL     (WINAPI *FuncVerifyImage)(LPCSTR,BYTE*);
     void     (WINAPI *FuncReturnhWnd)(HWND*);
 #else

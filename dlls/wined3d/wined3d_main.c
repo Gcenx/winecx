@@ -26,7 +26,10 @@
 #define VKD3D_NO_WIN32_TYPES
 #include "initguid.h"
 #include "wined3d_private.h"
+#include "wined3d_gl.h"
 #include "d3d12.h"
+#define VK_NO_PROTOTYPES
+#include "wine/vulkan.h"
 #include <vkd3d.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -135,6 +138,14 @@ struct cxgames_hacks cxgames_hacks =
 {
     FALSE,                      /* safe_vs_consts */
 };
+
+enum wined3d_renderer CDECL wined3d_get_renderer(void)
+{
+    if (wined3d_settings.renderer == WINED3D_RENDERER_AUTO)
+        return WINED3D_RENDERER_OPENGL;
+
+    return wined3d_settings.renderer;
+}
 
 struct wined3d * CDECL wined3d_create(uint32_t flags)
 {

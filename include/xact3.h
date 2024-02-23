@@ -487,8 +487,10 @@ DECLARE_INTERFACE(IXACT3Cue)
     STDMETHOD(GetVariable)(THIS_ XACTVARIABLEINDEX nIndex, XACTVARIABLEVALUE *nValue) PURE;
     STDMETHOD(Pause)(THIS_ BOOL fPause) PURE;
     STDMETHOD(GetProperties)(THIS_ LPXACT_CUE_INSTANCE_PROPERTIES *ppProperties) PURE;
+#if XACT3_VER >= 0x0305
     STDMETHOD(SetOutputVoices)(THIS_ const XAUDIO2_VOICE_SENDS *pSendList) PURE;
     STDMETHOD(SetOutputVoiceMatrix)(THIS_ IXAudio2Voice *pDestinationVoice, UINT32 SourceChannels, UINT32 DestinationChannels, const float *pLevelMatrix) PURE;
+#endif
 };
 #undef INTERFACE
 
@@ -662,7 +664,7 @@ DECLARE_INTERFACE(IXACT3WaveBank)
 DECLARE_INTERFACE_(IXACT3Engine,IUnknown)
 {
     /*** IUnknown methods ***/
-    STDMETHOD_(HRESULT,QueryInterface)(THIS_ REFIID riid, void** ppvObject) PURE;
+    STDMETHOD(QueryInterface)(THIS_ REFIID riid, void** ppvObject) PURE;
     STDMETHOD_(ULONG,AddRef)(THIS) PURE;
     STDMETHOD_(ULONG,Release)(THIS) PURE;
     /*** IXACT3Engine methods ***/

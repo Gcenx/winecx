@@ -28,6 +28,7 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "wingdi.h"
+#include "ntgdi.h"
 
 #include "wine/wgl.h"
 #include "wine/wgl_driver.h"
@@ -38,14 +39,14 @@ struct registry_entry
     const char *extension; /* name of the GL/WGL extension */
 };
 
-extern const struct registry_entry extension_registry[] DECLSPEC_HIDDEN;
-extern const int extension_registry_size DECLSPEC_HIDDEN;
+extern const struct registry_entry extension_registry[];
+extern const int extension_registry_size;
 
-extern struct opengl_funcs null_opengl_funcs DECLSPEC_HIDDEN;
+extern struct opengl_funcs null_opengl_funcs;
 
-static inline struct opengl_funcs *get_dc_funcs( HDC hdc )
+static inline const struct opengl_funcs *get_dc_funcs( HDC hdc )
 {
-    struct opengl_funcs *funcs = __wine_get_wgl_driver( hdc, WINE_WGL_DRIVER_VERSION );
+    const struct opengl_funcs *funcs = __wine_get_wgl_driver( hdc, WINE_WGL_DRIVER_VERSION );
     if (!funcs) RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
     else if (funcs == (void *)-1) funcs = &null_opengl_funcs;
     return funcs;

@@ -24,9 +24,6 @@
  * http://sources.redhat.com/gdb/onlinedocs/gdb/Maintenance-Commands.html
  */
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include <assert.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -67,6 +64,7 @@ struct reply_buffer
 struct gdb_context
 {
     /* gdb information */
+    HANDLE                      gdb_ctrl_thread;
     SOCKET                      sock;
     /* incoming buffer */
     char*                       in_buf;
@@ -1688,11 +1686,12 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
     IMAGE_NT_HEADERS *nth = NULL;
     IMAGEHLP_MODULE64 mod;
     SIZE_T size, i;
-    BOOL is_wow64;
     char buffer[0x400];
 
     mod.SizeOfStruct = sizeof(mod);
-    SymGetModuleInfo64(gdbctx->process->handle, base, &mod);
+    if (!SymGetModuleInfo64(gdbctx->process->handle, base, &mod) ||
+        mod.MachineType != gdbctx->process->be_cpu->machine)
+        return TRUE;
 
     reply_buffer_append_str(reply, "<library name=\"");
     if (strcmp(mod.LoadedImageName, "[vdso].so") == 0)
@@ -1710,8 +1709,7 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
 
         if ((unix_path = wine_get_unix_file_name(nt_name.Buffer)))
         {
-            if (IsWow64Process(gdbctx->process->handle, &is_wow64) &&
-                is_wow64 && (tmp = strstr(unix_path, "system32")))
+            if (gdbctx->process->is_wow64 && (tmp = strstr(unix_path, "system32")))
                 memcpy(tmp, "syswow64", 8);
             reply_buffer_append_xmlstr(reply, unix_path);
         }
@@ -1744,7 +1742,7 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
      * the following computation valid in all cases. */
     dos = (IMAGE_DOS_HEADER *)buffer;
     nth = (IMAGE_NT_HEADERS *)(buffer + dos->e_lfanew);
-    if (IsWow64Process(gdbctx->process->handle, &is_wow64) && is_wow64)
+    if (gdbctx->process->is_wow64)
         sec = IMAGE_FIRST_SECTION((IMAGE_NT_HEADERS32 *)nth);
     else
         sec = IMAGE_FIRST_SECTION((IMAGE_NT_HEADERS64 *)nth);
@@ -1765,7 +1763,7 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
 static enum packet_return packet_query_libraries(struct gdb_context* gdbctx)
 {
     struct reply_buffer* reply = &gdbctx->qxfer_buffer;
-    BOOL opt;
+    BOOL opt_native, opt_real_path;
 
     if (!gdbctx->process) return packet_error;
 
@@ -1776,9 +1774,12 @@ static enum packet_return packet_query_libraries(struct gdb_context* gdbctx)
     SymLoadModule(gdbctx->process->handle, 0, 0, 0, 0, 0);
 
     reply_buffer_append_str(reply, "<library-list>");
-    opt = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
+    /* request also ELF modules, and also real path to loaded modules */
+    opt_native = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
+    opt_real_path = SymSetExtendedOption(SYMOPT_EX_WINE_MODULE_REAL_PATH, TRUE);
     SymEnumerateModules64(gdbctx->process->handle, packet_query_libraries_cb, gdbctx);
-    SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
+    SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt_native);
+    SymSetExtendedOption(SYMOPT_EX_WINE_MODULE_REAL_PATH, opt_real_path);
     reply_buffer_append_str(reply, "</library-list>");
 
     return packet_send_buffer;
@@ -1965,7 +1966,6 @@ static enum packet_return packet_query_exec_file(struct gdb_context* gdbctx)
     struct reply_buffer* reply = &gdbctx->qxfer_buffer;
     struct dbg_process* process = gdbctx->process;
     char *unix_path;
-    BOOL is_wow64;
     char *tmp;
 
     if (!process) return packet_error;
@@ -1976,8 +1976,7 @@ static enum packet_return packet_query_exec_file(struct gdb_context* gdbctx)
     if (!(unix_path = wine_get_unix_file_name(process->imageName)))
         return packet_reply_error(gdbctx, GetLastError() == ERROR_NOT_ENOUGH_MEMORY ? HOST_ENOMEM : HOST_ENOENT);
 
-    if (IsWow64Process(process->handle, &is_wow64) &&
-        is_wow64 && (tmp = strstr(unix_path, "system32")))
+    if (process->is_wow64 && (tmp = strstr(unix_path, "system32")))
         memcpy(tmp, "syswow64", 8);
 
     reply_buffer_append_str(reply, unix_path);
@@ -2393,21 +2392,28 @@ static int fetch_data(struct gdb_context* gdbctx)
     return gdbctx->in_len - in_len;
 }
 
+static DWORD WINAPI gdb_ctrl_thread(void *pmt)
+{
+    /* don't bother freeing passed memory, we're terminating anyway */
+    return __wine_unix_spawnvp( (char **)pmt, TRUE );
+}
+
 #define FLAG_NO_START   1
 #define FLAG_WITH_XTERM 2
 
-static BOOL gdb_exec(unsigned port, unsigned flags)
+static HANDLE gdb_exec(unsigned port, unsigned flags)
 {
     WCHAR tmp[MAX_PATH], buf[MAX_PATH];
-    const char *argv[6];
+    const char **argv;
     char *unix_tmp;
     const char      *gdb_path;
     FILE*           f;
 
+    if (!(argv = HeapAlloc( GetProcessHeap(), 0, 6 * sizeof(argv[0]) ))) return NULL;
     if (!(gdb_path = getenv("WINE_GDB"))) gdb_path = "gdb";
     GetTempPathW( MAX_PATH, buf );
     GetTempFileNameW( buf, L"gdb", 0, tmp );
-    if ((f = _wfopen( tmp, L"w+" )) == NULL) return FALSE;
+    if ((f = _wfopen( tmp, L"w+" )) == NULL) return NULL;
     unix_tmp = wine_get_unix_file_name( tmp );
     fprintf(f, "target remote localhost:%d\n", ntohs(port));
     fprintf(f, "set prompt Wine-gdb>\\ \n");
@@ -2430,12 +2436,7 @@ static BOOL gdb_exec(unsigned port, unsigned flags)
     argv[3] = "-x";
     argv[4] = unix_tmp;
     argv[5] = NULL;
-    if (flags & FLAG_WITH_XTERM)
-        __wine_unix_spawnvp( (char **)argv, FALSE );
-    else
-        __wine_unix_spawnvp( (char **)argv + 2, FALSE );
-    HeapFree( GetProcessHeap(), 0, unix_tmp );
-    return TRUE;
+    return CreateThread( NULL, 0, gdb_ctrl_thread, (char **)argv + ((flags & FLAG_WITH_XTERM) ? 0 : 2), 0, NULL );
 }
 
 static BOOL gdb_startup(struct gdb_context* gdbctx, unsigned flags, unsigned port)
@@ -2475,7 +2476,7 @@ static BOOL gdb_startup(struct gdb_context* gdbctx, unsigned flags, unsigned por
     if (flags & FLAG_NO_START)
         fprintf(stderr, "target remote localhost:%d\n", ntohs(s_addrs.sin_port));
     else
-        gdb_exec(s_addrs.sin_port, flags);
+        gdbctx->gdb_ctrl_thread = gdb_exec(s_addrs.sin_port, flags);
 
     /* step 4: wait for gdb to connect actually */
     FD_ZERO( &read_fds );
@@ -2507,6 +2508,7 @@ static BOOL gdb_init_context(struct gdb_context* gdbctx, unsigned flags, unsigne
 {
     int                 i;
 
+    gdbctx->gdb_ctrl_thread = NULL;
     gdbctx->sock = INVALID_SOCKET;
     gdbctx->in_buf = NULL;
     gdbctx->in_buf_alloc = 0;
@@ -2577,6 +2579,8 @@ static int gdb_remote(unsigned flags, unsigned port)
             }
         }
     }
+    /* wait for gdb to terminate */
+    WaitForSingleObject(gdbctx.gdb_ctrl_thread, INFINITE);
     return 0;
 }
 

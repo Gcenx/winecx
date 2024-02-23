@@ -29,6 +29,7 @@
 #include "winerror.h"
 #include "winternl.h"
 #include "winioctl.h"
+#include "ddk/ntddk.h"
 
 #include "kernelbase.h"
 #include "wine/debug.h"
@@ -411,7 +412,7 @@ BOOL WINAPI GetWindowsAccountDomainSid( PSID sid, PSID domain_sid, DWORD *size )
  */
 BOOL WINAPI InitializeSid ( PSID sid, PSID_IDENTIFIER_AUTHORITY auth, BYTE count )
 {
-    return RtlInitializeSid( sid, auth, count );
+    return set_ntstatus(RtlInitializeSid( sid, auth, count ));
 }
 
 /******************************************************************************
@@ -682,13 +683,19 @@ BOOL WINAPI DuplicateToken( HANDLE token, SECURITY_IMPERSONATION_LEVEL level, PH
 BOOL WINAPI DuplicateTokenEx( HANDLE token, DWORD access, LPSECURITY_ATTRIBUTES sa,
                               SECURITY_IMPERSONATION_LEVEL level, TOKEN_TYPE type, PHANDLE ret )
 {
+    SECURITY_QUALITY_OF_SERVICE qos;
     OBJECT_ATTRIBUTES attr;
 
     TRACE("%p 0x%08lx 0x%08x 0x%08x %p\n", token, access, level, type, ret );
 
+    qos.Length = sizeof(qos);
+    qos.ImpersonationLevel = level;
+    qos.ContextTrackingMode = SECURITY_STATIC_TRACKING;
+    qos.EffectiveOnly = FALSE;
     InitializeObjectAttributes( &attr, NULL, (sa && sa->bInheritHandle) ? OBJ_INHERIT : 0,
                                 NULL, sa ? sa->lpSecurityDescriptor : NULL );
-    return set_ntstatus( NtDuplicateToken( token, access, &attr, level, type, ret ));
+    attr.SecurityQualityOfService = &qos;
+    return set_ntstatus( NtDuplicateToken( token, access, &attr, FALSE, type, ret ));
 }
 
 /******************************************************************************
@@ -1105,7 +1112,10 @@ BOOL WINAPI InitializeSecurityDescriptor( PSECURITY_DESCRIPTOR descr, DWORD revi
  */
 BOOL WINAPI IsValidSecurityDescriptor( PSECURITY_DESCRIPTOR descr )
 {
-    return set_ntstatus( RtlValidSecurityDescriptor( descr ));
+    if (!RtlValidSecurityDescriptor( descr ))
+        return set_ntstatus(STATUS_INVALID_SECURITY_DESCR);
+
+    return TRUE;
 }
 
 /******************************************************************************

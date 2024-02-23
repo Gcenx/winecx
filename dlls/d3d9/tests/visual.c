@@ -35,7 +35,6 @@
 #define COBJMACROS
 #include <d3d9.h>
 #include "utils.h"
-#include "wine/heap.h"
 
 struct vec2
 {
@@ -97,10 +96,7 @@ static BOOL compare_float(float f, float g, unsigned int ulps)
     if (y < 0)
         y = INT_MIN - y;
 
-    if (abs(x - y) > ulps)
-        return FALSE;
-
-    return TRUE;
+    return compare_uint(x, y, ulps);
 }
 
 static BOOL compare_vec4(const struct vec4 *vec, float x, float y, float z, float w, unsigned int ulps)
@@ -285,15 +281,18 @@ static D3DCOLOR check_expected_rt_color(unsigned int line, IDirect3DSurface9 *rt
     return color;
 }
 
-#define check_rt_color(a, b) check_rt_color_(__LINE__, a, b, false)
-#define check_rt_color_todo(a, b) check_rt_color_(__LINE__, a, b, true)
-#define check_rt_color_todo_if(a, b, c) check_rt_color_(__LINE__, a, b, c)
-static void check_rt_color_(unsigned int line, IDirect3DSurface9 *rt, D3DCOLOR expected_color, bool todo)
+#define check_rt_color(a, b) check_rt_color_(__LINE__, a, b, false, 0, false)
+#define check_rt_color_broken(a, b, c, d) check_rt_color_(__LINE__, a, b, false, c, d)
+#define check_rt_color_todo(a, b) check_rt_color_(__LINE__, a, b, true, 0, false)
+#define check_rt_color_todo_if(a, b, c) check_rt_color_(__LINE__, a, b, c, 0, false)
+static void check_rt_color_(unsigned int line, IDirect3DSurface9 *rt, D3DCOLOR expected_color, bool todo,
+        D3DCOLOR broken_color, bool is_broken)
 {
     unsigned int color = check_expected_rt_color(line, rt, expected_color);
 
     todo_wine_if (todo)
-        ok_(__FILE__, line)(color == expected_color, "Got unexpected color 0x%08x.\n", color);
+        ok_(__FILE__, line)(color == expected_color || broken(is_broken && color == broken_color),
+                "Got unexpected color 0x%08x.\n", color);
 }
 
 static IDirect3DDevice9 *create_device(IDirect3D9 *d3d, HWND device_window, HWND focus_window, BOOL windowed)
@@ -1027,8 +1026,8 @@ static void test_specular_lighting(void)
     } *quad;
     WORD *indices;
 
-    quad = HeapAlloc(GetProcessHeap(), 0, vertices_side * vertices_side * sizeof(*quad));
-    indices = HeapAlloc(GetProcessHeap(), 0, indices_count * sizeof(*indices));
+    quad = malloc(vertices_side * vertices_side * sizeof(*quad));
+    indices = malloc(indices_count * sizeof(*indices));
     for (i = 0, y = 0; y < vertices_side; ++y)
     {
         for (x = 0; x < vertices_side; ++x)
@@ -1130,8 +1129,8 @@ static void test_specular_lighting(void)
 done:
     IDirect3D9_Release(d3d);
     DestroyWindow(window);
-    HeapFree(GetProcessHeap(), 0, indices);
-    HeapFree(GetProcessHeap(), 0, quad);
+    free(indices);
+    free(quad);
 }
 
 static void clear_test(void)
@@ -2805,7 +2804,10 @@ static void test_cube_wrap(void)
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
         color = getPixelColor(device, 320, 240);
-        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x00, 0x00, 0xff), 1),
+        /* Modern AMD GPUs do slip into reading the border color. */
+        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x00, 0x00, 0xff), 1)
+                || broken(color_match(color, D3DCOLOR_ARGB(0x00, 0x00, 0xbf, 0x40), 1)
+                && address_modes[x].mode == D3DTADDRESS_BORDER),
                 "Got color 0x%08x for addressing mode %s, expected 0x000000ff.\n",
                 color, address_modes[x].name);
 
@@ -5557,8 +5559,8 @@ static void texture_transform_flags_test(void)
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
         /* What happens if 4 coords are used, but only 2 given ?*/
-        U(mat).m[2][0] = 1.0f;
-        U(mat).m[3][1] = 1.0f;
+        mat.m[2][0] = 1.0f;
+        mat.m[3][1] = 1.0f;
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, &mat);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
         hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT4);
@@ -12119,8 +12121,8 @@ static void test_pointsize(void)
     ok(color == 0x00ffff00, "pSprite: Pixel (64+4),(64-4) has color 0x%08x, expected 0x00ffff00\n", color);
     IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
 
-    U(matrix).m[0][0] =  1.0f / 64.0f;
-    U(matrix).m[1][1] = -1.0f / 64.0f;
+    matrix.m[0][0] =  1.0f / 64.0f;
+    matrix.m[1][1] = -1.0f / 64.0f;
     hr = IDirect3DDevice9_SetTransform(device, D3DTS_PROJECTION, &matrix);
     ok(SUCCEEDED(hr), "SetTransform failed, hr %#lx.\n", hr);
 
@@ -12139,7 +12141,7 @@ static void test_pointsize(void)
     ok(SUCCEEDED(hr), "Failed setting point scale attenuation coefficient, hr %#lx.\n", hr);
     if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1))
     {
-        hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 0, &S(U(matrix))._11, 4);
+        hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 0, &matrix._11, 4);
         ok(SUCCEEDED(hr), "Failed to set vertex shader constants, hr %#lx.\n", hr);
     }
 
@@ -17062,7 +17064,7 @@ static void fp_special_test(void)
         if (vs_body[i].size > body_size) body_size = vs_body[i].size;
     }
 
-    vs_code = HeapAlloc(GetProcessHeap(), 0, sizeof(vs_header) + body_size + sizeof(vs_footer));
+    vs_code = malloc(sizeof(vs_header) + body_size + sizeof(vs_footer));
     memcpy(vs_code, vs_header, sizeof(vs_header));
 
     for (i = 0; i < ARRAY_SIZE(vs_body); ++i)
@@ -17104,7 +17106,7 @@ static void fp_special_test(void)
         IDirect3DVertexShader9_Release(vs);
     }
 
-    HeapFree(GetProcessHeap(), 0, vs_code);
+    free(vs_code);
 
     hr = IDirect3DDevice9_SetPixelShader(device, NULL);
     ok(SUCCEEDED(hr), "SetPixelShader failed, hr %#lx.\n", hr);
@@ -19505,6 +19507,7 @@ static void add_dirty_rect_test(void)
     ULONG refcount;
     DWORD *texel;
     HWND window;
+    HDC dc;
     D3DLOCKED_RECT locked_rect;
     static const RECT part_rect = {96, 96, 160, 160};
     static const RECT oob_rect[] =
@@ -19746,6 +19749,21 @@ static void add_dirty_rect_test(void)
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to present, hr %#lx.\n", hr);
 
+    /* GetDC() records a dirty rect. */
+    fill_surface(surface_src_green, 0x00000080, D3DLOCK_NO_DIRTY_UPDATE);
+    hr = IDirect3DSurface9_GetDC(surface_src_green, &dc);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DSurface9_ReleaseDC(surface_src_green, dc);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice9_UpdateTexture(device, (IDirect3DBaseTexture9 *)tex_src_green,
+            (IDirect3DBaseTexture9 *)tex_dst2);
+    ok(SUCCEEDED(hr), "Failed to update texture, hr %#lx.\n", hr);
+    add_dirty_rect_test_draw(device);
+    color = getPixelColor(device, 320, 240);
+    ok(color_match(color, 0x00000080, 1), "Got unexpected color 0x%08x.\n", color);
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to present, hr %#lx.\n", hr);
+
     fill_surface(surface_src_red, 0x00ff0000, 0);
     fill_surface(surface_src_green, 0x0000ff00, 0);
 
@@ -19782,7 +19800,9 @@ static void add_dirty_rect_test(void)
     ok(hr == S_OK, "Failed to set texture, hr %#lx.\n", hr);
     add_dirty_rect_test_draw(device);
     color = getPixelColor(device, 320, 240);
-    ok(color_match(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+    /* Radeon GPUs read zero from sysmem textures. */
+    ok(color_match(color, 0x000000ff, 1) || broken(color_match(color, 0x00000000, 1)),
+            "Got unexpected color 0x%08x.\n", color);
 
     /* Tests with managed textures. */
     fill_surface(surface_managed0, 0x00ff0000, 0);
@@ -19866,6 +19886,18 @@ static void add_dirty_rect_test(void)
     add_dirty_rect_test_draw(device);
     color = getPixelColor(device, 320, 240);
     ok(color_match(color, 0x00ffff00, 1), "Got unexpected color 0x%08x.\n", color);
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to present, hr %#lx.\n", hr);
+
+    /* So does GetDC(). */
+    fill_surface(surface_managed0, 0x00000080, D3DLOCK_NO_DIRTY_UPDATE);
+    hr = IDirect3DSurface9_GetDC(surface_managed0, &dc);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DSurface9_ReleaseDC(surface_managed0, dc);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    add_dirty_rect_test_draw(device);
+    color = getPixelColor(device, 320, 240);
+    ok(color_match(color, 0x00000080, 1), "Got unexpected color 0x%08x.\n", color);
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to present, hr %#lx.\n", hr);
 
@@ -26314,7 +26346,7 @@ static void test_nrm_instruction(void)
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
         body_size = max(body_size, tests[i].body_size);
 
-    ps_code = heap_alloc(sizeof(ps_header) + body_size * sizeof(*ps_code) + sizeof(ps_footer));
+    ps_code = malloc(sizeof(ps_header) + body_size * sizeof(*ps_code) + sizeof(ps_footer));
     memcpy(ps_code, ps_header, sizeof(ps_header));
 
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ZENABLE, FALSE);
@@ -26360,7 +26392,7 @@ static void test_nrm_instruction(void)
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
 
-    heap_free(ps_code);
+    free(ps_code);
     IDirect3DVertexShader9_Release(vertex_shader);
     IDirect3DVertexDeclaration9_Release(vertex_declaration);
     refcount = IDirect3DDevice9_Release(device);
@@ -26460,10 +26492,10 @@ static void test_mismatched_sample_types(void)
     static IDirect3DVolumeTexture9 *volume;
     IDirect3DVertexShader9 *vertex_shader;
     static IDirect3DTexture9 *tex_2d;
+    unsigned int colour, i, r, g, b;
     D3DLOCKED_RECT locked_rect;
     D3DLOCKED_BOX locked_box;
     IDirect3DDevice9 *device;
-    unsigned int colour, i;
     IDirect3D9 *d3d;
     ULONG refcount;
     D3DCAPS9 caps;
@@ -26532,21 +26564,23 @@ static void test_mismatched_sample_types(void)
 
     static DWORD ps_code[ARRAY_SIZE(ps_header) + TEST_MISMATCHED_SAMPLE_BODY_WORDS + ARRAY_SIZE(ps_footer)];
 
+#define SAMPLE_ZERO 0x1
+#define RANDOM_W    0x2
     static const struct
     {
         const char *name;
         IDirect3DBaseTexture9 **texture;
         IDirect3DPixelShader9 **pixel_shader;
         unsigned int expected_colour;
-        unsigned int expected_broken;
-        unsigned int expected_broken2;
+        unsigned int broken;
     }
     tests[] =
     {
         {"2d_2d", (IDirect3DBaseTexture9 **)&tex_2d, &ps_2d, 0x00707070},
         {"3d_3d", (IDirect3DBaseTexture9 **)&volume, &ps_3d, 0x00303030},
-        {"2d_3d", (IDirect3DBaseTexture9 **)&tex_2d, &ps_3d, 0x00707070, 0x00b2cce5},
-        {"3d_2d", (IDirect3DBaseTexture9 **)&volume, &ps_2d, 0x00303030, 0x00b2cce5, 0x00202020},
+        /* Star Wars: The Old Republic uses mismatched samplers for rendering water. */
+        {"2d_3d", (IDirect3DBaseTexture9 **)&tex_2d, &ps_3d, 0x00707070, SAMPLE_ZERO},
+        {"3d_2d", (IDirect3DBaseTexture9 **)&volume, &ps_2d, 0x00303030, SAMPLE_ZERO | RANDOM_W},
     };
 
     window = create_window();
@@ -26643,10 +26677,17 @@ static void test_mismatched_sample_types(void)
 
         colour = getPixelColor(device, 320, 240);
 
+        /* If texld returns zero, the test writes vec4(0.7, 0.8, 0.9, 0.0) - 0x00b2cce5.
+         *
+         * When sampling the 3D texture with a 2D sampler, most drivers sample at the depth
+         * coordinate we provide (0.5), but some use 0.0, while my radeon GPU uses 0.89. */
+        r = (colour & 0x00ff0000) >> 16;
+        g = (colour & 0x0000ff00) >> 8;
+        b = (colour & 0x000000ff);
         todo_wine_if(!color_match(colour, tests[i].expected_colour, 1))
         ok(color_match(colour, tests[i].expected_colour, 1)
-                || broken(tests[i].expected_broken && color_match(colour, tests[i].expected_broken, 1))
-                || broken(tests[i].expected_broken2 && color_match(colour, tests[i].expected_broken2, 1)),
+                || broken((tests[i].broken & SAMPLE_ZERO) && color_match(colour, 0x00b2cce5, 1))
+                || broken((tests[i].broken & RANDOM_W) && r >= 0x1f && r <= 0x41 && r == g && r == b),
                 "test %s, expected 0x%08x, got 0x%08x.\n",
                 tests[i].name, tests[i].expected_colour, colour);
     }
@@ -26666,6 +26707,9 @@ done:
     ok(!refcount, "Device has %lu references left.\n", refcount);
     IDirect3D9_Release(d3d);
     DestroyWindow(window);
+
+#undef SAMPLE_ZERO
+#undef RANDOM_W
 }
 
 static void test_draw_mapped_buffer(void)
@@ -26676,7 +26720,6 @@ static void test_draw_mapped_buffer(void)
     unsigned int color, i;
     IDirect3D9 *d3d;
     ULONG refcount;
-    BOOL test_pass;
     HWND window;
     HRESULT hr;
     void *data;
@@ -26697,11 +26740,10 @@ static void test_draw_mapped_buffer(void)
     {
         D3DPOOL pool;
         DWORD usage;
-        BOOL ignore_wine_result;
     }
     tests[] =
     {
-        {D3DPOOL_DEFAULT, D3DUSAGE_DYNAMIC, TRUE},
+        {D3DPOOL_DEFAULT, D3DUSAGE_DYNAMIC},
         {D3DPOOL_MANAGED, 0},
         {D3DPOOL_SYSTEMMEM, 0},
     };
@@ -26781,11 +26823,7 @@ static void test_draw_mapped_buffer(void)
         ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
 
         color = getPixelColor(device, 160, 120);
-
-        test_pass = color_match(color, 0x00ff0000, 1);
-        todo_wine_if(tests[i].ignore_wine_result && !test_pass)
-        ok(test_pass, "Got unexpected color 0x%08x, test %u.\n", color, i);
-
+        ok(color_match(color, 0x00ff0000, 1), "Got unexpected color 0x%08x, test %u.\n", color, i);
         color = getPixelColor(device, 480, 360);
         ok(color_match(color, 0x000000ff, 1), "Got unexpected color 0x%08x, test %u.\n", color, i);
 
@@ -27316,14 +27354,9 @@ static void test_dynamic_map_synchronization(void)
     }
 
     hr = IDirect3DDevice9_CreateVertexBuffer(device, 200 * 4 * sizeof(struct dynamic_vb_vertex),
-            D3DUSAGE_DYNAMIC, D3DFVF_XYZ, D3DPOOL_DEFAULT, &buffer, NULL);
+            D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFVF_XYZ, D3DPOOL_DEFAULT, &buffer, NULL);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
 
-    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0f, 0);
-    ok(hr == D3D_OK, "Failed to clear, hr %#lx.\n", hr);
-
-    hr = IDirect3DDevice9_BeginScene(device);
-    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDirect3DDevice9_SetStreamSource(device, 0, buffer, 0, sizeof(struct dynamic_vb_vertex));
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
@@ -27331,6 +27364,12 @@ static void test_dynamic_map_synchronization(void)
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ZENABLE, FALSE);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0f, 0);
+    ok(hr == D3D_OK, "Failed to clear, hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice9_BeginScene(device);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
 
     for (y = 0; y < 200; ++y)
@@ -27369,6 +27408,52 @@ static void test_dynamic_map_synchronization(void)
 
     hr = IDirect3DDevice9_EndScene(device);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+    IDirect3DVertexBuffer9_Release(buffer);
+
+    /* Castlevania: Lords of Shadow 2 locks a vertex and index buffer and keeps
+     * both mapped for all of the draws in a frame. Test this by doing the same
+     * draws, but with the buffer mapped the whole time. */
+
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, 200 * 4 * sizeof(struct dynamic_vb_vertex),
+            D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFVF_XYZ, D3DPOOL_DEFAULT, &buffer, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDirect3DDevice9_SetStreamSource(device, 0, buffer, 0, sizeof(struct dynamic_vb_vertex));
+    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0f, 0);
+    ok(hr == D3D_OK, "Failed to clear, hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+    for (y = 0; y < 200; ++y)
+    {
+        hr = IDirect3DVertexBuffer9_Lock(buffer, 0, 0, &data, D3DLOCK_DISCARD);
+        ok(hr == D3D_OK, "Failed to map buffer, hr %#lx.\n", hr);
+
+        fill_dynamic_vb_quad(data, 0, y);
+        hr = IDirect3DDevice9_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, 0, 2);
+        ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+        for (x = 1; x < 200; ++x)
+        {
+            fill_dynamic_vb_quad((struct dynamic_vb_vertex *)data + 4 * x, x, y);
+            hr = IDirect3DDevice9_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, 4 * x, 2);
+            ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+        }
+
+        hr = IDirect3DVertexBuffer9_Unlock(buffer);
+        ok(hr == D3D_OK, "Failed to map buffer, hr %#lx.\n", hr);
+    }
+
+    hr = IDirect3DDevice9_EndScene(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &rt);
+    ok(hr == S_OK, "Failed to get render target, hr %#lx.\n", hr);
+    check_rt_color(rt, 0x0000ff00);
+    IDirect3DSurface9_Release(rt);
 
     IDirect3DVertexBuffer9_Release(buffer);
     refcount = IDirect3DDevice9_Release(device);
@@ -27950,11 +28035,11 @@ static void test_managed_generate_mipmap(void)
     release_test_context(&context);
 }
 
-/* Some applications lock a mipmapped texture at level 0, write every level at
- * once, and expect it to be uploaded. */
+/* Some applications (Vivisector, Cryostasis) lock a mipmapped managed texture
+ * at level 0, write every level at once, and expect it to be uploaded. */
 static void test_mipmap_upload(void)
 {
-    unsigned int i, j, width, level_count;
+    unsigned int j, width, level_count;
     struct d3d9_test_context context;
     IDirect3DTexture9 *texture;
     D3DLOCKED_RECT locked_rect;
@@ -27962,63 +28047,50 @@ static void test_mipmap_upload(void)
     unsigned int *mem;
     HRESULT hr;
 
-    static const D3DPOOL pools[] =
-    {
-        D3DPOOL_MANAGED,
-        D3DPOOL_SYSTEMMEM,
-    };
-
     if (!init_test_context(&context))
         return;
     device = context.device;
 
-    for (i = 0; i < ARRAY_SIZE(pools); ++i)
+    hr = IDirect3DDevice9_CreateTexture(device, 32, 32, 0, 0,
+            D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    level_count = IDirect3DBaseTexture9_GetLevelCount(texture);
+
+    hr = IDirect3DTexture9_LockRect(texture, 0, &locked_rect, NULL, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    mem = locked_rect.pBits;
+
+    for (j = 0; j < level_count; ++j)
     {
-        winetest_push_context("pool %#x", pools[i]);
+        width = 32 >> j;
+        memset(mem, 0x11 * (j + 1), width * width * 4);
+        mem += width * width;
+    }
 
-        hr = IDirect3DDevice9_CreateTexture(device, 32, 32, 0, 0,
-                D3DFMT_A8R8G8B8, pools[i], &texture, NULL);
+    hr = IDirect3DTexture9_UnlockRect(texture, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    for (j = 0; j < level_count; ++j)
+    {
+        winetest_push_context("level %u", j);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-        level_count = IDirect3DBaseTexture9_GetLevelCount(texture);
-
-        hr = IDirect3DTexture9_LockRect(texture, 0, &locked_rect, NULL, 0);
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, j);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-        mem = locked_rect.pBits;
-
-        for (j = 0; j < level_count; ++j)
-        {
-            width = 32 >> j;
-            memset(mem, 0x11 * (j + 1), width * width * 4);
-            mem += width * width;
-        }
-
-        hr = IDirect3DTexture9_UnlockRect(texture, 0);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        for (j = 0; j < level_count; ++j)
-        {
-            winetest_push_context("level %u", j);
-
-            hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
-            ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-            hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
-            ok(hr == S_OK, "Got hr %#lx.\n", hr);
-            hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, j);
-            ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-            draw_textured_quad(&context, texture);
-            check_rt_color(context.backbuffer, 0x00111111 * (j + 1));
-
-            winetest_pop_context();
-        }
-
-        IDirect3DTexture9_Release(texture);
+        draw_textured_quad(&context, texture);
+        check_rt_color(context.backbuffer, 0x00111111 * (j + 1));
 
         winetest_pop_context();
     }
+
+    IDirect3DTexture9_Release(texture);
     release_test_context(&context);
 }
 
@@ -28044,8 +28116,8 @@ START_TEST(visual)
     trace("Device name string: \"%s\"\n", identifier.DeviceName);
     ok(identifier.DeviceName[0], "Empty device name.\n");
     trace("Driver version %d.%d.%d.%d\n",
-            HIWORD(U(identifier.DriverVersion).HighPart), LOWORD(U(identifier.DriverVersion).HighPart),
-            HIWORD(U(identifier.DriverVersion).LowPart), LOWORD(U(identifier.DriverVersion).LowPart));
+            HIWORD(identifier.DriverVersion.HighPart), LOWORD(identifier.DriverVersion.HighPart),
+            HIWORD(identifier.DriverVersion.LowPart), LOWORD(identifier.DriverVersion.LowPart));
 
     IDirect3D9_Release(d3d);
 

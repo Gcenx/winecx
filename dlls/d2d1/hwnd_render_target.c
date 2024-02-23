@@ -652,10 +652,32 @@ static BOOL STDMETHODCALLTYPE d2d_hwnd_render_target_IsSupported(ID2D1HwndRender
         const D2D1_RENDER_TARGET_PROPERTIES *desc)
 {
     struct d2d_hwnd_render_target *render_target = impl_from_ID2D1HwndRenderTarget(iface);
+    const D2D1_RENDER_TARGET_PROPERTIES *target_desc = &render_target->desc;
+    D2D1_PIXEL_FORMAT pixel_format;
 
     TRACE("iface %p, desc %p.\n", iface, desc);
 
-    return ID2D1RenderTarget_IsSupported(render_target->dxgi_target, desc);
+    if (desc->type != D2D1_RENDER_TARGET_TYPE_DEFAULT
+            && target_desc->type != desc->type)
+    {
+        return FALSE;
+    }
+
+    pixel_format = ID2D1RenderTarget_GetPixelFormat(render_target->dxgi_target);
+
+    if (desc->pixelFormat.format != DXGI_FORMAT_UNKNOWN
+            && pixel_format.format != desc->pixelFormat.format)
+    {
+        return FALSE;
+    }
+
+    if (desc->pixelFormat.alphaMode != D2D1_ALPHA_MODE_UNKNOWN
+            && pixel_format.alphaMode != desc->pixelFormat.alphaMode)
+    {
+        return FALSE;
+    }
+
+    return (target_desc->usage & desc->usage) == desc->usage;
 }
 
 static D2D1_WINDOW_STATE STDMETHODCALLTYPE d2d_hwnd_render_target_CheckWindowState(ID2D1HwndRenderTarget *iface)
@@ -840,6 +862,18 @@ HRESULT d2d_hwnd_render_target_init(struct d2d_hwnd_render_target *render_target
     if (dxgi_rt_desc.pixelFormat.alphaMode == D2D1_ALPHA_MODE_UNKNOWN)
         dxgi_rt_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
 
+    if (dxgi_rt_desc.pixelFormat.alphaMode == D2D1_ALPHA_MODE_STRAIGHT)
+    {
+        IDXGIFactory_Release(dxgi_factory);
+        WARN("Alpha mode %u is not supported.\n", dxgi_rt_desc.pixelFormat.alphaMode);
+        return D2DERR_UNSUPPORTED_PIXEL_FORMAT;
+    }
+
+    render_target->desc = dxgi_rt_desc;
+    /* FIXME: should be resolved to either HW or SW type. */
+    if (render_target->desc.type == D2D1_RENDER_TARGET_TYPE_DEFAULT)
+        render_target->desc.type = D2D1_RENDER_TARGET_TYPE_HARDWARE;
+
     swapchain_desc.BufferDesc.Width = hwnd_rt_desc->pixelSize.width;
     swapchain_desc.BufferDesc.Height = hwnd_rt_desc->pixelSize.height;
     swapchain_desc.BufferDesc.RefreshRate.Numerator = 60;
@@ -855,7 +889,9 @@ HRESULT d2d_hwnd_render_target_init(struct d2d_hwnd_render_target *render_target
     swapchain_desc.Windowed = TRUE;
     swapchain_desc.SwapEffect = hwnd_rt_desc->presentOptions & D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS ?
         DXGI_SWAP_EFFECT_SEQUENTIAL : DXGI_SWAP_EFFECT_DISCARD;
-    swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE;
+    swapchain_desc.Flags = 0;
+    if (desc->usage & D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE)
+        swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE;
 
     hr = IDXGIFactory_CreateSwapChain(dxgi_factory, (IUnknown *)d3d_device, &swapchain_desc, &render_target->swapchain);
     IDXGIFactory_Release(dxgi_factory);
@@ -892,7 +928,7 @@ HRESULT d2d_hwnd_render_target_init(struct d2d_hwnd_render_target *render_target
         return hr;
     }
 
-    hr = d2d_d3d_create_render_target(device, dxgi_surface,
+    hr = d2d_d3d_create_render_target(unsafe_impl_from_ID2D1Device((ID2D1Device1 *)device), dxgi_surface,
             (IUnknown *)&render_target->ID2D1HwndRenderTarget_iface, &d2d_hwnd_render_target_ops,
             &dxgi_rt_desc, (void **)&render_target->dxgi_inner);
     IDXGISurface_Release(dxgi_surface);

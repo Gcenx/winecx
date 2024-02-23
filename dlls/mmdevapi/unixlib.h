@@ -53,7 +53,7 @@ struct get_endpoint_ids_params
 
 struct create_stream_params
 {
-    const char *name;
+    const WCHAR *name;
     const char *device;
     EDataFlow flow;
     AUDCLNT_SHAREMODE share;
@@ -207,7 +207,6 @@ struct set_volumes_params
     float master_volume;
     const float *volumes;
     const float *session_volumes;
-    int channel;
 };
 
 struct set_event_handle_params
@@ -219,7 +218,7 @@ struct set_event_handle_params
 
 struct test_connect_params
 {
-    const char *name;
+    const WCHAR *name;
     enum driver_priority priority;
 };
 
@@ -333,4 +332,5 @@ enum unix_funcs
     midi_in_message,
     midi_notify_wait,
     aux_message,
+    funcs_count
 };

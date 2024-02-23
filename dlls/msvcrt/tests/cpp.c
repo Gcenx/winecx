@@ -891,33 +891,36 @@ static void test_rtti(void)
       DEFINE_RTTI_REF(void, object_locator);
   } *obj_locator;
 
+  struct _rtti_base_descriptor
+  {
+    DEFINE_RTTI_REF(type_info, type_descriptor);
+    int num_base_classes;
+    struct {
+      int this_offset;
+      int vbase_descr;
+      int vbase_offset;
+    } this_ptr_offsets;
+    unsigned int attributes;
+  };
+
+  struct _rtti_base_array {
+    DEFINE_RTTI_REF(struct _rtti_base_descriptor, bases[4]);
+  };
+
+  struct _rtti_object_hierarchy {
+    unsigned int signature;
+    unsigned int attributes;
+    int array_len;
+    DEFINE_RTTI_REF(struct _rtti_base_array, base_classes);
+  };
+
   struct rtti_data
   {
     type_info type_info[4];
 
-    struct _rtti_base_descriptor
-    {
-      DEFINE_RTTI_REF(type_info, type_descriptor);
-      int num_base_classes;
-      struct {
-        int this_offset;
-        int vbase_descr;
-        int vbase_offset;
-      } this_ptr_offsets;
-      unsigned int attributes;
-    } base_descriptor[4];
-
-    struct _rtti_base_array {
-      DEFINE_RTTI_REF(struct _rtti_base_descriptor, bases[4]);
-    } base_array;
-
-    struct _rtti_object_hierarchy {
-      unsigned int signature;
-      unsigned int attributes;
-      int array_len;
-      DEFINE_RTTI_REF(struct _rtti_base_array, base_classes);
-    } object_hierarchy;
-
+    struct _rtti_base_descriptor base_descriptor[4];
+    struct _rtti_base_array base_array;
+    struct _rtti_object_hierarchy  object_hierarchy;
     struct _object_locator object_locator;
   } simple_class_rtti = {
     { {NULL, NULL, "simple_class"} },
@@ -1317,6 +1320,10 @@ static void test_demangle(void)
 /* 147 */ {"?ptititi4@@3PETtititi@@IET1@", "unsigned int const volatile tititi::* __ptr64 const volatile __ptr64 ptititi4"},
 /* 148 */ {"?ptititi4v@@3RETtititi@@IET1@", "unsigned int const volatile tititi::* __ptr64 const volatile __ptr64 ptititi4v"},
 /* 149 */ {"?meth@AAA@@QFCEXXZ", "public: void __thiscall AAA::meth(void)volatile __unaligned "},
+/* 150 */ {"?RegisterModuleUninitializer@<CrtImplementationDetails>@@YAXP$AAVEventHandler@System@@@Z",
+           "void __cdecl <CrtImplementationDetails>::RegisterModuleUninitializer(class System::EventHandler ^)"},
+/* 151 */ {"?RegisterModuleUninitializer@<CrtImplementationDetails>@@YAXBE$AAVEventHandler@System@@@Z",
+           "void __cdecl <CrtImplementationDetails>::RegisterModuleUninitializer(class System::EventHandler % __ptr64 volatile)"},
     };
     int i, num_test = ARRAY_SIZE(test);
     char* name;

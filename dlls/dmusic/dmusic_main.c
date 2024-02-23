@@ -35,15 +35,12 @@
 #include "dmusici.h"
 
 #include "dmusic_private.h"
-#include "dmobject.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmusic);
 
-LONG DMUSIC_refCount = 0;
-
 typedef struct {
         IClassFactory IClassFactory_iface;
-        HRESULT (*fnCreateInstance)(REFIID riid, void **ppv, IUnknown *pUnkOuter);
+        HRESULT (*create_instance)(IUnknown **ret_iface);
 } IClassFactoryImpl;
 
 /******************************************************************
@@ -76,37 +73,36 @@ static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID r
 
 static ULONG WINAPI ClassFactory_AddRef(IClassFactory *iface)
 {
-        DMUSIC_LockModule();
-
         return 2; /* non-heap based object */
 }
 
 static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
 {
-        DMUSIC_UnlockModule();
-
         return 1; /* non-heap based object */
 }
 
-static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown *pUnkOuter,
-        REFIID riid, void **ppv)
+static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown *unk_outer, REFIID riid, void **ret_iface)
 {
-        IClassFactoryImpl *This = impl_from_IClassFactory(iface);
+    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
+    IUnknown *object;
+    HRESULT hr;
 
-        TRACE ("(%p, %s, %p)\n", pUnkOuter, debugstr_dmguid(riid), ppv);
+    TRACE("(%p, %s, %p)\n", unk_outer, debugstr_dmguid(riid), ret_iface);
 
-        return This->fnCreateInstance(riid, ppv, pUnkOuter);
+    *ret_iface = NULL;
+    if (unk_outer) return CLASS_E_NOAGGREGATION;
+    if (SUCCEEDED(hr = This->create_instance(&object)))
+    {
+        hr = IUnknown_QueryInterface(object, riid, ret_iface);
+        IUnknown_Release(object);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL dolock)
 {
         TRACE("(%d)\n", dolock);
-
-        if (dolock)
-                DMUSIC_LockModule();
-        else
-                DMUSIC_UnlockModule();
-
         return S_OK;
 }
 
@@ -118,19 +114,9 @@ static const IClassFactoryVtbl classfactory_vtbl = {
         ClassFactory_LockServer
 };
 
-static IClassFactoryImpl DirectMusic_CF = {{&classfactory_vtbl}, DMUSIC_CreateDirectMusicImpl};
-static IClassFactoryImpl Collection_CF = {{&classfactory_vtbl},
-                                          DMUSIC_CreateDirectMusicCollectionImpl};
+static IClassFactoryImpl DirectMusic_CF = {{&classfactory_vtbl}, music_create};
+static IClassFactoryImpl Collection_CF = {{&classfactory_vtbl}, collection_create};
 
-/******************************************************************
- *		DllCanUnloadNow (DMUSIC.@)
- *
- *
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-	return DMUSIC_refCount != 0 ? S_FALSE : S_OK;
-}
 
 
 /******************************************************************
@@ -177,11 +163,6 @@ void Patch2MIDILOCALE (DWORD dwPatch, LPMIDILOCALE pLocale) {
 	pLocale->ulInstrument = (dwPatch & 0x7F); /* get PC value */
 	pLocale->ulBank = ((dwPatch & 0x007F7F00) >> 8); /* get MIDI bank location */
 	pLocale->ulBank |= (dwPatch & F_INSTRUMENT_DRUMS); /* get drum bit */
-}
-
-/* check whether the given DWORD is even (return 0) or odd (return 1) */
-int even_or_odd (DWORD number) {
-	return (number & 0x1); /* basically, check if bit 0 is set ;) */
 }
 
 /* generic flag-dumping function */

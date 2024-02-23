@@ -45,6 +45,7 @@
 
 #ifdef HAVE_NETIPX_IPX_H
 # include <netipx/ipx.h>
+# define HAS_IPX
 #elif defined(HAVE_LINUX_IPX_H)
 # ifdef HAVE_ASM_TYPES_H
 #  include <asm/types.h>
@@ -53,9 +54,9 @@
 #  include <linux/types.h>
 # endif
 # include <linux/ipx.h>
-#endif
-#if defined(SOL_IPX) || defined(SO_DEFAULT_HEADERS)
-# define HAS_IPX
+# ifdef SOL_IPX
+#  define HAS_IPX
+# endif
 #endif
 
 #ifdef HAVE_LINUX_IRDA_H
@@ -168,7 +169,7 @@ static NTSTATUS sock_errno_to_status( int err )
         case EWOULDBLOCK:       return STATUS_DEVICE_NOT_READY;
         case EALREADY:          return STATUS_NETWORK_BUSY;
         case ENOTSOCK:          return STATUS_OBJECT_TYPE_MISMATCH;
-        case EDESTADDRREQ:      return STATUS_INVALID_PARAMETER;
+        case EDESTADDRREQ:      return STATUS_INVALID_CONNECTION;
         case EMSGSIZE:          return STATUS_BUFFER_OVERFLOW;
         case EPROTONOSUPPORT:
         case ESOCKTNOSUPPORT:
@@ -981,10 +982,15 @@ static NTSTATUS try_send( int fd, struct async_send_ioctl *async )
 {
     union unix_sockaddr unix_addr;
     struct msghdr hdr;
+    int attempt = 0;
+    int sock_type;
+    socklen_t len = sizeof(sock_type);
     ssize_t ret;
 
+    getsockopt(fd, SOL_SOCKET, SO_TYPE, &sock_type, &len);
+
     memset( &hdr, 0, sizeof(hdr) );
-    if (async->addr)
+    if (async->addr && sock_type != SOCK_STREAM)
     {
         hdr.msg_name = &unix_addr;
         hdr.msg_namelen = sockaddr_to_unix( async->addr, async->addr_len, &unix_addr );
@@ -1025,6 +1031,17 @@ static NTSTATUS try_send( int fd, struct async_send_ioctl *async )
         else if (errno != EINTR)
         {
             if (errno != EWOULDBLOCK) WARN( "sendmsg: %s\n", strerror( errno ) );
+
+            /* ECONNREFUSED may be returned if this is connected datagram socket and the system received
+             * ICMP "destination port unreachable" message from the peer. That is ignored
+             * on Windows. The first sendmsg() will clear the error in this case and the next
+             * call should succeed. */
+            if (!attempt && errno == ECONNREFUSED)
+            {
+                ++attempt;
+                continue;
+            }
+
             return sock_errno_to_status( errno );
         }
     }
@@ -1522,10 +1539,32 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         }
 
         case IOCTL_AFD_GET_EVENTS:
+        {
+            struct afd_get_events_params *params = out_buffer;
+            HANDLE reset_event = in_buffer; /* sic */
+
+            TRACE( "reset_event %p\n", reset_event );
             if (in_size) FIXME( "unexpected input size %u\n", in_size );
 
-            status = STATUS_BAD_DEVICE_TYPE;
-            break;
+            if (out_size < sizeof(*params))
+            {
+                status = STATUS_INVALID_PARAMETER;
+                break;
+            }
+
+            SERVER_START_REQ( socket_get_events )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                req->event = wine_server_obj_handle( reset_event );
+                wine_server_set_reply( req, params->status, sizeof(params->status) );
+                if (!(status = wine_server_call( req )))
+                    params->flags = reply->flags;
+            }
+            SERVER_END_REQ;
+
+            complete_async( handle, event, apc, apc_user, io, status, 0 );
+            return status;
+        }
 
         case IOCTL_AFD_POLL:
             status = STATUS_BAD_DEVICE_TYPE;
@@ -1885,30 +1924,10 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         }
 
         case IOCTL_AFD_WINE_GETPEERNAME:
-        {
-            union unix_sockaddr unix_addr;
-            socklen_t unix_len = sizeof(unix_addr);
-            int len;
+            if (in_size) FIXME( "unexpected input size %u\n", in_size );
 
-            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )))
-                return status;
-
-            if (getpeername( fd, &unix_addr.addr, &unix_len ) < 0)
-            {
-                status = sock_errno_to_status( errno );
-                break;
-            }
-
-            len = sockaddr_from_unix( &unix_addr, out_buffer, out_size );
-            if (out_size < len)
-            {
-                status = STATUS_BUFFER_TOO_SMALL;
-                break;
-            }
-            information = len;
-            status = STATUS_SUCCESS;
+            status = STATUS_BAD_DEVICE_TYPE;
             break;
-        }
 
         case IOCTL_AFD_WINE_GET_SO_BROADCAST:
             return do_getsockopt( handle, io, SOL_SOCKET, SO_BROADCAST, out_buffer, out_size );
@@ -1964,11 +1983,15 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         case IOCTL_AFD_WINE_SET_IP_ADD_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_ADD_MEMBERSHIP, in_buffer, in_size );
 
+#ifdef IP_ADD_SOURCE_MEMBERSHIP
         case IOCTL_AFD_WINE_SET_IP_ADD_SOURCE_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_ADD_SOURCE_MEMBERSHIP, in_buffer, in_size );
+#endif
 
+#ifdef IP_BLOCK_SOURCE
         case IOCTL_AFD_WINE_SET_IP_BLOCK_SOURCE:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_BLOCK_SOURCE, in_buffer, in_size );
+#endif
 
         case IOCTL_AFD_WINE_GET_IP_DONTFRAGMENT:
         {
@@ -2032,8 +2055,10 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         case IOCTL_AFD_WINE_SET_IP_DROP_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_DROP_MEMBERSHIP, in_buffer, in_size );
 
+#ifdef IP_ADD_SOURCE_MEMBERSHIP
         case IOCTL_AFD_WINE_SET_IP_DROP_SOURCE_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_DROP_SOURCE_MEMBERSHIP, in_buffer, in_size );
+#endif
 
 #ifdef IP_HDRINCL
         case IOCTL_AFD_WINE_GET_IP_HDRINCL:
@@ -2167,8 +2192,10 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         case IOCTL_AFD_WINE_SET_IP_TTL:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_TTL, in_buffer, in_size );
 
+#ifdef IP_UNBLOCK_SOURCE
         case IOCTL_AFD_WINE_SET_IP_UNBLOCK_SOURCE:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_UNBLOCK_SOURCE, in_buffer, in_size );
+#endif
 
 #ifdef IP_UNICAST_IF
         case IOCTL_AFD_WINE_GET_IP_UNICAST_IF:
@@ -2375,6 +2402,7 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             break;
         }
 
+#ifdef HAS_IPX
 #ifdef SOL_IPX
         case IOCTL_AFD_WINE_GET_IPX_PTYPE:
             return do_getsockopt( handle, io, SOL_IPX, IPX_TYPE, out_buffer, out_size );
@@ -2412,6 +2440,7 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             value.ipx_pt = *(DWORD *)in_buffer;
             return do_setsockopt( handle, io, 0, SO_DEFAULT_HEADERS, &value, sizeof(value) );
         }
+#endif
 #endif
 
 #ifdef HAS_IRDA

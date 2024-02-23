@@ -21,9 +21,6 @@
 #include <stdio.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include <windows.h>
 #include "wine/test.h"
 
@@ -166,10 +163,10 @@ static HRESULT WINAPI TestLockBytes_SetSize(ILockBytes *iface,
     if (This->buffer_size < cb.QuadPart)
     {
         ULONG new_buffer_size = max(This->buffer_size * 2, cb.QuadPart);
-        BYTE* new_buffer = HeapAlloc(GetProcessHeap(), 0, new_buffer_size);
+        BYTE* new_buffer = malloc(new_buffer_size);
         if (!new_buffer) return E_OUTOFMEMORY;
         memcpy(new_buffer, This->contents, This->size);
-        HeapFree(GetProcessHeap(), 0, This->contents);
+        free(This->contents);
         This->contents = new_buffer;
     }
 
@@ -235,7 +232,7 @@ static const ILockBytesVtbl TestLockBytes_Vtbl = {
 
 static void CreateTestLockBytes(TestLockBytes **This)
 {
-    *This = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(**This));
+    *This = calloc(1, sizeof(**This));
 
     if (*This)
     {
@@ -243,7 +240,7 @@ static void CreateTestLockBytes(TestLockBytes **This)
         (*This)->ref = 1;
         (*This)->size = 0;
         (*This)->buffer_size = 1024;
-        (*This)->contents = HeapAlloc(GetProcessHeap(), 0, (*This)->buffer_size);
+        (*This)->contents = malloc((*This)->buffer_size);
     }
 }
 
@@ -251,8 +248,8 @@ static void DeleteTestLockBytes(TestLockBytes *This)
 {
     ok(This->ILockBytes_iface.lpVtbl == &TestLockBytes_Vtbl, "test lock bytes %p deleted with incorrect vtable\n", This);
     ok(This->ref == 1, "test lock bytes %p deleted with %li references instead of 1\n", This, This->ref);
-    HeapFree(GetProcessHeap(), 0, This->contents);
-    HeapFree(GetProcessHeap(), 0, This);
+    free(This->contents);
+    free(This);
 }
 
 static void test_hglobal_storage_stat(void)
@@ -1076,8 +1073,8 @@ static void test_storage_refcount(void)
         r = IStorage_Stat( stg, &statstg, STATFLAG_NONAME );
         ok(r == S_OK, "Stat should have succeeded instead of returning 0x%08lx\n", r);
         ok(statstg.type == STGTY_STORAGE, "Statstg type should have been STGTY_STORAGE instead of %ld\n", statstg.type);
-        ok(U(statstg.cbSize).LowPart == 0, "Statstg cbSize.LowPart should have been 0 instead of %ld\n", U(statstg.cbSize).LowPart);
-        ok(U(statstg.cbSize).HighPart == 0, "Statstg cbSize.HighPart should have been 0 instead of %ld\n", U(statstg.cbSize).HighPart);
+        ok(statstg.cbSize.LowPart == 0, "Statstg cbSize.LowPart should have been 0 instead of %ld\n", statstg.cbSize.LowPart);
+        ok(statstg.cbSize.HighPart == 0, "Statstg cbSize.HighPart should have been 0 instead of %ld\n", statstg.cbSize.HighPart);
         ok(statstg.grfMode == (STGM_TRANSACTED|STGM_SHARE_DENY_WRITE|STGM_READWRITE),
             "Statstg grfMode should have been 0x10022 instead of 0x%lx\n", statstg.grfMode);
         ok(statstg.grfLocksSupported == 0, "Statstg grfLocksSupported should have been 0 instead of %ld\n", statstg.grfLocksSupported);
@@ -1093,8 +1090,8 @@ static void test_storage_refcount(void)
         ok(!memcmp(statstg.pwcsName, stgname, sizeof(stgname)),
             "Statstg pwcsName should have been the name the storage was created with\n");
         ok(statstg.type == STGTY_STORAGE, "Statstg type should have been STGTY_STORAGE instead of %ld\n", statstg.type);
-        ok(U(statstg.cbSize).LowPart == 0, "Statstg cbSize.LowPart should have been 0 instead of %ld\n", U(statstg.cbSize).LowPart);
-        ok(U(statstg.cbSize).HighPart == 0, "Statstg cbSize.HighPart should have been 0 instead of %ld\n", U(statstg.cbSize).HighPart);
+        ok(statstg.cbSize.LowPart == 0, "Statstg cbSize.LowPart should have been 0 instead of %ld\n", statstg.cbSize.LowPart);
+        ok(statstg.cbSize.HighPart == 0, "Statstg cbSize.HighPart should have been 0 instead of %ld\n", statstg.cbSize.HighPart);
         ok(statstg.grfMode == STGM_SHARE_EXCLUSIVE,
             "Statstg grfMode should have been STGM_SHARE_EXCLUSIVE instead of 0x%lx\n", statstg.grfMode);
         ok(statstg.grfLocksSupported == 0, "Statstg grfLocksSupported should have been 0 instead of %ld\n", statstg.grfLocksSupported);
@@ -1135,8 +1132,8 @@ static void test_storage_refcount(void)
         r = IStorage_Stat( stg, &statstg, STATFLAG_NONAME );
         ok(r == S_OK, "Stat should have succeeded instead of returning 0x%08lx\n", r);
         ok(statstg.type == STGTY_STORAGE, "Statstg type should have been STGTY_STORAGE instead of %ld\n", statstg.type);
-        ok(U(statstg.cbSize).LowPart == 0, "Statstg cbSize.LowPart should have been 0 instead of %ld\n", U(statstg.cbSize).LowPart);
-        ok(U(statstg.cbSize).HighPart == 0, "Statstg cbSize.HighPart should have been 0 instead of %ld\n", U(statstg.cbSize).HighPart);
+        ok(statstg.cbSize.LowPart == 0, "Statstg cbSize.LowPart should have been 0 instead of %ld\n", statstg.cbSize.LowPart);
+        ok(statstg.cbSize.HighPart == 0, "Statstg cbSize.HighPart should have been 0 instead of %ld\n", statstg.cbSize.HighPart);
         ok(statstg.grfMode == (STGM_TRANSACTED|STGM_SHARE_DENY_WRITE|STGM_READWRITE),
             "Statstg grfMode should have been 0x10022 instead of 0x%lx\n", statstg.grfMode);
         ok(statstg.grfLocksSupported == 0, "Statstg grfLocksSupported should have been 0 instead of %ld\n", statstg.grfLocksSupported);
@@ -2336,26 +2333,26 @@ static void test_simple(void)
     pos.QuadPart = 0;
     r = IStream_Seek(stm, pos, STREAM_SEEK_CUR, &upos);
     ok(r == S_OK, "got %08lx\n", r);
-    ok(upos.QuadPart == 3, "got %ld\n", upos.u.LowPart);
+    ok(upos.QuadPart == 3, "got %ld\n", upos.LowPart);
 
     r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
     ok(r == S_OK ||
        broken(r == STG_E_INVALIDFUNCTION), /* NT4 and below */
        "got %08lx\n", r);
     if (r == S_OK)
-        ok(stat.cbSize.QuadPart == 3, "got %ld\n", stat.cbSize.u.LowPart);
+        ok(stat.cbSize.QuadPart == 3, "got %ld\n", stat.cbSize.LowPart);
 
     pos.QuadPart = 1;
     r = IStream_Seek(stm, pos, STREAM_SEEK_SET, &upos);
     ok(r == S_OK, "got %08lx\n", r);
-    ok(upos.QuadPart == 1, "got %ld\n", upos.u.LowPart);
+    ok(upos.QuadPart == 1, "got %ld\n", upos.LowPart);
 
     r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
     ok(r == S_OK ||
        broken(r == STG_E_INVALIDFUNCTION), /* NT4 and below */
        "got %08lx\n", r);
     if (r == S_OK)
-        ok(stat.cbSize.QuadPart == 1, "got %ld\n", stat.cbSize.u.LowPart);
+        ok(stat.cbSize.QuadPart == 1, "got %ld\n", stat.cbSize.LowPart);
 
     IStream_Release(stm);
 
@@ -2393,7 +2390,7 @@ static void test_simple(void)
 
     r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
     ok(r == S_OK, "got %08lx\n", r);
-    ok(stat.cbSize.QuadPart == 6000, "got %ld\n", stat.cbSize.u.LowPart);
+    ok(stat.cbSize.QuadPart == 6000, "got %ld\n", stat.cbSize.LowPart);
 
     IStream_Release(stm);
 
@@ -2402,7 +2399,7 @@ static void test_simple(void)
 
     r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
     ok(r == S_OK, "got %08lx\n", r);
-    ok(stat.cbSize.QuadPart == 4096, "got %ld\n", stat.cbSize.u.LowPart);
+    ok(stat.cbSize.QuadPart == 4096, "got %ld\n", stat.cbSize.LowPart);
 
     IStream_Release(stm);
 
@@ -3269,7 +3266,7 @@ static void test_hglobal_storage_creation(void)
 
     r = ILockBytes_Stat(ilb, &stat, STATFLAG_NONAME);
     ok(r == S_OK, "ILockBytes_Stat failed, hr=%lx\n", r);
-    ok(stat.cbSize.u.LowPart < 2512, "expected truncated size, got %ld\n", stat.cbSize.u.LowPart);
+    ok(stat.cbSize.LowPart < 2512, "expected truncated size, got %ld\n", stat.cbSize.LowPart);
 
     ILockBytes_Release(ilb);
 }
@@ -3524,10 +3521,10 @@ static void test_locking(void)
             hfile = CreateFileW(filename, open_mode, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             ok(hfile != INVALID_HANDLE_VALUE, "couldn't open file with mode %lx\n", current->stg_mode);
 
-            ol.u.s.OffsetHigh = 0;
+            ol.OffsetHigh = 0;
             ol.hEvent = NULL;
 
-            for (ol.u.s.Offset = 0x7ffffe00; ol.u.s.Offset != 0x80000000; ol.u.s.Offset++)
+            for (ol.Offset = 0x7ffffe00; ol.Offset != 0x80000000; ol.Offset++)
             {
                 if (LockFileEx(hfile, LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &ol))
                     locked = FALSE;
@@ -3539,7 +3536,7 @@ static void test_locking(void)
 
                 UnlockFileEx(hfile, 0, 1, 0, &ol);
 
-                if ((ol.u.s.Offset&0x1ff) == *next_lock)
+                if ((ol.Offset&0x1ff) == *next_lock)
                 {
                     expect_locked = TRUE;
                     next_lock++;
@@ -3549,12 +3546,12 @@ static void test_locking(void)
 
                 if (!current->todo || locked == expect_locked)
                     ok(locked == expect_locked, "byte %lx of file with mode %lx is %slocked but should %sbe\n",
-                       ol.u.s.Offset, current->stg_mode, locked?"":"not ", expect_locked?"":"not ");
+                       ol.Offset, current->stg_mode, locked?"":"not ", expect_locked?"":"not ");
                 else
                 {
                     any_failure = TRUE;
                     todo_wine ok(locked == expect_locked, "byte %lx of file with mode %lx is %slocked but should %sbe\n",
-                              ol.u.s.Offset, current->stg_mode, locked?"":"not ", expect_locked?"":"not ");
+                              ol.Offset, current->stg_mode, locked?"":"not ", expect_locked?"":"not ");
                 }
             }
 
@@ -3573,17 +3570,17 @@ static void test_locking(void)
             hfile = CreateFileW(filename, open_mode, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             ok(hfile != INVALID_HANDLE_VALUE, "couldn't open file with mode %lx\n", current->stg_mode);
 
-            ol.u.s.OffsetHigh = 0;
+            ol.OffsetHigh = 0;
             ol.hEvent = NULL;
 
-            for (ol.u.s.Offset = 0x7ffffe00; ol.u.s.Offset != 0x80000000; ol.u.s.Offset++)
+            for (ol.Offset = 0x7ffffe00; ol.Offset != 0x80000000; ol.Offset++)
             {
-                if (ol.u.s.Offset == 0x7fffff92 ||
-                    (ol.u.s.Offset == 0x7fffff80 && current->stg_mode == (STGM_TRANSACTED|STGM_READWRITE)) ||
-                    (ol.u.s.Offset == 0x7fffff80 && current->stg_mode == (STGM_TRANSACTED|STGM_READ)))
+                if (ol.Offset == 0x7fffff92 ||
+                    (ol.Offset == 0x7fffff80 && current->stg_mode == (STGM_TRANSACTED|STGM_READWRITE)) ||
+                    (ol.Offset == 0x7fffff80 && current->stg_mode == (STGM_TRANSACTED|STGM_READ)))
                     continue; /* This makes opens hang */
 
-                if (ol.u.s.Offset < 0x7fffff00)
+                if (ol.Offset < 0x7fffff00)
                     LockFileEx(hfile, 0, 0, 1, 0, &ol);
                 else
                     LockFileEx(hfile, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &ol);
@@ -3596,11 +3593,11 @@ static void test_locking(void)
 
                 failed = FAILED(hr);
 
-                if (!expect_failed && (ol.u.s.Offset&0x1ff) == next_range[0])
+                if (!expect_failed && (ol.Offset&0x1ff) == next_range[0])
                 {
                     expect_failed = TRUE;
                 }
-                else if (expect_failed && (ol.u.s.Offset&0x1ff) == next_range[1])
+                else if (expect_failed && (ol.Offset&0x1ff) == next_range[1])
                 {
                     expect_failed = FALSE;
                     next_range += 2;
@@ -3608,12 +3605,12 @@ static void test_locking(void)
 
                 if (!current->todo || failed == expect_failed)
                     ok(failed == expect_failed, "open with byte %lx locked, mode %lx %s but should %s\n",
-                       ol.u.s.Offset, current->stg_mode, failed?"failed":"succeeded", expect_failed?"fail":"succeed");
+                       ol.Offset, current->stg_mode, failed?"failed":"succeeded", expect_failed?"fail":"succeed");
                 else
                 {
                     any_failure = TRUE;
                     todo_wine ok(failed == expect_failed, "open with byte %lx locked, mode %lx %s but should %s\n",
-                                 ol.u.s.Offset, current->stg_mode, failed?"failed":"succeeded", expect_failed?"fail":"succeed");
+                                 ol.Offset, current->stg_mode, failed?"failed":"succeeded", expect_failed?"fail":"succeed");
                 }
             }
 

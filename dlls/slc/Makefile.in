@@ -7,6 +7,6 @@ PARENTSRC = ../sppc
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
+SOURCES = \
 	slc.c \
 	sppc.c

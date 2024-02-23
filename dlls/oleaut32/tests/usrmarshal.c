@@ -30,12 +30,6 @@
 
 #include "wine/test.h"
 
-#if (__STDC__ && !defined(_FORCENAMELESSUNION)) || defined(NONAMELESSUNION)
-# define V_U2(A)  ((A)->n1.n2)
-#else
-# define V_U2(A)  (*(A))
-#endif
-
 typedef struct
 {
     IUnknown IUnknown_iface;
@@ -870,9 +864,9 @@ static DWORD *check_variant_header(DWORD *wirev, VARIANT *v, ULONG size)
     ok(header->clSize == (size + 7) >> 3, "wv[0] %08lx, expected %08lx\n", header->clSize, (size + 7) >> 3);
     ok(header->rpcReserved == 0, "wv[1] %08lx\n", header->rpcReserved);
     ok(header->vt == V_VT(v), "vt %04x expected %04x\n", header->vt, V_VT(v));
-    ok(header->wReserved1 == V_U2(v).wReserved1, "res1 %04x expected %04x\n", header->wReserved1, V_U2(v).wReserved1);
-    ok(header->wReserved2 == V_U2(v).wReserved2, "res2 %04x expected %04x\n", header->wReserved2, V_U2(v).wReserved2);
-    ok(header->wReserved3 == V_U2(v).wReserved3, "res3 %04x expected %04x\n", header->wReserved3, V_U2(v).wReserved3);
+    ok(header->wReserved1 == v->wReserved1, "res1 %04x expected %04x\n", header->wReserved1, v->wReserved1);
+    ok(header->wReserved2 == v->wReserved2, "res2 %04x expected %04x\n", header->wReserved2, v->wReserved2);
+    ok(header->wReserved3 == v->wReserved3, "res3 %04x expected %04x\n", header->wReserved3, v->wReserved3);
 
     switch_is = V_VT(v);
     if(switch_is & VT_ARRAY)
@@ -898,7 +892,9 @@ static void test_marshal_VARIANT(void)
     RPC_MESSAGE rpcMsg = { 0 };
     USER_MARSHAL_CB umcb = { 0 };
     unsigned char *buffer, *next;
+    IMalloc *allocator;
     void *oldbuffer;
+    SIZE_T size;
     ULONG ul;
     short s;
     double d;
@@ -916,6 +912,10 @@ static void test_marshal_VARIANT(void)
     VARTYPE vt, vt2;
     IUnknown *unk;
 
+    hr = CoGetMalloc(MEMCTX_TASK, &allocator);
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+    ok(!!allocator, "got allocator %p\n", allocator);
+
     stubMsg.RpcMsg = &rpcMsg;
 
     umcb.Flags = MAKELONG(MSHCTX_DIFFERENTMACHINE, NDR_LOCAL_DATA_REPRESENTATION);
@@ -932,9 +932,9 @@ static void test_marshal_VARIANT(void)
     /* check_variant_header tests wReserved[123], so initialize to unique values.
      * (Could probably also do this by setting the variant to a known DECIMAL.)
      */
-    V_U2(&v).wReserved1 = 0x1234;
-    V_U2(&v).wReserved2 = 0x5678;
-    V_U2(&v).wReserved3 = 0x9abc;
+    v.wReserved1 = 0x1234;
+    v.wReserved2 = 0x5678;
+    v.wReserved3 = 0x9abc;
 
     /* Variants have an alignment of 8 */
     rpcMsg.BufferLength = stubMsg.BufferLength = VARIANT_UserSize(&umcb.Flags, 1, &v);
@@ -1098,7 +1098,8 @@ static void test_marshal_VARIANT(void)
     ok(next == buffer + stubMsg.BufferLength, "got %p expect %p\n", next, buffer + stubMsg.BufferLength);
     ok(V_VT(&v) == V_VT(&v2), "got vt %d expect %d\n", V_VT(&v), V_VT(&v2));
     ok(*V_UI4REF(&v) == *V_UI4REF(&v2), "got ui4 ref %lx expect ui4 ref %lx\n", *V_UI4REF(&v), *V_UI4REF(&v2));
-
+    size = IMalloc_GetSize(allocator, V_BYREF(&v2));
+    ok(size == sizeof(V_UI4(&v2)), "got size %#Ix\n", size);
     VARIANT_UserFree(&umcb.Flags, &v2);
     HeapFree(GetProcessHeap(), 0, oldbuffer);
 
@@ -1212,7 +1213,8 @@ static void test_marshal_VARIANT(void)
     ok(next == buffer + stubMsg.BufferLength, "got %p expect %p\n", next, buffer + stubMsg.BufferLength);
     ok(V_VT(&v) == V_VT(&v2), "got vt %d expect %d\n", V_VT(&v), V_VT(&v2));
     ok(*V_R8REF(&v) == *V_R8REF(&v2), "got r8 ref %f expect %f\n", *V_R8REF(&v), *V_R8REF(&v2));
-
+    size = IMalloc_GetSize(allocator, V_BYREF(&v2));
+    ok(size == sizeof(V_R8(&v2)), "got size %#Ix\n", size);
     VARIANT_UserFree(&umcb.Flags, &v2);
     HeapFree(GetProcessHeap(), 0, oldbuffer);
 
@@ -1298,16 +1300,17 @@ static void test_marshal_VARIANT(void)
     /* check_variant_header tests wReserved[123], so initialize to unique values.
      * (Could probably also do this by setting the variant to a known DECIMAL.)
      */
-    V_U2(&v2).wReserved1 = 0x0123;
-    V_U2(&v2).wReserved2 = 0x4567;
-    V_U2(&v2).wReserved3 = 0x89ab;
+    v2.wReserved1 = 0x0123;
+    v2.wReserved2 = 0x4567;
+    v2.wReserved3 = 0x89ab;
 
     stubMsg.Buffer = buffer;
     next = VARIANT_UserUnmarshal(&umcb.Flags, buffer, &v2);
     ok(next == buffer + stubMsg.BufferLength, "got %p expect %p\n", next, buffer + stubMsg.BufferLength);
     ok(V_VT(&v) == V_VT(&v2), "got vt %d expect %d\n", V_VT(&v), V_VT(&v2));
     ok(!memcmp(V_DECIMALREF(&v), V_DECIMALREF(&v2), sizeof(DECIMAL)), "decimals differ\n");
-
+    size = IMalloc_GetSize(allocator, V_BYREF(&v2));
+    ok(size == sizeof(V_DECIMAL(&v2)), "got size %#Ix\n", size);
     VARIANT_UserFree(&umcb.Flags, &v2);
     HeapFree(GetProcessHeap(), 0, oldbuffer);
 
@@ -1418,7 +1421,8 @@ static void test_marshal_VARIANT(void)
     ok(V_VT(&v) == V_VT(&v2), "got vt %d expect %d\n", V_VT(&v), V_VT(&v2));
     ok(SysStringByteLen(*V_BSTRREF(&v)) == SysStringByteLen(*V_BSTRREF(&v2)), "bstr string lens differ\n");
     ok(!memcmp(*V_BSTRREF(&v), *V_BSTRREF(&v2), SysStringByteLen(*V_BSTRREF(&v))), "bstrs differ\n");
-
+    size = IMalloc_GetSize(allocator, V_BYREF(&v2));
+    ok(size == sizeof(V_BSTR(&v2)), "got size %#Ix\n", size);
     SysFreeString(b2);
     HeapFree(GetProcessHeap(), 0, oldbuffer);
     SysFreeString(b);
@@ -1503,6 +1507,8 @@ static void test_marshal_VARIANT(void)
     SafeArrayGetVartype(*V_ARRAYREF(&v), &vt);
     SafeArrayGetVartype(*V_ARRAYREF(&v2), &vt2);
     ok(vt == vt2, "array vts differ %x %x\n", vt, vt2);
+    size = IMalloc_GetSize(allocator, V_BYREF(&v2));
+    ok(size == sizeof(V_ARRAY(&v2)), "got size %#Ix\n", size);
     VARIANT_UserFree(&umcb.Flags, &v2);
     HeapFree(GetProcessHeap(), 0, oldbuffer);
 
@@ -1594,6 +1600,8 @@ static void test_marshal_VARIANT(void)
     ok(V_VT(V_VARIANTREF(&v)) == V_VT(V_VARIANTREF(&v3)), "vts differ %x %x\n",
        V_VT(V_VARIANTREF(&v)), V_VT(V_VARIANTREF(&v3))); 
     ok(V_R8(V_VARIANTREF(&v)) == V_R8(V_VARIANTREF(&v3)), "r8s differ\n"); 
+    size = IMalloc_GetSize(allocator, V_BYREF(&v3));
+    ok(size == sizeof(*V_VARIANTREF(&v3)), "got size %#Ix\n", size);
     VARIANT_UserFree(&umcb.Flags, &v3);
     HeapFree(GetProcessHeap(), 0, oldbuffer);
 
@@ -1617,8 +1625,8 @@ static void test_marshal_VARIANT(void)
     wirev = (DWORD*)buffer;
     wirev = check_variant_header(wirev, &v, next - buffer);
 
-    ok(*wirev == (DWORD_PTR)V_UNKNOWN(&v) /* Win9x */ ||
-       *wirev == (DWORD_PTR)V_UNKNOWN(&v) + 1 /* NT */, "wv[5] %08lx\n", *wirev);
+    todo_wine_if( *wirev == (DWORD)(DWORD_PTR)V_UNKNOWN(&v) /* win9x */)
+    ok(*wirev == (DWORD)(DWORD_PTR)V_UNKNOWN(&v) + 1, "wv[5] %08lx\n", *wirev);
     wirev++;
     ok(*wirev == next - buffer - 0x20, "wv[6] %08lx\n", *wirev);
     wirev++;
@@ -1686,8 +1694,8 @@ static void test_marshal_VARIANT(void)
 
     ok(*wirev == 4, "wv[5] %08lx\n", *wirev);
     wirev++;
-    ok(*wirev == (DWORD_PTR)heap_unknown /* Win9x, Win2000 */ ||
-       *wirev == (DWORD_PTR)heap_unknown + 1 /* XP */, "wv[6] %08lx\n", *wirev);
+    todo_wine_if( *wirev == (DWORD)(DWORD_PTR)heap_unknown /* win9x */)
+    ok(*wirev == (DWORD)(DWORD_PTR)heap_unknown + 1, "wv[6] %08lx\n", *wirev);
     wirev++;
     ok(*wirev == next - buffer - 0x24, "wv[7] %08lx\n", *wirev);
     wirev++;
@@ -1704,6 +1712,8 @@ static void test_marshal_VARIANT(void)
     ok(heap_unknown->refs == 2, "got refcount %ld\n", heap_unknown->refs);
     ok(V_VT(&v) == V_VT(&v3), "got vt %d expect %d\n", V_VT(&v), V_VT(&v3));
     ok(*V_UNKNOWNREF(&v) == *V_UNKNOWNREF(&v3), "got %p expect %p\n", *V_UNKNOWNREF(&v), *V_UNKNOWNREF(&v3));
+    size = IMalloc_GetSize(allocator, V_BYREF(&v3));
+    ok(size == sizeof(V_BSTR(&v3)), "got size %#Ix\n", size);
     VARIANT_UserFree(&umcb.Flags, &v3);
     ok(heap_unknown->refs == 1, "%ld refcounts of IUnknown leaked\n", heap_unknown->refs - 1);
     IUnknown_Release(&heap_unknown->IUnknown_iface);
@@ -1732,8 +1742,12 @@ static void test_marshal_VARIANT(void)
     ok(next == buffer + stubMsg.BufferLength, "got %p expect %p\n", next, buffer + stubMsg.BufferLength);
     ok(V_VT(&v) == V_VT(&v2), "got vt %d expect %d\n", V_VT(&v2), V_VT(&v));
     ok(!*V_UNKNOWNREF(&v2), "got %p expect NULL\n", *V_UNKNOWNREF(&v2));
+    size = IMalloc_GetSize(allocator, V_BYREF(&v2));
+    ok(size == sizeof(V_BSTR(&v2)), "got size %#Ix\n", size);
     VARIANT_UserFree(&umcb.Flags, &v2);
     HeapFree(GetProcessHeap(), 0, oldbuffer);
+
+    IMalloc_Release(allocator);
 }
 
 

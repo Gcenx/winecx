@@ -28,7 +28,6 @@
 #include "dmusics.h"
 #include "dmobject.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmobj);
 WINE_DECLARE_DEBUG_CHANNEL(dmfile);
@@ -288,7 +287,7 @@ const char *debugstr_chunk(const struct chunk_entry *chunk)
     return wine_dbg_sprintf("%s chunk, %ssize %lu", debugstr_fourcc(chunk->id), type, chunk->size);
 }
 
-static HRESULT stream_read(IStream *stream, void *data, ULONG size)
+HRESULT stream_read(IStream *stream, void *data, ULONG size)
 {
     ULONG read;
     HRESULT hr;
@@ -339,11 +338,10 @@ HRESULT stream_get_chunk(IStream *stream, struct chunk_entry *chunk)
         }
     }
 
-    if (chunk->id == FOURCC_LIST || chunk->id == FOURCC_RIFF) {
-        hr = stream_read(stream, &chunk->type, sizeof(FOURCC));
-        if (hr != S_OK)
-            return hr != S_FALSE ? hr : E_FAIL;
-    }
+    if (chunk->id != FOURCC_LIST && chunk->id != FOURCC_RIFF)
+        chunk->type = 0;
+    else if ((hr = stream_read(stream, &chunk->type, sizeof(FOURCC))) != S_OK)
+        return hr != S_FALSE ? hr : E_FAIL;
 
     TRACE_(dmfile)("Returning %s\n", debugstr_chunk(chunk));
 
@@ -375,7 +373,7 @@ HRESULT stream_next_chunk(IStream *stream, struct chunk_entry *chunk)
 /* Reads chunk data of the form:
    DWORD     - size of array element
    element[] - Array of elements
-   The caller needs to heap_free() the array.
+   The caller needs to free() the array.
 */
 HRESULT stream_chunk_get_array(IStream *stream, const struct chunk_entry *chunk, void **array,
         unsigned int *count, DWORD elem_size)
@@ -400,10 +398,10 @@ HRESULT stream_chunk_get_array(IStream *stream, const struct chunk_entry *chunk,
 
     *count = (chunk->size - sizeof(DWORD)) / elem_size;
     size = *count * elem_size;
-    if (!(*array = heap_alloc(size)))
+    if (!(*array = malloc(size)))
         return E_OUTOFMEMORY;
     if (FAILED(hr = stream_read(stream, *array, size))) {
-        heap_free(*array);
+        free(*array);
         *array = NULL;
         return hr;
     }
@@ -446,6 +444,35 @@ HRESULT stream_chunk_get_wstr(IStream *stream, const struct chunk_entry *chunk, 
     return S_OK;
 }
 
+HRESULT stream_get_loader(IStream *stream, IDirectMusicLoader **ret_loader)
+{
+    IDirectMusicGetLoader *getter;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = IStream_QueryInterface(stream, &IID_IDirectMusicGetLoader, (void**)&getter)))
+    {
+        hr = IDirectMusicGetLoader_GetLoader(getter, ret_loader);
+        IDirectMusicGetLoader_Release(getter);
+    }
+
+    if (FAILED(hr)) *ret_loader = NULL;
+    return hr;
+}
+
+HRESULT stream_get_object(IStream *stream, DMUS_OBJECTDESC *desc, REFIID iid, void **ret_iface)
+{
+    IDirectMusicLoader *loader;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = stream_get_loader(stream, &loader)))
+    {
+        hr = IDirectMusicLoader_GetObject(loader, desc, iid, ret_iface);
+        IDirectMusicLoader_Release(loader);
+    }
+
+    if (FAILED(hr)) *ret_iface = NULL;
+    return hr;
+}
 
 
 /* Generic IDirectMusicObject methods */
@@ -589,7 +616,14 @@ HRESULT dmobj_parsedescriptor(IStream *stream, const struct chunk_entry *riff,
                             desc->wszFileName, sizeof(desc->wszFileName)) == S_OK)
                     desc->dwValidData |= DMUS_OBJ_FILENAME;
                 break;
+            case FOURCC_DLID:
+                if (!(supported & DMUS_OBJ_GUID_DLID)) break;
+                if ((supported & DMUS_OBJ_OBJECT) && stream_chunk_get_data(stream, &chunk,
+                            &desc->guidObject, sizeof(desc->guidObject)) == S_OK)
+                    desc->dwValidData |= DMUS_OBJ_OBJECT;
+                break;
             case DMUS_FOURCC_GUID_CHUNK:
+                if ((supported & DMUS_OBJ_GUID_DLID)) break;
                 if ((supported & DMUS_OBJ_OBJECT) && stream_chunk_get_data(stream, &chunk,
                             &desc->guidObject, sizeof(desc->guidObject)) == S_OK)
                     desc->dwValidData |= DMUS_OBJ_OBJECT;
@@ -621,8 +655,6 @@ HRESULT dmobj_parsereference(IStream *stream, const struct chunk_entry *list,
         IDirectMusicObject **dmobj)
 {
     struct chunk_entry chunk = {.parent = list};
-    IDirectMusicGetLoader *getloader;
-    IDirectMusicLoader *loader;
     DMUS_OBJECTDESC desc;
     DMUS_IO_REFERENCE reference;
     HRESULT hr;
@@ -645,17 +677,7 @@ HRESULT dmobj_parsereference(IStream *stream, const struct chunk_entry *list,
     desc.dwValidData |= DMUS_OBJ_CLASS;
     dump_DMUS_OBJECTDESC(&desc);
 
-    if (FAILED(hr = IStream_QueryInterface(stream, &IID_IDirectMusicGetLoader, (void**)&getloader)))
-        return hr;
-    hr = IDirectMusicGetLoader_GetLoader(getloader, &loader);
-    IDirectMusicGetLoader_Release(getloader);
-    if (FAILED(hr))
-        return hr;
-
-    hr = IDirectMusicLoader_GetObject(loader, &desc, &IID_IDirectMusicObject, (void**)dmobj);
-    IDirectMusicLoader_Release(loader);
-
-    return hr;
+    return stream_get_object(stream, &desc, &IID_IDirectMusicObject, (void **)dmobj);
 }
 
 /* Generic IPersistStream methods */

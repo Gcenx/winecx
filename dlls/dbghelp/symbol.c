@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -1150,7 +1148,7 @@ static BOOL symt_enum_locals(struct process* pcs, const WCHAR* mask,
     se->sym_info->MaxNameLen = sizeof(se->buffer) - sizeof(SYMBOL_INFO);
 
     pair.pcs = pcs;
-    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc, DMT_UNKNOWN);
+    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc);
     if (!module_get_debug(&pair)) return FALSE;
 
     if (symt_check_tag(pcs->localscope_symt, SymTagFunction) ||
@@ -1320,7 +1318,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR Mask,
         HeapFree(GetProcessHeap(), 0, mod);
         return TRUE;
     }
-    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
+    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll);
     if (!module_get_debug(&pair))
         return FALSE;
 
@@ -1626,7 +1624,7 @@ BOOL WINAPI SymFromName(HANDLE hProcess, PCSTR Name, PSYMBOL_INFO Symbol)
 
     /* search first in local context */
     pair.pcs = pcs;
-    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc, DMT_UNKNOWN);
+    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc);
     if (module_get_debug(&pair) &&
         (symt_check_tag(pcs->localscope_symt, SymTagFunction) ||
          symt_check_tag(pcs->localscope_symt, SymTagInlineSite)))
@@ -1882,7 +1880,7 @@ static BOOL get_line_from_function(struct module_pair* pair, struct symt_functio
         if (found_dli)
         {
             BOOL ret;
-            if (dbghelp_opt_native)
+            if (dbghelp_opt_source_actual_path)
             {
                 /* Return native file paths when using winedbg */
                 ret = internal_line_set_nameA(pair->pcs, intl, (char*)source_get(pair->effective, dli->u.source_file), FALSE);
@@ -2850,15 +2848,4 @@ BOOL WINAPI SymQueryInlineTrace(HANDLE hProcess, DWORD64 StartAddress, DWORD Sta
         *CurFrameIndex = 0;
     }
     return TRUE;
-}
-
-/******************************************************************
- *      SymSrvGetFileIndexInfo (DBGHELP.@)
- *
- */
-BOOL WINAPI SymSrvGetFileIndexInfo(const char *file, SYMSRV_INDEX_INFO* info, DWORD flags)
-{
-    FIXME("(%s, %p, 0x%08lx): stub!\n", debugstr_a(file), info, flags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
 }

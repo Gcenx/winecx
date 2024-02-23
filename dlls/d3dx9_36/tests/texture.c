@@ -1330,6 +1330,15 @@ static void WINAPI fillfunc_cube(D3DXVECTOR4 *value, const D3DXVECTOR3 *texcoord
     value->w = texelsize->x;
 }
 
+static void WINAPI fillfunc_cube_coord(D3DXVECTOR4 *value, const D3DXVECTOR3 *texcoord,
+        const D3DXVECTOR3 *texelsize, void *data)
+{
+    value->x = texcoord->x;
+    value->y = texcoord->y;
+    value->z = texcoord->z;
+    value->w = 1.0f;
+}
+
 enum cube_coord
 {
     XCOORD = 0,
@@ -1362,119 +1371,146 @@ static float get_cube_coord(enum cube_coord coord, unsigned int x, unsigned int 
     }
 }
 
+static DWORD get_argb_color(D3DFORMAT format, DWORD x, DWORD y, const D3DLOCKED_RECT *lock_rect)
+{
+    DWORD value, ret;
+    int pitch;
+
+    switch (format)
+    {
+    case D3DFMT_A8R8G8B8:
+        pitch = lock_rect->Pitch / sizeof(DWORD);
+        return ((DWORD *)lock_rect->pBits)[y * pitch + x];
+    case D3DFMT_A1R5G5B5:
+        pitch = lock_rect->Pitch / sizeof(WORD);
+        value = ((WORD *)lock_rect->pBits)[y * pitch + x];
+
+        ret = (value >> 15 & 0x1) << 24
+                | (value >> 10 & 0x1f) << 16
+                | (value >> 5 & 0x1f) << 8
+                | (value & 0x1f);
+
+        return ret;
+
+    default:
+        return 0;
+    }
+}
+
+static BYTE get_s8_clipped(float v)
+{
+    return (BYTE)(v >= 0.0f ? v * 255 + 0.5f : 0.0f);
+}
+
+static DWORD get_expected_argb_color(D3DFORMAT format, const D3DXVECTOR4 *v)
+{
+    switch (format)
+    {
+    case D3DFMT_A8R8G8B8:
+        return get_s8_clipped(v->w) << 24
+                | get_s8_clipped(v->x) << 16
+                | get_s8_clipped(v->y) << 8
+                | get_s8_clipped(v->z);
+
+    case D3DFMT_A1R5G5B5:
+        return (BYTE)(v->w + 0.5f) << 24
+                | (BYTE)(v->x * 31 + 0.5f) << 16
+                | (BYTE)(v->y * 31 + 0.5f) << 8
+                | (BYTE)(v->z * 31 + 0.5f);
+    default:
+        return 0;
+    }
+}
+
+#define compare_cube_texture(t,f,d) compare_cube_texture_(t,f,d,__LINE__)
+static void compare_cube_texture_(IDirect3DCubeTexture9 *texture,
+        LPD3DXFILL3D func, BYTE diff, unsigned int line)
+{
+    static const enum cube_coord coordmap[6][3] =
+    {
+        {ONE, YCOORDINV, XCOORDINV},
+        {ZERO, YCOORDINV, XCOORD},
+        {XCOORD, ONE, YCOORD},
+        {XCOORD, ZERO, YCOORDINV},
+        {XCOORD, YCOORDINV, ONE},
+        {XCOORDINV, YCOORDINV, ZERO}
+    };
+
+    DWORD x, y, m, f, levels, size, value, expected;
+    D3DXVECTOR3 coord, texelsize;
+    D3DLOCKED_RECT lock_rect;
+    D3DSURFACE_DESC desc;
+    D3DXVECTOR4 out;
+    HRESULT hr;
+
+    levels = IDirect3DCubeTexture9_GetLevelCount(texture);
+
+    for (m = 0; m < levels; ++m)
+    {
+        hr = IDirect3DCubeTexture9_GetLevelDesc(texture, m, &desc);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
+
+        size = desc.Width;
+
+        for (f = 0; f < 6; f++)
+        {
+            texelsize.x = (f == 0) || (f == 1) ? 0.0f : 2.0f / size;
+            texelsize.y = (f == 2) || (f == 3) ? 0.0f : 2.0f / size;
+            texelsize.z = (f == 4) || (f == 5) ? 0.0f : 2.0f / size;
+
+            hr = IDirect3DCubeTexture9_LockRect(texture, f, m, &lock_rect, NULL, D3DLOCK_READONLY);
+            ok(hr == D3D_OK, "Couldn't lock the texture, error %#lx.\n", hr);
+
+            for (y = 0; y < size; y++)
+            {
+                for (x = 0; x < size; x++)
+                {
+                    coord.x = get_cube_coord(coordmap[f][0], x, y, size) / size * 2.0f - 1.0f;
+                    coord.y = get_cube_coord(coordmap[f][1], x, y, size) / size * 2.0f - 1.0f;
+                    coord.z = get_cube_coord(coordmap[f][2], x, y, size) / size * 2.0f - 1.0f;
+
+                    func(&out, &coord, &texelsize, NULL);
+
+                    value = get_argb_color(desc.Format, x, y, &lock_rect);
+                    expected = get_expected_argb_color(desc.Format, &out);
+
+                    ok_(__FILE__, line)(compare_color(value, expected, diff),
+                            "Texel at face %lu (%lu, %lu) doesn't match: %08lx, expected %08lx.\n",
+                            f, x, y, value, expected);
+                }
+            }
+            IDirect3DCubeTexture9_UnlockRect(texture, f, m);
+        }
+    }
+}
+
 static void test_D3DXFillCubeTexture(IDirect3DDevice9 *device)
 {
     IDirect3DCubeTexture9 *tex;
     HRESULT hr;
-    D3DLOCKED_RECT lock_rect;
-    DWORD x, y, f, m;
-    DWORD v[4], e[4];
-    DWORD value, expected, size, pitch;
-    enum cube_coord coordmap[6][3] =
-        {
-            {ONE, YCOORDINV, XCOORDINV},
-            {ZERO, YCOORDINV, XCOORD},
-            {XCOORD, ONE, YCOORD},
-            {XCOORD, ZERO, YCOORDINV},
-            {XCOORD, YCOORDINV, ONE},
-            {XCOORDINV, YCOORDINV, ZERO}
-        };
 
-    size = 4;
-    hr = IDirect3DDevice9_CreateCubeTexture(device, size, 0, 0, D3DFMT_A8R8G8B8,
-                                            D3DPOOL_MANAGED, &tex, NULL);
+    /* A8R8G8B8 */
+    hr = IDirect3DDevice9_CreateCubeTexture(device, 4, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
 
-    if (SUCCEEDED(hr))
-    {
-        hr = D3DXFillCubeTexture(tex, fillfunc_cube, NULL);
-        ok(hr == D3D_OK, "D3DXFillCubeTexture returned %#lx, expected %#lx\n", hr, D3D_OK);
+    hr = D3DXFillCubeTexture(tex, fillfunc_cube, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
+    compare_cube_texture(tex, fillfunc_cube, 1);
 
-        for (m = 0; m < 3; m++)
-        {
-            for (f = 0; f < 6; f++)
-            {
-                hr = IDirect3DCubeTexture9_LockRect(tex, f, m, &lock_rect, NULL, D3DLOCK_READONLY);
-                ok(hr == D3D_OK, "Couldn't lock the texture, error %#lx\n", hr);
-                if (SUCCEEDED(hr))
-                {
-                    pitch = lock_rect.Pitch / sizeof(DWORD);
-                    for (y = 0; y < size; y++)
-                    {
-                        for (x = 0; x < size; x++)
-                        {
-                            value = ((DWORD *)lock_rect.pBits)[y * pitch + x];
-                            v[0] = (value >> 24) & 0xff;
-                            v[1] = (value >> 16) & 0xff;
-                            v[2] = (value >> 8) & 0xff;
-                            v[3] = value & 0xff;
+    hr = D3DXFillCubeTexture(tex, fillfunc_cube_coord, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
+    compare_cube_texture(tex, fillfunc_cube_coord, 1);
 
-                            e[0] = (f == 0) || (f == 1) ?
-                                0 : (BYTE)(255.0f / size * 2.0f + 0.5f);
-                            e[1] = get_cube_coord(coordmap[f][0], x, y, size) / size * 255.0f + 0.5f;
-                            e[2] = get_cube_coord(coordmap[f][1], x, y, size) / size * 255.0f + 0.5f;
-                            e[3] = get_cube_coord(coordmap[f][2], x, y, size) / size * 255.0f + 0.5f;
-                            expected = e[0] << 24 | e[1] << 16 | e[2] << 8 | e[3];
+    IDirect3DCubeTexture9_Release(tex);
 
-                            ok(color_match(v, e),
-                               "Texel at face %lu (%lu, %lu) doesn't match: %#lx, expected %#lx\n",
-                               f, x, y, value, expected);
-                        }
-                    }
-                    IDirect3DCubeTexture9_UnlockRect(tex, f, m);
-                }
-            }
-            size >>= 1;
-        }
-
-        IDirect3DCubeTexture9_Release(tex);
-    }
-    else
-        skip("Failed to create texture\n");
-
+    /* A1R5G5B5 */
     hr = IDirect3DDevice9_CreateCubeTexture(device, 4, 1, 0, D3DFMT_A1R5G5B5,
-                                            D3DPOOL_MANAGED, &tex, NULL);
-
-    if (SUCCEEDED(hr))
-    {
-        hr = D3DXFillCubeTexture(tex, fillfunc_cube, NULL);
-        ok(hr == D3D_OK, "D3DXFillTexture returned %#lx, expected %#lx\n", hr, D3D_OK);
-        for (f = 0; f < 6; f++)
-        {
-            hr = IDirect3DCubeTexture9_LockRect(tex, f, 0, &lock_rect, NULL, D3DLOCK_READONLY);
-            ok(hr == D3D_OK, "Couldn't lock the texture, error %#lx\n", hr);
-            if (SUCCEEDED(hr))
-            {
-                pitch = lock_rect.Pitch / sizeof(WORD);
-                for (y = 0; y < 4; y++)
-                {
-                    for (x = 0; x < 4; x++)
-                    {
-                        value = ((WORD *)lock_rect.pBits)[y * pitch + x];
-                        v[0] = value >> 15;
-                        v[1] = value >> 10 & 0x1f;
-                        v[2] = value >> 5 & 0x1f;
-                        v[3] = value & 0x1f;
-
-                        e[0] = (f == 0) || (f == 1) ?
-                            0 : (BYTE)(1.0f / size * 2.0f + 0.5f);
-                        e[1] = get_cube_coord(coordmap[f][0], x, y, 4) / 4 * 31.0f + 0.5f;
-                        e[2] = get_cube_coord(coordmap[f][1], x, y, 4) / 4 * 31.0f + 0.5f;
-                        e[3] = get_cube_coord(coordmap[f][2], x, y, 4) / 4 * 31.0f + 0.5f;
-                        expected = e[0] << 15 | e[1] << 10 | e[2] << 5 | e[3];
-
-                        ok(color_match(v, e),
-                           "Texel at face %lu (%lu, %lu) doesn't match: %#lx, expected %#lx\n",
-                           f, x, y, value, expected);
-                    }
-                }
-                IDirect3DCubeTexture9_UnlockRect(tex, f, 0);
-            }
-        }
-
-        IDirect3DCubeTexture9_Release(tex);
-    }
-    else
-        skip("Failed to create texture\n");
+            D3DPOOL_MANAGED, &tex, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
+    hr = D3DXFillCubeTexture(tex, fillfunc_cube, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
+    compare_cube_texture(tex, fillfunc_cube, 2);
+    IDirect3DCubeTexture9_Release(tex);
 }
 
 static void WINAPI fillfunc_volume(D3DXVECTOR4 *value, const D3DXVECTOR3 *texcoord,
@@ -2439,17 +2475,25 @@ float4 main(float3 pos : POSITION, float3 size : PSIZE) : COLOR
     hr = D3DXCreateTextureShader(NULL, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#lx.\n", hr);
 
+    tx = (void *)0xdeadbeef;
     hr = D3DXCreateTextureShader(NULL, &tx);
     ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#lx.\n", hr);
+    ok(tx == (void *)0xdeadbeef, "Unexpected pointer %p.\n", tx);
 
+    tx = (void *)0xdeadbeef;
     hr = D3DXCreateTextureShader(shader_invalid, &tx);
-    todo_wine ok(hr == D3DXERR_INVALIDDATA, "Got unexpected hr %#lx.\n", hr);
+    ok(hr == D3DXERR_INVALIDDATA, "Got unexpected hr %#lx.\n", hr);
+    ok(tx == (void *)0xdeadbeef, "Unexpected pointer %p.\n", tx);
 
+    tx = (void *)0xdeadbeef;
     hr = D3DXCreateTextureShader(shader_zero, &tx);
-    todo_wine ok(hr == D3DXERR_INVALIDDATA, "Got unexpected hr %#lx.\n", hr);
+    ok(hr == D3DXERR_INVALIDDATA, "Got unexpected hr %#lx.\n", hr);
+    ok(tx == (void *)0xdeadbeef, "Unexpected pointer %p.\n", tx);
 
+    tx = (void *)0xdeadbeef;
     hr = D3DXCreateTextureShader(shader_empty, &tx);
-    todo_wine ok(hr == D3DXERR_INVALIDDATA, "Got unexpected hr %#lx.\n", hr);
+    ok(hr == D3DXERR_INVALIDDATA, "Got unexpected hr %#lx.\n", hr);
+    ok(tx == (void *)0xdeadbeef, "Unexpected pointer %p.\n", tx);
 
     hr = D3DXCreateTextureShader(shader_code, &tx);
     ok(SUCCEEDED(hr), "Got unexpected hr %#lx.\n", hr);
@@ -2471,21 +2515,20 @@ float4 main(float3 pos : POSITION, float3 size : PSIZE) : COLOR
     hr = tx->lpVtbl->GetConstantBuffer(tx, &buffer);
     todo_wine
     ok(SUCCEEDED(hr), "Failed to get texture shader constant buffer.\n");
-    if (FAILED(hr))
+
+    if (SUCCEEDED(hr))
     {
-        skip("Texture shaders not supported, skipping further tests.\n");
-        IUnknown_Release(tx);
-        return;
+        size = ID3DXBuffer_GetBufferSize(buffer);
+        ok(!size, "Unexpected buffer size %lu.\n", size);
+
+        ID3DXBuffer_Release(buffer);
     }
 
-    size = ID3DXBuffer_GetBufferSize(buffer);
-    ok(!size, "Unexpected buffer size %lu.\n", size);
-
-    ID3DXBuffer_Release(buffer);
-
     hr = tx->lpVtbl->GetDesc(tx, &ctab_desc);
+    todo_wine
     ok(hr == S_OK, "Failed to get constant description, hr %#lx.\n", hr);
-    ok(!ctab_desc.Constants, "Unexpected number of constants %u.\n", ctab_desc.Constants);
+    if (SUCCEEDED(hr))
+        ok(!ctab_desc.Constants, "Unexpected number of constants %u.\n", ctab_desc.Constants);
 
     /* Constant table access calls, without constant table. */
     h = tx->lpVtbl->GetConstant(tx, NULL, 0);
@@ -2561,52 +2604,7 @@ float4 main(float3 pos : POSITION, float3 size : PSIZE) : COLOR
 
     hr = D3DXFillCubeTextureTX(cube_texture, tx);
     ok(SUCCEEDED(hr), "Got unexpected hr %#lx.\n", hr);
-
-    for (z = 0; z < 6; ++z)
-    {
-        static const char * const mapping[6][3] =
-        {
-            {"-x", "-y", "1"},
-            {"+x", "-y", "0"},
-            {"+y", "1", "+x"},
-            {"-y", "0", "+x"},
-            {"1", "-y", "+x"},
-            {"0", "-y", "-x"},
-        };
-
-        hr = IDirect3DCubeTexture9_LockRect(cube_texture, z, 0, &lr, NULL, D3DLOCK_READONLY);
-        ok(SUCCEEDED(hr), "Locking texture failed, hr %#lx.\n", hr);
-        data = lr.pBits;
-        for (y = 0; y < 256; ++y)
-        {
-            for (x = 0; x < 256; ++x)
-            {
-                unsigned int color = data[y * lr.Pitch / sizeof(*data) + x];
-                unsigned int expected = 0xff000000;
-                unsigned int i;
-
-                for (i = 0; i < 3; ++i)
-                {
-                    int component;
-
-                    if (mapping[z][i][0] == '0')
-                        component = 0;
-                    else if (mapping[z][i][0] == '1')
-                        component = 255;
-                    else
-                        component = mapping[z][i][1] == 'x' ? x * 2 - 255 : y * 2 - 255;
-                    if (mapping[z][i][0] == '-')
-                        component = -component;
-                    expected |= max(component, 0) << i * 8;
-                }
-                ok(compare_color(color, expected, 1), "Unexpected color %08x at (%u, %u, %u).\n",
-                        color, x, y, z);
-            }
-        }
-        hr = IDirect3DCubeTexture9_UnlockRect(cube_texture, z, 0);
-        ok(SUCCEEDED(hr), "Unlocking texture failed, hr %#lx.\n", hr);
-    }
-
+    compare_cube_texture(cube_texture, fillfunc_cube_coord, 1);
     IDirect3DCubeTexture9_Release(cube_texture);
 
     if (!(caps.TextureCaps & D3DPTEXTURECAPS_VOLUMEMAP) || caps.MaxVolumeExtent < 64)
@@ -2619,6 +2617,7 @@ float4 main(float3 pos : POSITION, float3 size : PSIZE) : COLOR
     ok(SUCCEEDED(hr), "Got unexpected hr %#lx.\n", hr);
 
     hr = D3DXFillVolumeTextureTX(volume_texture, tx);
+    todo_wine
     ok(SUCCEEDED(hr), "Got unexpected hr %#lx.\n", hr);
 
     hr = IDirect3DVolumeTexture9_LockBox(volume_texture, 0, &lb, NULL, D3DLOCK_READONLY);
@@ -2633,6 +2632,7 @@ float4 main(float3 pos : POSITION, float3 size : PSIZE) : COLOR
                 unsigned int expected = 0xff000000 | ((x * 4 + 2) << 16) | ((y * 4 + 2) << 8) | (z * 4 + 2);
                 unsigned int color = data[z * lb.SlicePitch / sizeof(*data) + y * lb.RowPitch / sizeof(*data) + x];
 
+                todo_wine
                 ok(compare_color(color, expected, 1), "Unexpected color %08x at (%u, %u, %u).\n",
                         color, x, y, z);
             }
@@ -2646,8 +2646,12 @@ float4 main(float3 pos : POSITION, float3 size : PSIZE) : COLOR
     IUnknown_Release(tx);
 
     /* With constant table */
+    tx = NULL;
     hr = D3DXCreateTextureShader(shader_code2, &tx);
+    todo_wine
     ok(SUCCEEDED(hr), "Got unexpected hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto cleanup;
 
     hr = tx->lpVtbl->GetConstantBuffer(tx, &buffer);
     todo_wine
@@ -2768,7 +2772,8 @@ float4 main(float3 pos : POSITION, float3 size : PSIZE) : COLOR
     IDirect3DDevice9_Release(device);
     IDirect3D9_Release(d3d);
     DestroyWindow(wnd);
-    IUnknown_Release(tx);
+    if (tx)
+        IUnknown_Release(tx);
 }
 
 START_TEST(texture)

@@ -21,7 +21,9 @@
 #include <assert.h>
 #include <stdlib.h>
 #include "winternl.h"
+#include "wincrypt.h"
 #include "winnls.h"
+#include "schannel.h"
 
 #define LDAP_NEEDS_PROTOTYPES
 #include <lber.h>
@@ -167,6 +169,9 @@ typedef enum {
 #define WLDAP32_LDAP_VERSION3   3
 #define WLDAP32_LDAP_VERSION    WLDAP32_LDAP_VERSION2
 
+#define LDAP_CHASE_SUBORDINATE_REFERRALS    0x20
+#define LDAP_CHASE_EXTERNAL_REFERRALS       0x40
+
 #define WLDAP32_LDAP_AUTH_SIMPLE        0x80
 #define WLDAP32_LDAP_AUTH_SASL          0x83
 #define WLDAP32_LDAP_AUTH_OTHERKIND     0x86
@@ -190,16 +195,17 @@ typedef struct WLDAP32_berelement
     char *opaque;
 } WLDAP32_BerElement;
 
+struct ld_sb
+{
+    UINT_PTR sb_sd;
+    UCHAR Reserved1[41];
+    ULONG_PTR sb_naddr;
+    UCHAR Reserved2[24];
+};
+
 typedef struct ldap
 {
-    struct
-    {
-        UINT_PTR sb_sd;
-        UCHAR Reserved1[41];
-        ULONG_PTR sb_naddr;
-        UCHAR Reserved2[24];
-    } ld_sb;
-
+    struct ld_sb ld_sb;
     char *ld_host;
     ULONG ld_version;
     UCHAR ld_lberoptions;
@@ -216,6 +222,28 @@ typedef struct ldap
     ULONG ld_refhoplimit;
     ULONG ld_options;
 } LDAP, *PLDAP;
+
+typedef BOOLEAN (CDECL QUERYCLIENTCERT)(LDAP *, SecPkgContext_IssuerListInfoEx *, const CERT_CONTEXT **);
+typedef BOOLEAN (CDECL VERIFYSERVERCERT)(LDAP *, const CERT_CONTEXT **);
+
+struct private_data
+{
+    LDAP *ctx;
+    struct berval **server_ctrls;
+    QUERYCLIENTCERT *client_cert_callback;
+    VERIFYSERVERCERT *server_cert_callback;
+    BOOL connected;
+};
+C_ASSERT(sizeof(struct private_data) < FIELD_OFFSET(struct ld_sb, sb_naddr) - FIELD_OFFSET(struct ld_sb, Reserved1));
+
+#define CTX(ld) (((struct private_data *)ld->ld_sb.Reserved1)->ctx)
+#define SERVER_CTRLS(ld) (((struct private_data *)ld->ld_sb.Reserved1)->server_ctrls)
+#define CLIENT_CERT_CALLBACK(ld) (((struct private_data *)ld->ld_sb.Reserved1)->client_cert_callback)
+#define SERVER_CERT_CALLBACK(ld) (((struct private_data *)ld->ld_sb.Reserved1)->server_cert_callback)
+#define CONNECTED(ld) (((struct private_data *)ld->ld_sb.Reserved1)->connected)
+
+#define MSG(entry) (entry->Request)
+#define BER(ber) ((BerElement *)((ber)->opaque))
 
 typedef struct l_timeval
 {
@@ -362,25 +390,26 @@ typedef struct ldapsearch
     struct WLDAP32_berval *cookie;
 } LDAPSearch;
 
-#define CTX(ld) (*(LDAP **)ld->Reserved3)
-#define SERVER_CTRLS(ld) (*(struct berval ***)(ld->Reserved3 + sizeof(LDAP *)))
-#define MSG(entry) (entry->Request)
-#define BER(ber) ((BerElement *)((ber)->opaque))
-
-WLDAP32_BerElement * CDECL WLDAP32_ber_alloc_t( int );
-BERVAL * CDECL WLDAP32_ber_bvdup( BERVAL * );
 void CDECL WLDAP32_ber_bvecfree( BERVAL ** );
 void CDECL WLDAP32_ber_bvfree( BERVAL * );
+void CDECL WLDAP32_ber_free( WLDAP32_BerElement *, int );
+WLDAP32_BerElement * CDECL WLDAP32_ber_alloc_t( int ) __WINE_DEALLOC(WLDAP32_ber_free);
+BERVAL * CDECL WLDAP32_ber_bvdup( BERVAL * ) __WINE_DEALLOC(WLDAP32_ber_bvfree);
 ULONG CDECL WLDAP32_ber_first_element( WLDAP32_BerElement *, ULONG *, char ** );
 int CDECL WLDAP32_ber_flatten( WLDAP32_BerElement *, BERVAL ** );
-void CDECL WLDAP32_ber_free( WLDAP32_BerElement *, int );
-WLDAP32_BerElement * CDECL WLDAP32_ber_init( BERVAL * );
+WLDAP32_BerElement * CDECL WLDAP32_ber_init( BERVAL * ) __WINE_DEALLOC(WLDAP32_ber_free);
 ULONG CDECL WLDAP32_ber_next_element( WLDAP32_BerElement *, ULONG *, char * );
 ULONG CDECL WLDAP32_ber_peek_tag( WLDAP32_BerElement *, ULONG * );
 ULONG CDECL WLDAP32_ber_skip_tag( WLDAP32_BerElement *, ULONG * );
 int WINAPIV WLDAP32_ber_printf( WLDAP32_BerElement *, char *, ... );
 ULONG WINAPIV WLDAP32_ber_scanf( WLDAP32_BerElement *, char *, ... );
 
+void CDECL ldap_memfreeA( char * );
+void CDECL ldap_memfreeW( WCHAR * );
+ULONG CDECL ldap_value_freeA( char ** );
+ULONG CDECL ldap_value_freeW( WCHAR ** );
+ULONG CDECL WLDAP32_ldap_msgfree( WLDAP32_LDAPMessage * );
+ULONG CDECL WLDAP32_ldap_value_free_len(struct WLDAP32_berval **);
 ULONG CDECL ldap_addA( LDAP *, char *, LDAPModA ** );
 ULONG CDECL ldap_addW( LDAP *, WCHAR *, LDAPModW ** );
 ULONG CDECL ldap_add_extA( LDAP *, char *, LDAPModA **, LDAPControlA **, LDAPControlA **, ULONG * );
@@ -417,6 +446,7 @@ ULONG CDECL ldap_compare_ext_sW( LDAP *, WCHAR *, WCHAR *, WCHAR *, struct WLDAP
                                  LDAPControlW ** );
 ULONG CDECL ldap_compare_sA( LDAP *, char *, char *, char * );
 ULONG CDECL ldap_compare_sW( LDAP *, WCHAR *, WCHAR *, WCHAR * );
+ULONG CDECL WLDAP32_ldap_connect( LDAP *, struct l_timeval * );
 ULONG CDECL ldap_create_sort_controlA( LDAP *, LDAPSortKeyA **, UCHAR, LDAPControlA ** );
 ULONG CDECL ldap_create_sort_controlW( LDAP *, LDAPSortKeyW **, UCHAR, LDAPControlW ** );
 int CDECL ldap_create_vlv_controlA( LDAP *, WLDAP32_LDAPVLVInfo *, UCHAR, LDAPControlA ** );
@@ -429,16 +459,12 @@ ULONG CDECL ldap_delete_ext_sA( LDAP *, char *, LDAPControlA **, LDAPControlA **
 ULONG CDECL ldap_delete_ext_sW( LDAP *, WCHAR *, LDAPControlW **, LDAPControlW ** );
 ULONG CDECL ldap_delete_sA( LDAP *, char * );
 ULONG CDECL ldap_delete_sW( LDAP *, WCHAR * );
-char * CDECL ldap_dn2ufnA( char * );
-WCHAR * CDECL ldap_dn2ufnW( WCHAR * );
-void CDECL ldap_memfreeA( char * );
-void CDECL ldap_memfreeW( WCHAR * );
-char ** CDECL ldap_explode_dnA( char *, ULONG );
-WCHAR ** CDECL ldap_explode_dnW( WCHAR *, ULONG );
-ULONG CDECL ldap_value_freeA( char ** );
-ULONG CDECL ldap_value_freeW( WCHAR ** );
-char * CDECL ldap_get_dnA( LDAP *, WLDAP32_LDAPMessage * );
-WCHAR * CDECL ldap_get_dnW( LDAP *, WLDAP32_LDAPMessage * );
+char * CDECL ldap_dn2ufnA( char * ) __WINE_DEALLOC(ldap_memfreeA) __WINE_MALLOC;
+WCHAR * CDECL ldap_dn2ufnW( WCHAR * ) __WINE_DEALLOC(ldap_memfreeW) __WINE_MALLOC;
+char ** CDECL ldap_explode_dnA( char *, ULONG ) __WINE_DEALLOC(ldap_value_freeA);
+WCHAR ** CDECL ldap_explode_dnW( WCHAR *, ULONG ) __WINE_DEALLOC(ldap_value_freeW);
+char * CDECL ldap_get_dnA( LDAP *, WLDAP32_LDAPMessage * ) __WINE_DEALLOC(ldap_memfreeA) __WINE_MALLOC;
+WCHAR * CDECL ldap_get_dnW( LDAP *, WLDAP32_LDAPMessage * ) __WINE_DEALLOC(ldap_memfreeW) __WINE_MALLOC;
 ULONG CDECL ldap_ufn2dnA( char *, char ** );
 ULONG CDECL ldap_ufn2dnW( WCHAR *, WCHAR ** );
 ULONG CDECL ldap_extended_operationA( LDAP *, char *, struct WLDAP32_berval *, LDAPControlA **, LDAPControlA **,
@@ -461,11 +487,14 @@ ULONG CDECL ldap_start_tls_sA( LDAP *, ULONG *, WLDAP32_LDAPMessage **, LDAPCont
 ULONG CDECL ldap_start_tls_sW( LDAP *, ULONG *, WLDAP32_LDAPMessage **, LDAPControlW **, LDAPControlW ** );
 ULONG CDECL ldap_check_filterA( LDAP *, char * );
 ULONG CDECL ldap_check_filterW( LDAP *, WCHAR * );
-char * CDECL ldap_first_attributeA( LDAP *, WLDAP32_LDAPMessage *, WLDAP32_BerElement ** );
-WCHAR * CDECL ldap_first_attributeW( LDAP *, WLDAP32_LDAPMessage *, WLDAP32_BerElement ** );
-ULONG CDECL WLDAP32_ldap_msgfree( WLDAP32_LDAPMessage * );
-char * CDECL ldap_next_attributeA( LDAP *, WLDAP32_LDAPMessage *, WLDAP32_BerElement * );
-WCHAR * CDECL ldap_next_attributeW( LDAP *, WLDAP32_LDAPMessage *, WLDAP32_BerElement * );
+char * CDECL ldap_first_attributeA( LDAP *, WLDAP32_LDAPMessage *,
+                                    WLDAP32_BerElement ** ) __WINE_DEALLOC(ldap_memfreeA) __WINE_MALLOC;
+WCHAR * CDECL ldap_first_attributeW( LDAP *, WLDAP32_LDAPMessage *,
+                                     WLDAP32_BerElement ** ) __WINE_DEALLOC(ldap_memfreeW) __WINE_MALLOC;
+char * CDECL ldap_next_attributeA( LDAP *, WLDAP32_LDAPMessage *,
+                                   WLDAP32_BerElement * ) __WINE_DEALLOC(ldap_memfreeA) __WINE_MALLOC;
+WCHAR * CDECL ldap_next_attributeW( LDAP *, WLDAP32_LDAPMessage *,
+                                    WLDAP32_BerElement * ) __WINE_DEALLOC(ldap_memfreeW) __WINE_MALLOC;
 ULONG CDECL WLDAP32_ldap_result( LDAP *, ULONG, ULONG, struct l_timeval *, WLDAP32_LDAPMessage ** );
 ULONG CDECL ldap_modifyA( LDAP *, char *, LDAPModA ** );
 ULONG CDECL ldap_modifyW( LDAP *, WCHAR *, LDAPModW ** );
@@ -528,12 +557,14 @@ ULONG CDECL ldap_search_stA( LDAP *, const PCHAR, ULONG, const PCHAR, char **, U
                              WLDAP32_LDAPMessage ** );
 ULONG CDECL ldap_search_stW( LDAP *, const PWCHAR, ULONG, const PWCHAR, WCHAR **, ULONG, struct l_timeval *,
                              WLDAP32_LDAPMessage ** );
-char ** CDECL ldap_get_valuesA( LDAP *, WLDAP32_LDAPMessage *, char * );
-WCHAR ** CDECL ldap_get_valuesW( LDAP *, WLDAP32_LDAPMessage *, WCHAR * );
-struct WLDAP32_berval ** CDECL ldap_get_values_lenA( LDAP *, LDAPMessage *, char * );
-struct WLDAP32_berval ** CDECL ldap_get_values_lenW( LDAP *, LDAPMessage *, WCHAR * );
+char ** CDECL ldap_get_valuesA( LDAP *, WLDAP32_LDAPMessage *, char * ) __WINE_DEALLOC(ldap_value_freeA);
+WCHAR ** CDECL ldap_get_valuesW( LDAP *, WLDAP32_LDAPMessage *, WCHAR * ) __WINE_DEALLOC(ldap_value_freeW);
+struct WLDAP32_berval ** CDECL ldap_get_values_lenA( LDAP *, LDAPMessage *,
+                                                     char * ) __WINE_DEALLOC(WLDAP32_ldap_value_free_len);
+struct WLDAP32_berval ** CDECL ldap_get_values_lenW( LDAP *, LDAPMessage *,
+                                                     WCHAR * ) __WINE_DEALLOC(WLDAP32_ldap_value_free_len);
 
-ULONG map_error( int ) DECLSPEC_HIDDEN;
+ULONG map_error( int );
 
 static inline char *strWtoU( const WCHAR *str )
 {
@@ -587,6 +618,24 @@ static inline WCHAR *strnAtoW( const char *str, DWORD in_len, DWORD *out_len )
             ret[len] = 0;
             *out_len = len;
         }
+    }
+    return ret;
+}
+
+static inline char *strreplace( const char *s, const char *before, const char *after )
+{
+    char *ret = malloc( strlen( s ) + strlen( after ) / strlen( before ) + 1 );
+    char *cur, *prev = ret;
+    if (ret)
+    {
+        ret[0] = 0;
+        for (cur = strstr( s, before ); cur; cur = strstr( prev, before ))
+        {
+            strncat( ret, prev, cur - prev );
+            strcat( ret, after );
+            prev = cur + strlen( before );
+        }
+        strncat( ret, prev, cur - prev );
     }
     return ret;
 }
@@ -743,11 +792,6 @@ static inline struct WLDAP32_berval **bvarrayUtoW( struct berval **bv )
     return ret;
 }
 
-static inline void bvfreeU( struct berval *berval )
-{
-    free( berval );
-}
-
 static inline struct berval **bvarrayWtoU( struct WLDAP32_berval **bv )
 {
     struct berval **ret = NULL;
@@ -828,6 +872,7 @@ static inline void modfreeU( LDAPMod *mod )
         bvarrayfreeU( mod->mod_vals.modv_bvals );
     else
         strarrayfreeU( mod->mod_vals.modv_strvals );
+    free( mod->mod_type );
     free( mod );
 }
 
@@ -970,6 +1015,7 @@ static inline void modfreeW( LDAPModW *mod )
         bvarrayfreeW( mod->mod_vals.modv_bvals );
     else
         strarrayfreeW( mod->mod_vals.modv_strvals );
+    free( mod->mod_type );
     free( mod );
 }
 

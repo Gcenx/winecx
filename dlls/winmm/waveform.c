@@ -22,8 +22,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
@@ -236,11 +234,11 @@ void WINMM_DeleteWaveform(void)
         DeleteCriticalSection(&mmdevice->lock);
     }
 
-    HeapFree(GetProcessHeap(), 0, g_out_mmdevices);
-    HeapFree(GetProcessHeap(), 0, g_in_mmdevices);
+    free(g_out_mmdevices);
+    free(g_in_mmdevices);
 
-    HeapFree(GetProcessHeap(), 0, g_device_handles);
-    HeapFree(GetProcessHeap(), 0, g_handle_devices);
+    free(g_device_handles);
+    free(g_handle_devices);
 
     DeleteCriticalSection(&g_devthread_lock);
 }
@@ -291,8 +289,7 @@ static WINMM_Device *WINMM_FindUnusedDevice(WINMM_Device **devices,
         WINMM_Device *device = devices[i];
 
         if(!device){
-            device = devices[i] = HeapAlloc(GetProcessHeap(),
-                    HEAP_ZERO_MEMORY, sizeof(WINMM_Device));
+            device = devices[i] = calloc(1, sizeof(WINMM_Device));
             if(!device)
                 return NULL;
 
@@ -580,18 +577,16 @@ static HRESULT WINMM_EnumDevices(WINMM_MMDevice **devices,
         UINT n, count = 1;
         IMMDevice *def_dev = NULL;
 
-        *devices = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                sizeof(WINMM_MMDevice) * (*devcount));
+        *devices = calloc(*devcount, sizeof(WINMM_MMDevice));
         if(!*devices){
             IMMDeviceCollection_Release(devcoll);
             return E_OUTOFMEMORY;
         }
 
-        *map = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                sizeof(WINMM_MMDevice *) * (*devcount));
+        *map = calloc(*devcount, sizeof(WINMM_MMDevice *));
         if(!*map){
             IMMDeviceCollection_Release(devcoll);
-            HeapFree(GetProcessHeap(), 0, *devices);
+            free(*devices);
             return E_OUTOFMEMORY;
         }
 
@@ -774,7 +769,7 @@ static HRESULT reroute_mapper_device(WINMM_Device *device, BOOL is_out)
         return E_FAIL;
     }
 
-    HeapFree(GetProcessHeap(), 0, info.format);
+    free(info.format);
 
     if(!stopped){
         if(is_out)
@@ -1101,7 +1096,7 @@ static LRESULT WINMM_OpenDevice(WINMM_Device *device, WINMM_OpenInfo *info,
 
         /* we aren't guaranteed that the struct in lpFormat is a full
          * WAVEFORMATEX struct, which IAC::IsFormatSupported requires */
-        device->orig_fmt = HeapAlloc(GetProcessHeap(), 0, sizeof(WAVEFORMATEX));
+        device->orig_fmt = malloc(sizeof(WAVEFORMATEX));
         memcpy(device->orig_fmt, info->format, sizeof(PCMWAVEFORMAT));
         device->orig_fmt->cbSize = 0;
         if(device->orig_fmt->wBitsPerSample % 8 != 0){
@@ -1118,8 +1113,7 @@ static LRESULT WINMM_OpenDevice(WINMM_Device *device, WINMM_OpenInfo *info,
             device->orig_fmt->nAvgBytesPerSec  = device->orig_fmt->nSamplesPerSec * device->orig_fmt->nBlockAlign;
         }
     }else{
-        device->orig_fmt = HeapAlloc(GetProcessHeap(), 0,
-                sizeof(WAVEFORMATEX) + info->format->cbSize);
+        device->orig_fmt = malloc(sizeof(WAVEFORMATEX) + info->format->cbSize);
         memcpy(device->orig_fmt, info->format,
                 sizeof(WAVEFORMATEX) + info->format->cbSize);
     }
@@ -1171,16 +1165,10 @@ static LRESULT WINMM_OpenDevice(WINMM_Device *device, WINMM_OpenInfo *info,
 
         /* As the devices thread is waiting on g_device_handles, it can
          * only be modified from within this same thread. */
-        if(g_device_handles){
-            g_device_handles = HeapReAlloc(GetProcessHeap(), 0, g_device_handles,
-                    sizeof(HANDLE) * (g_devhandle_count + 1));
-            g_handle_devices = HeapReAlloc(GetProcessHeap(), 0, g_handle_devices,
-                    sizeof(WINMM_Device *) * (g_devhandle_count + 1));
-        }else{
-            g_device_handles = HeapAlloc(GetProcessHeap(), 0, sizeof(HANDLE));
-            g_handle_devices = HeapAlloc(GetProcessHeap(), 0,
-                    sizeof(WINMM_Device *));
-        }
+        g_device_handles = realloc(g_device_handles,
+                sizeof(HANDLE) * (g_devhandle_count + 1));
+        g_handle_devices = realloc(g_handle_devices,
+                sizeof(WINMM_Device *) * (g_devhandle_count + 1));
         g_device_handles[g_devhandle_count] = device->event;
         g_handle_devices[g_devhandle_count] = device;
         ++g_devhandle_count;
@@ -1429,7 +1417,7 @@ static HRESULT WINMM_CloseDevice(WINMM_Device *device)
     IAudioClock_Release(device->clock);
     device->clock = NULL;
 
-    HeapFree(GetProcessHeap(), 0, device->orig_fmt);
+    free(device->orig_fmt);
 
     return S_OK;
 }
@@ -1501,7 +1489,7 @@ static LRESULT WINMM_PrepareHeader(HWAVE hwave, WAVEHDR *header)
             return mr;
         }
 
-        ash = HeapAlloc(GetProcessHeap(), 0, sizeof(ACMSTREAMHEADER) + size);
+        ash = malloc(sizeof(ACMSTREAMHEADER) + size);
         if(!ash){
             LeaveCriticalSection(&device->lock);
             return MMSYSERR_NOMEM;
@@ -1519,7 +1507,7 @@ static LRESULT WINMM_PrepareHeader(HWAVE hwave, WAVEHDR *header)
 
         mr = acmStreamPrepareHeader(device->acm_handle, ash, 0);
         if(mr != MMSYSERR_NOERROR){
-            HeapFree(GetProcessHeap(), 0, ash);
+            free(ash);
             LeaveCriticalSection(&device->lock);
             return mr;
         }
@@ -1549,7 +1537,7 @@ static LRESULT WINMM_UnprepareHeader(HWAVE hwave, WAVEHDR *header)
 
         acmStreamUnprepareHeader(device->acm_handle, ash, 0);
 
-        HeapFree(GetProcessHeap(), 0, ash);
+        free(ash);
     }
 
     LeaveCriticalSection(&device->lock);
@@ -1800,7 +1788,7 @@ static void WID_PullACMData(WINMM_Device *device)
         device->acm_hdr.cbSrcLength = packet * device->bytes_per_frame;
         device->acm_hdr.cbSrcLengthUsed = 0;
         device->acm_hdr.dwSrcUser = 0;
-        device->acm_hdr.pbDst = HeapAlloc(GetProcessHeap(), 0, packet_bytes);
+        device->acm_hdr.pbDst = malloc(packet_bytes);
         device->acm_hdr.cbDstLength = packet_bytes;
         device->acm_hdr.cbDstLengthUsed = 0;
         device->acm_hdr.dwDstUser = 0;
@@ -1846,7 +1834,7 @@ static void WID_PullACMData(WINMM_Device *device)
 
         if(device->acm_offs >= WINMM_FixedBufferLen(device->acm_hdr.cbDstLengthUsed, device)){
             acmStreamUnprepareHeader(device->acm_handle, &device->acm_hdr, 0);
-            HeapFree(GetProcessHeap(), 0, device->acm_hdr.pbDst);
+            free(device->acm_hdr.pbDst);
             device->acm_hdr.cbDstLength = 0;
             device->acm_hdr.cbDstLengthUsed = 0;
 
@@ -1858,7 +1846,7 @@ static void WID_PullACMData(WINMM_Device *device)
 
     /* out of WAVEHDRs to write into, so toss the rest of this packet */
     acmStreamUnprepareHeader(device->acm_handle, &device->acm_hdr, 0);
-    HeapFree(GetProcessHeap(), 0, device->acm_hdr.pbDst);
+    free(device->acm_hdr.pbDst);
     device->acm_hdr.cbDstLength = 0;
     device->acm_hdr.cbDstLengthUsed = 0;
 }
@@ -2687,14 +2675,14 @@ UINT WINAPI waveOutGetErrorTextA(UINT uError, LPSTR lpText, UINT uSize)
     else if (uSize == 0) ret = MMSYSERR_NOERROR;
     else
     {
-        LPWSTR	xstr = HeapAlloc(GetProcessHeap(), 0, uSize * sizeof(WCHAR));
+        WCHAR *xstr = malloc(uSize * sizeof(WCHAR));
         if (!xstr) ret = MMSYSERR_NOMEM;
         else
         {
             ret = waveOutGetErrorTextW(uError, xstr, uSize);
             if (ret == MMSYSERR_NOERROR)
                 WideCharToMultiByte(CP_ACP, 0, xstr, -1, lpText, uSize, NULL, NULL);
-            HeapFree(GetProcessHeap(), 0, xstr);
+            free(xstr);
         }
     }
     return ret;
@@ -3067,7 +3055,7 @@ UINT WINAPI waveOutGetVolume(HWAVEOUT hWaveOut, DWORD *out)
         return MMSYSERR_ERROR;
     }
 
-    vols = HeapAlloc(GetProcessHeap(), 0, sizeof(float) * channels);
+    vols = malloc(sizeof(float) * channels);
     if(!vols){
         LeaveCriticalSection(&device->lock);
         return MMSYSERR_NOMEM;
@@ -3076,7 +3064,7 @@ UINT WINAPI waveOutGetVolume(HWAVEOUT hWaveOut, DWORD *out)
     hr = IAudioStreamVolume_GetAllVolumes(device->volume, channels, vols);
     if(FAILED(hr)){
         LeaveCriticalSection(&device->lock);
-        HeapFree(GetProcessHeap(), 0, vols);
+        free(vols);
         WARN("GetAllVolumes failed: %08lx\n", hr);
         return MMSYSERR_ERROR;
     }
@@ -3087,7 +3075,7 @@ UINT WINAPI waveOutGetVolume(HWAVEOUT hWaveOut, DWORD *out)
     if(channels > 1)
         *out |= ((UINT16)(vols[1] * (DWORD)0xFFFF)) << 16;
 
-    HeapFree(GetProcessHeap(), 0, vols);
+    free(vols);
 
     return MMSYSERR_NOERROR;
 }
@@ -3116,7 +3104,7 @@ UINT WINAPI waveOutSetVolume(HWAVEOUT hWaveOut, DWORD in)
         return MMSYSERR_ERROR;
     }
 
-    vols = HeapAlloc(GetProcessHeap(), 0, sizeof(float) * channels);
+    vols = malloc(sizeof(float) * channels);
     if(!vols){
         LeaveCriticalSection(&device->lock);
         return MMSYSERR_NOMEM;
@@ -3125,7 +3113,7 @@ UINT WINAPI waveOutSetVolume(HWAVEOUT hWaveOut, DWORD in)
     hr = IAudioStreamVolume_GetAllVolumes(device->volume, channels, vols);
     if(FAILED(hr)){
         LeaveCriticalSection(&device->lock);
-        HeapFree(GetProcessHeap(), 0, vols);
+        free(vols);
         WARN("GetAllVolumes failed: %08lx\n", hr);
         return MMSYSERR_ERROR;
     }
@@ -3137,14 +3125,14 @@ UINT WINAPI waveOutSetVolume(HWAVEOUT hWaveOut, DWORD in)
     hr = IAudioStreamVolume_SetAllVolumes(device->volume, channels, vols);
     if(FAILED(hr)){
         LeaveCriticalSection(&device->lock);
-        HeapFree(GetProcessHeap(), 0, vols);
+        free(vols);
         WARN("SetAllVolumes failed: %08lx\n", hr);
         return MMSYSERR_ERROR;
     }
 
     LeaveCriticalSection(&device->lock);
 
-    HeapFree(GetProcessHeap(), 0, vols);
+    free(vols);
 
     return MMSYSERR_NOERROR;
 }
@@ -3921,17 +3909,17 @@ UINT WINAPI mixerGetControlDetailsA(HMIXEROBJ hmix, LPMIXERCONTROLDETAILS lpmcdA
 	    int size = max(1, lpmcdA->cChannels) * sizeof(MIXERCONTROLDETAILS_LISTTEXTW);
             unsigned int i;
 
-	    if (lpmcdA->u.cMultipleItems != 0) {
-		size *= lpmcdA->u.cMultipleItems;
+	    if (lpmcdA->cMultipleItems != 0) {
+		size *= lpmcdA->cMultipleItems;
 	    }
-	    pDetailsW = HeapAlloc(GetProcessHeap(), 0, size);
+	    pDetailsW = malloc(size);
             lpmcdA->paDetails = pDetailsW;
             lpmcdA->cbDetails = sizeof(MIXERCONTROLDETAILS_LISTTEXTW);
 	    /* set up lpmcd->paDetails */
 	    ret = mixerGetControlDetailsW(hmix, lpmcdA, fdwDetails);
 	    /* copy from lpmcd->paDetails back to paDetailsW; */
             if (ret == MMSYSERR_NOERROR) {
-                for (i = 0; i < lpmcdA->u.cMultipleItems * lpmcdA->cChannels; i++) {
+                for (i = 0; i < lpmcdA->cMultipleItems * lpmcdA->cChannels; i++) {
                     pDetailsA->dwParam1 = pDetailsW->dwParam1;
                     pDetailsA->dwParam2 = pDetailsW->dwParam2;
                     WideCharToMultiByte( CP_ACP, 0, pDetailsW->szName, -1,
@@ -3940,10 +3928,10 @@ UINT WINAPI mixerGetControlDetailsA(HMIXEROBJ hmix, LPMIXERCONTROLDETAILS lpmcdA
                     pDetailsA++;
                     pDetailsW++;
                 }
-                pDetailsA -= lpmcdA->u.cMultipleItems * lpmcdA->cChannels;
-                pDetailsW -= lpmcdA->u.cMultipleItems * lpmcdA->cChannels;
+                pDetailsA -= lpmcdA->cMultipleItems * lpmcdA->cChannels;
+                pDetailsW -= lpmcdA->cMultipleItems * lpmcdA->cChannels;
             }
-	    HeapFree(GetProcessHeap(), 0, pDetailsW);
+	    free(pDetailsW);
 	    lpmcdA->paDetails = pDetailsA;
             lpmcdA->cbDetails = sizeof(MIXERCONTROLDETAILS_LISTTEXTA);
 	}
@@ -3973,8 +3961,8 @@ UINT WINAPI mixerGetLineControlsA(HMIXEROBJ hmix, LPMIXERLINECONTROLSA lpmlcA,
 
     mlcW.cbStruct = sizeof(mlcW);
     mlcW.dwLineID = lpmlcA->dwLineID;
-    mlcW.u.dwControlID = lpmlcA->u.dwControlID;
-    mlcW.u.dwControlType = lpmlcA->u.dwControlType;
+    mlcW.dwControlID = lpmlcA->dwControlID;
+    mlcW.dwControlType = lpmlcA->dwControlType;
 
     /* Debugging on Windows shows for MIXER_GETLINECONTROLSF_ONEBYTYPE only,
        the control count is assumed to be 1 - This is relied upon by a game,
@@ -3985,15 +3973,14 @@ UINT WINAPI mixerGetLineControlsA(HMIXEROBJ hmix, LPMIXERLINECONTROLSA lpmlcA,
         mlcW.cControls = lpmlcA->cControls;
     }
     mlcW.cbmxctrl = sizeof(MIXERCONTROLW);
-    mlcW.pamxctrl = HeapAlloc(GetProcessHeap(), 0,
-			      mlcW.cControls * mlcW.cbmxctrl);
+    mlcW.pamxctrl = malloc(mlcW.cControls * mlcW.cbmxctrl);
 
     ret = mixerGetLineControlsW(hmix, &mlcW, fdwControls);
 
     if (ret == MMSYSERR_NOERROR) {
 	lpmlcA->dwLineID = mlcW.dwLineID;
-	lpmlcA->u.dwControlID = mlcW.u.dwControlID;
-	lpmlcA->u.dwControlType = mlcW.u.dwControlType;
+	lpmlcA->dwControlID = mlcW.dwControlID;
+	lpmlcA->dwControlType = mlcW.dwControlType;
 
 	for (i = 0; i < mlcW.cControls; i++) {
 	    lpmlcA->pamxctrl[i].cbStruct = sizeof(MIXERCONTROLA);
@@ -4018,7 +4005,7 @@ UINT WINAPI mixerGetLineControlsA(HMIXEROBJ hmix, LPMIXERLINECONTROLSA lpmlcA,
 	}
     }
 
-    HeapFree(GetProcessHeap(), 0, mlcW.pamxctrl);
+    free(mlcW.pamxctrl);
 
     return ret;
 }
@@ -4032,8 +4019,8 @@ static UINT WINMM_GetVolumeLineControl(WINMM_MMDevice *mmdevice, DWORD line,
     ctl->cMultipleItems = 0;
     LoadStringW(hWinMM32Instance, IDS_VOLUME, ctl->szShortName, MIXER_SHORT_NAME_CHARS);
     LoadStringW(hWinMM32Instance, IDS_VOLUME, ctl->szName, MIXER_LONG_NAME_CHARS);
-    ctl->Bounds.s1.dwMinimum = 0;
-    ctl->Bounds.s1.dwMaximum = 0xFFFF;
+    ctl->Bounds.dwMinimum = 0;
+    ctl->Bounds.dwMaximum = 0xFFFF;
     ctl->Metrics.cSteps = 192;
 
     return MMSYSERR_NOERROR;
@@ -4048,8 +4035,8 @@ static UINT WINMM_GetMuteLineControl(WINMM_MMDevice *mmdevice, DWORD line,
     ctl->cMultipleItems = 0;
     LoadStringW(hWinMM32Instance, IDS_MUTE, ctl->szShortName, MIXER_SHORT_NAME_CHARS);
     LoadStringW(hWinMM32Instance, IDS_MUTE, ctl->szName, MIXER_LONG_NAME_CHARS);
-    ctl->Bounds.s1.dwMinimum = 0;
-    ctl->Bounds.s1.dwMaximum = 1;
+    ctl->Bounds.dwMinimum = 0;
+    ctl->Bounds.dwMaximum = 1;
     ctl->Metrics.cSteps = 0;
 
     return MMSYSERR_NOERROR;
@@ -4083,7 +4070,7 @@ UINT WINAPI mixerGetLineControlsW(HMIXEROBJ hmix, LPMIXERLINECONTROLSW lpmlcW,
         return MMSYSERR_INVALPARAM;
 
     TRACE("dwLineID: %lu\n", lpmlcW->dwLineID);
-    TRACE("dwControl: %lx\n", lpmlcW->u.dwControlID);
+    TRACE("dwControl: %lx\n", lpmlcW->dwControlID);
     TRACE("cControls: %lu\n", lpmlcW->cControls);
 
     mmdevice = WINMM_GetMixerMMDevice(hmix, fdwControls, NULL);
@@ -4110,10 +4097,10 @@ UINT WINAPI mixerGetLineControlsW(HMIXEROBJ hmix, LPMIXERLINECONTROLSW lpmlcW,
             return MMSYSERR_INVALPARAM;
         if(lpmlcW->dwLineID != 0 && lpmlcW->dwLineID != 0xFFFF0000)
             return MIXERR_INVALLINE;
-        if(lpmlcW->u.dwControlID == 0)
+        if(lpmlcW->dwControlID == 0)
             return WINMM_GetVolumeLineControl(mmdevice, lpmlcW->dwLineID,
                     lpmlcW->pamxctrl, fdwControls);
-        if(lpmlcW->u.dwControlID == 1)
+        if(lpmlcW->dwControlID == 1)
             return WINMM_GetMuteLineControl(mmdevice, lpmlcW->dwLineID,
                     lpmlcW->pamxctrl, fdwControls);
         return MMSYSERR_NOTSUPPORTED;
@@ -4124,10 +4111,10 @@ UINT WINAPI mixerGetLineControlsW(HMIXEROBJ hmix, LPMIXERLINECONTROLSW lpmlcW,
             return MMSYSERR_INVALPARAM;
         if(lpmlcW->dwLineID != 0 && lpmlcW->dwLineID != 0xFFFF0000)
             return MIXERR_INVALLINE;
-        if(lpmlcW->u.dwControlType == MIXERCONTROL_CONTROLTYPE_VOLUME)
+        if(lpmlcW->dwControlType == MIXERCONTROL_CONTROLTYPE_VOLUME)
             return WINMM_GetVolumeLineControl(mmdevice, lpmlcW->dwLineID,
                     lpmlcW->pamxctrl, fdwControls);
-        if(lpmlcW->u.dwControlType == MIXERCONTROL_CONTROLTYPE_MUTE)
+        if(lpmlcW->dwControlType == MIXERCONTROL_CONTROLTYPE_MUTE)
             return WINMM_GetMuteLineControl(mmdevice, lpmlcW->dwLineID,
                     lpmlcW->pamxctrl, fdwControls);
         return MMSYSERR_NOTSUPPORTED;

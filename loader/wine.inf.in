@@ -107,7 +107,7 @@ AddReg=\
     ContentIndex,\
     ControlClass,\
     CurrentVersion,\
-    CurrentVersionWow64,\
+    CurrentVersionWow64.ntamd64,\
     Debugger,\
     DirectX,\
     Fonts,\
@@ -119,7 +119,7 @@ AddReg=\
     SessionMgr,\
     Tapi,\
     ThemeManager,\
-    VersionInfo.ntamd64,\
+    VersionInfo,\
     LicenseInformation
 
 [DefaultInstall.ntarm64]
@@ -132,7 +132,7 @@ AddReg=\
     ContentIndex,\
     ControlClass,\
     CurrentVersion,\
-    CurrentVersionWow64,\
+    CurrentVersionWow64.ntarm64,\
     Debugger,\
     DirectX,\
     Fonts,\
@@ -144,26 +144,38 @@ AddReg=\
     SessionMgr,\
     Tapi,\
     ThemeManager,\
-    VersionInfo.ntamd64,\
+    VersionInfo,\
     LicenseInformation
 
-[Wow64Install]
+[Wow64Install.ntx86]
 RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin32,FakeDllsWow64
 CopyFiles=NlsFiles
 AddReg=\
     CurrentVersion,\
-    CurrentVersionWow64,\
+    CurrentVersionWow64.ntx86,\
     Debugger,\
     DirectX,\
     MCI,\
     Misc,\
     Tapi,\
-    VersionInfo.ntamd64,\
+    VersionInfo,\
     LicenseInformation
 
-[Wow64Install.ntarm64]
-WineFakeDlls=FakeDllsWin32
+[Wow64Install.ntarm]
+RegisterDlls=RegisterDllsSection
+WineFakeDlls=FakeDllsWin32,FakeDllsWow64
+CopyFiles=NlsFiles
+AddReg=\
+    CurrentVersion,\
+    CurrentVersionWow64.ntarm,\
+    Debugger,\
+    DirectX,\
+    MCI,\
+    Misc,\
+    Tapi,\
+    VersionInfo,\
+    LicenseInformation
 
 [DefaultInstall.Services]
 AddService=BITS,0,BITSService
@@ -171,6 +183,7 @@ AddService=EventLog,0x800,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
+AddService=scardsvr,0,ScardSvrService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
@@ -190,6 +203,7 @@ AddService=EventLog,0x800,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
+AddService=scardsvr,0,ScardSvrService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
@@ -209,6 +223,7 @@ AddService=EventLog,0x800,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
+AddService=scardsvr,0,ScardSvrService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
@@ -228,6 +243,7 @@ AddService=EventLog,0x800,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
+AddService=scardsvr,0,ScardSvrService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
@@ -399,9 +415,26 @@ HKLM,%CurrentVersionNT%\Print,,16
 HKLM,%CurrentVersionNT%\ProfileList,,16
 HKLM,%CurrentVersionNT%\Winlogon,"Shell",,"explorer.exe"
 
-[CurrentVersionWow64]
+[CurrentVersionWow64.ntamd64]
 HKLM,%CurrentVersion%,"ProgramFilesDir (x86)",,"%16426%"
 HKLM,%CurrentVersion%,"CommonFilesDir (x86)",,"%16428%"
+HKLM,Software\Microsoft\Wow64\x86,,2,"wow64cpu.dll"
+
+[CurrentVersionWow64.ntarm64]
+HKLM,%CurrentVersion%,"ProgramFilesDir (x86)",,"%16426%"
+HKLM,%CurrentVersion%,"CommonFilesDir (x86)",,"%16428%"
+HKLM,%CurrentVersion%,"ProgramFilesDir (Arm)",,"C:\Program Files (Arm)"
+HKLM,%CurrentVersion%,"CommonFilesDir (Arm)",,"C:\Program Files (Arm)\Common Files"
+HKLM,Software\Microsoft\Wow64\arm,,2,"wowarmhw.dll"
+HKLM,Software\Microsoft\Wow64\x86,,2,"xtajit.dll"
+
+[CurrentVersionWow64.ntx86]
+HKLM,%CurrentVersion%,"ProgramFilesDir (x86)",,"%16422%"
+HKLM,%CurrentVersion%,"CommonFilesDir (x86)",,"%16427%"
+
+[CurrentVersionWow64.ntarm]
+HKLM,%CurrentVersion%,"ProgramFilesDir (Arm)",,"%16422%"
+HKLM,%CurrentVersion%,"CommonFilesDir (Arm)",,"%16427%"
 
 [Debugger]
 HKLM,%CurrentVersionNT%\AeDebug,"Debugger",2,"winedbg --auto %ld %ld"
@@ -2067,7 +2100,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,cryptnet.dll,1
 11,,devenum.dll,1
 11,,mp3dmod.dll,1
-;(cw)11,,mscoree.dll,1
+11,,mscoree.dll,1
 11,,mshtml.dll,1
 11,,msisip.dll,1
 11,,qcap.dll,1
@@ -2112,6 +2145,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,mui,
 11,gecko\plugin,npmshtml.dll
 11,Speech\Common,sapi.dll
+11,Speech\Engines\TTS,msttsengine.dll
 11,wbem,mofcomp.exe
 11,wbem,wbemdisp.dll
 11,wbem,wbemprox.dll
@@ -2197,6 +2231,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,shdocvw.dll
 11,gecko\plugin,npmshtml.dll
 11,Speech\Common,sapi.dll
+11,Speech\Engines\TTS,msttsengine.dll
 11,wbem,mofcomp.exe
 11,wbem,wbemdisp.dll
 11,wbem,wbemprox.dll
@@ -2238,7 +2273,7 @@ system.ini, drivers32,,"msacm.msgsm610=msgsm32.acm"
 system.ini, drivers32,,"vidc.mrle=msrle32.dll"
 system.ini, drivers32,,"vidc.msvc=msvidc32.dll"
 system.ini, drivers32,,"vidc.cvid=iccvid.dll"
-system.ini, drivers32,,"; vidc.IV50=ir50_32.dll"
+system.ini, drivers32,,"vidc.IV50=ir50_32.dll"
 system.ini, drivers32,,"; vidc.IV31=ir32_32.dll"
 system.ini, drivers32,,"; vidc.IV32=ir32_32.dll"
 
@@ -2321,6 +2356,19 @@ ServiceType=32
 StartType=3
 ErrorControl=1
 
+[ScardSvrService]
+AddReg=ScardSvrServiceKeys
+DisplayName="Smart card server"
+ServiceBinary="%11%\svchost.exe -k netsvcs"
+ServiceType=32
+StartType=3
+ErrorControl=1
+
+[ScardSvrServiceKeys]
+HKR,Parameters,"ServiceDll",,"%11%\scardsvr.dll"
+HKR,Parameters,"ServiceMain",,"CalaisMain"
+HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010008,"scardsvr"
+
 [SpoolerService]
 AddReg=SpoolerServiceKeys
 Description="Loads files to memory for later printing"
@@ -2370,15 +2418,15 @@ ErrorControl=1
 
 [BITSServiceKeys]
 HKR,Parameters,"ServiceDll",,"%11%\qmgr.dll"
-HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010000,"BITS"
+HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010008,"BITS"
 
 [EventLogServiceKeys]
 HKR,Parameters,"ServiceDll",,"%11%\wevtsvc.dll"
-HKLM,%CurrentVersionNT%\SvcHost,"LocalServiceNetworkRestricted",0x00010000,"EventLog"
+HKLM,%CurrentVersionNT%\SvcHost,"LocalServiceNetworkRestricted",0x00010008,"EventLog"
 
 [StiServiceKeys]
 HKR,Parameters,"ServiceDll",,"%11%\wiaservc.dll"
-HKLM,%CurrentVersionNT%\SvcHost,"imgsvc",0x00010000,"StiSvc"
+HKLM,%CurrentVersionNT%\SvcHost,"imgsvc",0x00010008,"StiSvc"
 
 [PlugPlayService]
 Description="Enables automatic configuration of devices"
@@ -2402,12 +2450,12 @@ Description="Lanman Server"
 DisplayName="Lanman Server"
 ServiceBinary="%11%\svchost.exe -k netsvcs"
 ServiceType=32
-StartType=4
+StartType=3
 ErrorControl=1
 
 [LanmanServerServiceKeys]
 HKR,Parameters,"ServiceDll",,"%11%\srvsvc.dll"
-;; HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010008,"lanmanserver"
+HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010008,"lanmanserver"
 
 [FontCacheService]
 AddReg=FontCacheServiceKeys
@@ -2444,7 +2492,7 @@ StartType=3
 ErrorControl=1
 
 [Services]
-;(cw)HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"
+HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"
 HKLM,"System\CurrentControlSet\Services\Eventlog\Application",,16
 HKLM,"System\CurrentControlSet\Services\Eventlog\System","Sources",0x10000,""
 HKLM,"System\CurrentControlSet\Services\Tcpip\Parameters","DataBasePath",,"%12%\etc"
@@ -2453,13 +2501,12 @@ HKLM,"System\CurrentControlSet\Services\Winsock\Parameters",,16
 HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Catalog_Entries",,16
 
 [VersionInfo]
-HKLM,%CurrentVersionNT%,"CurrentVersion",2,"6.1"
-HKLM,%CurrentVersionNT%,"CurrentMajorVersionNumber",0x10003,6
-HKLM,%CurrentVersionNT%,"CurrentMinorVersionNumber",0x10003,1
-HKLM,%CurrentVersionNT%,"CSDVersion",2,"Service Pack 1"
-HKLM,%CurrentVersionNT%,"CurrentBuild",2,"7601"
-HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"7601"
-HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
+HKLM,%CurrentVersionNT%,"CurrentVersion",2,"6.3"
+HKLM,%CurrentVersionNT%,"CurrentMajorVersionNumber",0x10003,10
+HKLM,%CurrentVersionNT%,"CurrentMinorVersionNumber",0x10003,0
+HKLM,%CurrentVersionNT%,"CurrentBuild",2,"19043"
+HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"19043"
+HKLM,%CurrentVersionNT%,"CurrentType",2,"Multiprocessor Free"
 HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
@@ -2467,27 +2514,10 @@ HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%,"ProductName",2,"Microsoft Windows 7"
+HKLM,%CurrentVersionNT%,"EditionId",2,"Professional"
+HKLM,%CurrentVersionNT%,"ProductName",2,"Windows 10 Pro"
 HKLM,%Control%\ProductOptions,"ProductType",2,"WinNT"
-HKLM,%Control%\Windows,"CSDVersion",0x10003,0x100
-HKLM,%Control%\Session Manager\Environment,"OS",2,"Windows_NT"
-
-[VersionInfo.ntamd64]
-HKLM,%CurrentVersionNT%,"CurrentVersion",2,"6.1"
-HKLM,%CurrentVersionNT%,"CSDVersion",2,"Service Pack 1"
-HKLM,%CurrentVersionNT%,"CurrentBuild",2,"7601"
-HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"7601"
-HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
-HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
-00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
-00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
-00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
-00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
-00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
-00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%,"ProductName",2,"Microsoft Windows 7"
-HKLM,%Control%\ProductOptions,"ProductType",2,"WinNT"
-HKLM,%Control%\Windows,"CSDVersion",0x10003,0x100
+HKLM,%Control%\Windows,"CSDVersion",0x10003,0
 HKLM,%Control%\Session Manager\Environment,"OS",2,"Windows_NT"
 
 [Wow64]

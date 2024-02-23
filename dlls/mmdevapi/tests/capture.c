@@ -283,7 +283,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
             /* Native's position is one period further than what we read.
              * Perhaps that's precisely the meaning of DATA_DISCONTINUITY:
              * signal when the position jump left a gap. */
-            ok(pos == sum + frames, "Position %u last %u frames %u\n", (UINT)pos, sum, frames);
+            ok(pos >= sum + frames, "Position %u last %u frames %u\n", (UINT)pos, sum, frames);
             sum = pos;
         }else{ /* win10 */
             ok(pos == sum, "Position %u last %u frames %u\n", (UINT)pos, sum, frames);
@@ -530,9 +530,6 @@ static void test_audioclient(void)
     ok(hr == S_OK, "Valid GetStreamLatency call returns %08lx\n", hr);
     trace("Returned latency: %u.%04u ms\n",
           (UINT)(t1/10000), (UINT)(t1 % 10000));
-
-    hr = IAudioClient_Initialize(ac, AUDCLNT_SHAREMODE_SHARED, 0, 5000000, 0, pwfx, NULL);
-    ok(hr == AUDCLNT_E_ALREADY_INITIALIZED, "Calling Initialize twice returns %08lx\n", hr);
 
     hr = IAudioClient_SetEventHandle(ac, NULL);
     ok(hr == E_INVALIDARG, "SetEventHandle(NULL) returns %08lx\n", hr);

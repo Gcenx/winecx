@@ -944,7 +944,7 @@ NTSTATUS WINAPI wow64_NtQueryObject( UINT *args )
     switch (class)
     {
     case ObjectBasicInformation:   /* OBJECT_BASIC_INFORMATION */
-    case ObjectDataInformation:   /* OBJECT_DATA_INFORMATION */
+    case ObjectHandleFlagInformation:   /* OBJECT_HANDLE_FLAG_INFORMATION */
         return NtQueryObject( handle, class, ptr, len, retlen );
 
     case ObjectNameInformation:   /* OBJECT_NAME_INFORMATION */
@@ -1371,7 +1371,7 @@ NTSTATUS WINAPI wow64_NtSetInformationObject( UINT *args )
 
     switch (class)
     {
-    case ObjectDataInformation:   /* OBJECT_DATA_INFORMATION */
+    case ObjectHandleFlagInformation:   /* OBJECT_HANDLE_FLAG_INFORMATION */
         return NtSetInformationObject( handle, class, ptr, len );
 
     default:
@@ -1490,6 +1490,71 @@ NTSTATUS WINAPI wow64_NtWaitForAlertByThreadId( UINT *args )
 }
 
 
+/* helper to wow64_NtWaitForDebugEvent; retrieve machine from PE image */
+static NTSTATUS get_image_machine( HANDLE handle, USHORT *machine )
+{
+    IMAGE_DOS_HEADER dos_hdr;
+    IMAGE_NT_HEADERS nt_hdr;
+    IO_STATUS_BLOCK32 iosb32;
+    IO_STATUS_BLOCK iosb;
+    LARGE_INTEGER offset;
+    FILE_POSITION_INFORMATION pos_info;
+    NTSTATUS status;
+
+    /* HACK: this shouldn't be necessary since we open the file for synchronous
+     * I/O, but we currently ignore that in ntdll.so and always write the 32-bit
+     * IOSB */
+    iosb.Pointer = &iosb32;
+
+    offset.QuadPart = 0;
+    status = NtReadFile( handle, NULL, NULL, NULL,
+                         &iosb, &dos_hdr, sizeof(dos_hdr), &offset, NULL );
+    if (!status)
+    {
+        offset.QuadPart = dos_hdr.e_lfanew;
+        status = NtReadFile( handle, NULL, NULL, NULL, &iosb,
+                             &nt_hdr, FIELD_OFFSET(IMAGE_NT_HEADERS, OptionalHeader), &offset, NULL );
+        if (!status)
+            *machine = nt_hdr.FileHeader.Machine;
+        /* Reset file pos at beginning of file */
+        pos_info.CurrentByteOffset.QuadPart = 0;
+        NtSetInformationFile( handle, &iosb, &pos_info, sizeof(pos_info), FilePositionInformation );
+    }
+    return status;
+}
+
+/* helper to wow64_NtWaitForDebugEvent; only pass debug events for current machine */
+static BOOL filter_out_state_change( HANDLE handle, DBGUI_WAIT_STATE_CHANGE *state )
+{
+    BOOL filter_out;
+
+    switch (state->NewState)
+    {
+    case DbgLoadDllStateChange:
+        filter_out = ((ULONG64)state->StateInfo.LoadDll.BaseOfDll >> 32) != 0;
+        if (!filter_out)
+        {
+            USHORT machine;
+            filter_out = !get_image_machine( state->StateInfo.LoadDll.FileHandle, &machine) && machine != current_machine;
+        }
+        break;
+    case DbgUnloadDllStateChange:
+        filter_out = ((ULONG_PTR)state->StateInfo.UnloadDll.BaseAddress >> 32) != 0;
+        break;
+    default:
+        filter_out = FALSE;
+        break;
+    }
+    if (filter_out)
+    {
+        if (state->NewState == DbgLoadDllStateChange)
+            NtClose( state->StateInfo.LoadDll.FileHandle );
+        NtDebugContinue( handle, &state->AppClientId, DBG_CONTINUE );
+    }
+    return filter_out;
+}
+
+
 /**********************************************************************
  *           wow64_NtWaitForDebugEvent
  */
@@ -1502,7 +1567,12 @@ NTSTATUS WINAPI wow64_NtWaitForDebugEvent( UINT *args )
 
     ULONG i;
     DBGUI_WAIT_STATE_CHANGE state;
-    NTSTATUS status = NtWaitForDebugEvent( handle, alertable, timeout, &state );
+    NTSTATUS status;
+
+    do
+    {
+        status = NtWaitForDebugEvent( handle, alertable, timeout, &state );
+    } while (!status && filter_out_state_change( handle, &state ));
 
     if (!status)
     {
@@ -1616,4 +1686,58 @@ NTSTATUS WINAPI wow64_NtWaitForSingleObject( UINT *args )
 NTSTATUS WINAPI wow64_NtYieldExecution( UINT *args )
 {
     return NtYieldExecution();
+}
+
+
+/**********************************************************************
+ *           wow64_NtCreateTransaction
+ */
+NTSTATUS WINAPI wow64_NtCreateTransaction( UINT *args )
+{
+    ULONG *handle_ptr = get_ptr( &args );
+    ACCESS_MASK access = get_ulong( &args );
+    OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
+    GUID *guid = get_ptr( &args );
+    HANDLE tm = get_handle( &args );
+    ULONG options = get_ulong( &args );
+    ULONG isol_level = get_ulong( &args );
+    ULONG isol_flags = get_ulong( &args );
+    LARGE_INTEGER *timeout = get_ptr( &args );
+    UNICODE_STRING32 *desc32 = get_ptr( &args );
+
+    struct object_attr64 attr;
+    UNICODE_STRING desc;
+    HANDLE handle = 0;
+    NTSTATUS status;
+
+    *handle_ptr = 0;
+    status = NtCreateTransaction( &handle, access, objattr_32to64( &attr, attr32 ), guid, tm, options,
+            isol_level, isol_flags, timeout, unicode_str_32to64( &desc, desc32 ));
+    put_handle( handle_ptr, handle );
+
+    return status;
+}
+
+
+/**********************************************************************
+ *           wow64_NtCommitTransaction
+ */
+NTSTATUS WINAPI wow64_NtCommitTransaction( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    BOOLEAN wait = get_ulong( &args );
+
+    return NtCommitTransaction( handle, wait );
+}
+
+
+/**********************************************************************
+ *           wow64_NtRollbackTransaction
+ */
+NTSTATUS WINAPI wow64_NtRollbackTransaction( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    BOOLEAN wait = get_ulong( &args );
+
+    return NtRollbackTransaction( handle, wait );
 }

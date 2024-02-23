@@ -30,6 +30,15 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(enhmetafile);
 
+static inline UINT aligned_size(UINT size)
+{
+    return (size + 3) & ~3;
+}
+
+static inline void pad_record(void *record, UINT size)
+{
+    if (size & 3) memset((char *)record + size, 0, 4 - (size & 3));
+}
 
 struct emf
 {
@@ -489,7 +498,7 @@ static DWORD emfdc_create_brush( struct emf *emf, HBRUSH brush )
             DWORD info_size;
             UINT usage;
 
-            if (!__wine_get_brush_bitmap_info( brush, info, NULL, &usage )) break;
+            if (!NtGdiIcmBrushInfo( 0, brush, info, NULL, NULL, &usage, NULL, 0 )) break;
             info_size = get_dib_info_size( info, usage );
 
             emr = HeapAlloc( GetProcessHeap(), 0,
@@ -530,7 +539,7 @@ static DWORD emfdc_create_brush( struct emf *emf, HBRUSH brush )
             if (info->bmiHeader.biClrUsed == 1 << info->bmiHeader.biBitCount)
                 info->bmiHeader.biClrUsed = 0;
             memcpy( (BYTE *)emr + emr->offBmi, info, emr->cbBmi );
-            __wine_get_brush_bitmap_info( brush, NULL, (char *)emr + emr->offBits, NULL );
+            NtGdiIcmBrushInfo( 0, brush, NULL, (char *)emr + emr->offBits, NULL, NULL, NULL, 0 );
 
             if (!emfdc_record( emf, &emr->emr )) index = 0;
             HeapFree( GetProcessHeap(), 0, emr );
@@ -647,30 +656,45 @@ static BOOL emfdc_select_font( DC_ATTR *dc_attr, HFONT font )
     return emfdc_record( emf, &emr.emr );
 }
 
+static DWORD emfdc_ext_create_pen( struct emf *emf, HPEN pen )
+{
+    EMREXTCREATEPEN *emr;
+    int size, emr_size;
+    DWORD ret = 0;
+
+    if (!(size = GetObjectW( pen, 0, NULL )))
+        return 0;
+    emr_size = sizeof(*emr) - sizeof(emr->elp) + size;
+    emr = HeapAlloc( GetProcessHeap(), 0, emr_size );
+    if (!emr)
+        return 0;
+    GetObjectW( pen, size, &emr->elp );
+
+    if (emr->elp.elpBrushStyle == BS_DIBPATTERN ||
+            emr->elp.elpBrushStyle == BS_DIBPATTERNPT ||
+            emr->elp.elpBrushStyle == BS_PATTERN)
+    {
+        FIXME( "elpBrushStyle = %d\n", emr->elp.elpBrushStyle );
+        HeapFree( GetProcessHeap(), 0, emr );
+        return 0;
+    }
+    emr->offBmi = emr->cbBmi = emr->offBits = emr->cbBits = 0;
+
+    emr->emr.iType = EMR_EXTCREATEPEN;
+    emr->emr.nSize = emr_size;
+    emr->ihPen = ret = emfdc_add_handle( emf, pen );
+    ret = emfdc_record( emf, &emr->emr ) ? ret : 0;
+    HeapFree( GetProcessHeap(), 0, emr );
+    return ret;
+}
+
 static DWORD emfdc_create_pen( struct emf *emf, HPEN hPen )
 {
     EMRCREATEPEN emr;
     DWORD index = 0;
 
     if (!GetObjectW( hPen, sizeof(emr.lopn), &emr.lopn ))
-    {
-        /* must be an extended pen */
-        EXTLOGPEN *elp;
-        INT size = GetObjectW( hPen, 0, NULL );
-
-        if (!size) return 0;
-
-        elp = HeapAlloc( GetProcessHeap(), 0, size );
-
-        GetObjectW( hPen, size, elp );
-        /* FIXME: add support for user style pens */
-        emr.lopn.lopnStyle = elp->elpPenStyle;
-        emr.lopn.lopnWidth.x = elp->elpWidth;
-        emr.lopn.lopnWidth.y = 0;
-        emr.lopn.lopnColor = elp->elpColor;
-
-        HeapFree( GetProcessHeap(), 0, elp );
-    }
+        return emfdc_ext_create_pen( emf, hPen );
 
     emr.emr.iType = EMR_CREATEPEN;
     emr.emr.nSize = sizeof(emr);
@@ -1144,7 +1168,7 @@ BOOL EMFDC_PolyDraw( DC_ATTR *dc_attr, const POINT *pts, const BYTE *types, DWOR
 
     size = use_small_emr ? offsetof( EMRPOLYDRAW16, apts[count] )
         : offsetof( EMRPOLYDRAW, aptl[count] );
-    size += (count + 3) & ~3;
+    size += aligned_size(count);
 
     if (!(emr = HeapAlloc( GetProcessHeap(), 0, size ))) return FALSE;
 
@@ -1154,7 +1178,7 @@ BOOL EMFDC_PolyDraw( DC_ATTR *dc_attr, const POINT *pts, const BYTE *types, DWOR
 
     types_dest = store_points( emr->aptl, pts, count, use_small_emr );
     memcpy( types_dest, types, count );
-    if (count & 3) memset( types_dest + count, 0, 4 - (count & 3) );
+    pad_record( types_dest, count );
 
     if (!emf->path)
         get_points_bounds( &emr->rclBounds, pts, count, 0 );
@@ -1170,26 +1194,20 @@ BOOL EMFDC_PolyDraw( DC_ATTR *dc_attr, const POINT *pts, const BYTE *types, DWOR
 INT EMFDC_ExtEscape( DC_ATTR *dc_attr, INT escape, INT input_size, const char *input,
                       INT output_size, char *output)
 {
-    struct EMREXTESCAPE
-    {
-        EMR emr;
-        DWORD escape;
-        DWORD size;
-        BYTE data[1];
-    } *emr;
+    EMREXTESCAPE *emr;
     size_t size;
 
     if (escape == QUERYESCSUPPORT) return 0;
 
-    size = FIELD_OFFSET( struct EMREXTESCAPE, data[input_size] );
-    size = (size + 3) & ~3;
+    size = aligned_size(FIELD_OFFSET( EMREXTESCAPE, EscData[input_size] ));
     if (!(emr = HeapAlloc( GetProcessHeap(), 0, size ))) return 0;
 
     emr->emr.iType = EMR_EXTESCAPE;
     emr->emr.nSize = size;
-    emr->escape = escape;
-    emr->size = input_size;
-    memcpy(emr->data, input, input_size);
+    emr->iEscape = escape;
+    emr->cbEscData = input_size;
+    memcpy(emr->EscData, input, input_size);
+    pad_record(emr->EscData, input_size);
     emfdc_record( get_dc_emf( dc_attr ), &emr->emr );
     HeapFree( GetProcessHeap(), 0, emr );
     if (output_size && output) return 0;
@@ -1318,13 +1336,15 @@ BOOL EMFDC_ExtTextOut( DC_ATTR *dc_attr, INT x, INT y, UINT flags, const RECT *r
     HDC hdc = dc_attr_handle( dc_attr );
     FLOAT ex_scale, ey_scale;
     EMREXTTEXTOUTW *emr;
-    int text_height = 0;
+    int text_height = 0, top = y, bottom = y;
     int text_width = 0;
     TEXTMETRICW tm;
-    DWORD size;
+    DWORD dx_len, size;
     BOOL ret;
 
-    size = sizeof(*emr) + ((count+1) & ~1) * sizeof(WCHAR) + count * sizeof(INT);
+    if (!dx && flags & ETO_PDY) return FALSE;
+    dx_len = flags & ETO_PDY ? count * 2 : count;
+    size = sizeof(*emr) + ((count+1) & ~1) * sizeof(WCHAR) + dx_len * sizeof(INT);
 
     TRACE( "%s %s count %d size = %ld\n", debugstr_wn(str, count),
            wine_dbgstr_rect(rect), count, size );
@@ -1381,10 +1401,24 @@ BOOL EMFDC_ExtTextOut( DC_ATTR *dc_attr, INT x, INT y, UINT flags, const RECT *r
     {
         UINT i;
         SIZE str_size;
-        memcpy( (char*)emr + emr->emrtext.offDx, dx, count * sizeof(INT) );
-        for (i = 0; i < count; i++) text_width += dx[i];
+        memcpy( (char*)emr + emr->emrtext.offDx, dx, dx_len * sizeof(INT) );
         if (GetTextExtentPoint32W( hdc, str, count, &str_size ))
             text_height = str_size.cy;
+        if (flags & ETO_PDY)
+        {
+            int cur_y = y;
+            for (i = 0; i < count; i++)
+            {
+                top = min( top, cur_y );
+                bottom = max( bottom, cur_y );
+                text_width += dx[2 * i];
+                cur_y -= dx[2 * i + 1];
+            }
+        }
+        else
+        {
+            for (i = 0; i < count; i++) text_width += dx[i];
+        }
     }
     else
     {
@@ -1433,18 +1467,18 @@ BOOL EMFDC_ExtTextOut( DC_ATTR *dc_attr, INT x, INT y, UINT flags, const RECT *r
         if (!GetTextMetricsW( hdc, &tm )) tm.tmDescent = 0;
         /* Play safe here... it's better to have a bounding box */
         /* that is too big than too small. */
-        emr->rclBounds.top    = y - text_height - 1;
-        emr->rclBounds.bottom = y + tm.tmDescent + 1;
+        emr->rclBounds.top    = top - text_height - 1;
+        emr->rclBounds.bottom = bottom + tm.tmDescent + 1;
         break;
 
     case TA_BOTTOM:
-        emr->rclBounds.top    = y - text_height - 1;
-        emr->rclBounds.bottom = y;
+        emr->rclBounds.top    = top - text_height - 1;
+        emr->rclBounds.bottom = bottom;
         break;
 
     default: /* TA_TOP */
-        emr->rclBounds.top    = y;
-        emr->rclBounds.bottom = y + text_height + 1;
+        emr->rclBounds.top    = top;
+        emr->rclBounds.bottom = bottom + text_height + 1;
     }
     emfdc_update_bounds( emf, &emr->rclBounds );
 
@@ -1875,13 +1909,14 @@ BOOL EMFDC_StretchDIBits( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst,
     UINT bmi_size, img_size, payload_size, emr_size;
     BITMAPINFOHEADER bih;
     BITMAPINFO *bi;
+    void *ptr;
 
     /* calculate the size of the colour table and the image */
     if (!emf_parse_user_bitmapinfo( &bih, &info->bmiHeader, usage, TRUE,
                                     &bmi_size, &img_size )) return 0;
 
     /* check for overflows */
-    payload_size = bmi_size + img_size;
+    payload_size = aligned_size(bmi_size) + aligned_size(img_size);
     if (payload_size < bmi_size) return 0;
 
     emr_size = sizeof (EMRSTRETCHDIBITS) + payload_size;
@@ -1889,14 +1924,6 @@ BOOL EMFDC_StretchDIBits( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst,
 
     /* allocate record */
     if (!(emr = HeapAlloc(GetProcessHeap(), 0, emr_size ))) return 0;
-
-    /* write a bitmap info header (with colours) to the record */
-    bi = (BITMAPINFO *)&emr[1];
-    bi->bmiHeader = bih;
-    emf_copy_colours_from_user_bitmapinfo( bi, info, usage );
-
-    /* write bitmap bits to the record */
-    memcpy ( (BYTE *)&emr[1] + bmi_size, bits, img_size );
 
     /* fill in the EMR header at the front of our piece of memory */
     emr->emr.iType = EMR_STRETCHDIBITS;
@@ -1913,7 +1940,7 @@ BOOL EMFDC_StretchDIBits( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst,
     emr->iUsageSrc    = usage;
     emr->offBmiSrc    = sizeof (EMRSTRETCHDIBITS);
     emr->cbBmiSrc     = bmi_size;
-    emr->offBitsSrc   = emr->offBmiSrc + bmi_size;
+    emr->offBitsSrc   = emr->offBmiSrc + aligned_size(bmi_size);
     emr->cbBitsSrc    = img_size;
 
     emr->cxSrc = width_src;
@@ -1923,6 +1950,16 @@ BOOL EMFDC_StretchDIBits( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst,
     emr->rclBounds.top    = y_dst;
     emr->rclBounds.right  = x_dst + width_dst - 1;
     emr->rclBounds.bottom = y_dst + height_dst - 1;
+
+    /* write a bitmap info header (with colours) to the record */
+    bi = (BITMAPINFO *)((BYTE *)emr + emr->offBmiSrc);
+    bi->bmiHeader = bih;
+    emf_copy_colours_from_user_bitmapinfo( bi, info, usage );
+    pad_record( bi, emr->cbBmiSrc );
+
+    /* write bitmap bits to the record */
+    ptr = memcpy ( (BYTE *)emr + emr->offBitsSrc, bits, img_size );
+    pad_record( ptr, emr->cbBitsSrc );
 
     /* save the record we just created */
     ret = emfdc_record( get_dc_emf( dc_attr ), &emr->emr );
@@ -1941,6 +1978,7 @@ BOOL EMFDC_SetDIBitsToDevice( DC_ATTR *dc_attr, INT x_dst, INT y_dst, DWORD widt
     UINT src_height, stride;
     BITMAPINFOHEADER bih;
     BITMAPINFO *bi;
+    void *ptr;
 
     /* calculate the size of the colour table and the image */
     if (!emf_parse_user_bitmapinfo( &bih, &info->bmiHeader, usage, TRUE,
@@ -1966,7 +2004,7 @@ BOOL EMFDC_SetDIBitsToDevice( DC_ATTR *dc_attr, INT x_dst, INT y_dst, DWORD widt
     }
 
     /* check for overflows */
-    payload_size = bmi_size + img_size;
+    payload_size = aligned_size(bmi_size) + aligned_size(img_size);
     if (payload_size < bmi_size) return 0;
 
     emr_size = sizeof (EMRSETDIBITSTODEVICE) + payload_size;
@@ -1974,14 +2012,6 @@ BOOL EMFDC_SetDIBitsToDevice( DC_ATTR *dc_attr, INT x_dst, INT y_dst, DWORD widt
 
     /* allocate record */
     if (!(emr = HeapAlloc( GetProcessHeap(), 0, emr_size ))) return FALSE;
-
-    /* write a bitmap info header (with colours) to the record */
-    bi = (BITMAPINFO *)&emr[1];
-    bi->bmiHeader = bih;
-    emf_copy_colours_from_user_bitmapinfo( bi, info, usage );
-
-    /* write bitmap bits to the record */
-    memcpy ( (BYTE *)&emr[1] + bmi_size, bits, img_size );
 
     emr->emr.iType = EMR_SETDIBITSTODEVICE;
     emr->emr.nSize = emr_size;
@@ -1997,11 +2027,21 @@ BOOL EMFDC_SetDIBitsToDevice( DC_ATTR *dc_attr, INT x_dst, INT y_dst, DWORD widt
     emr->cySrc = height;
     emr->offBmiSrc = sizeof(EMRSETDIBITSTODEVICE);
     emr->cbBmiSrc = bmi_size;
-    emr->offBitsSrc = sizeof(EMRSETDIBITSTODEVICE) + bmi_size;
+    emr->offBitsSrc = sizeof(EMRSETDIBITSTODEVICE) + aligned_size(bmi_size);
     emr->cbBitsSrc = img_size;
     emr->iUsageSrc = usage;
     emr->iStartScan = startscan;
     emr->cScans = lines;
+
+    /* write a bitmap info header (with colours) to the record */
+    bi = (BITMAPINFO *)((BYTE *)emr + emr->offBmiSrc);
+    bi->bmiHeader = bih;
+    emf_copy_colours_from_user_bitmapinfo( bi, info, usage );
+    pad_record( bi, bmi_size );
+
+    /* write bitmap bits to the record */
+    ptr = memcpy ( (BYTE *)emr + emr->offBitsSrc, bits, img_size );
+    pad_record( ptr, img_size );
 
     if ((ret = emfdc_record( get_dc_emf( dc_attr ), (EMR*)emr )))
         emfdc_update_bounds( get_dc_emf( dc_attr ), &emr->rclBounds );
@@ -2114,6 +2154,16 @@ BOOL EMFDC_SetBkColor( DC_ATTR *dc_attr, COLORREF color )
     return emfdc_record( get_dc_emf( dc_attr ), &emr.emr );
 }
 
+BOOL EMFDC_SetBrushOrgEx( DC_ATTR *dc_attr, INT x, INT y )
+{
+    EMRSETBRUSHORGEX emr;
+
+    emr.emr.iType = EMR_SETBRUSHORGEX;
+    emr.emr.nSize = sizeof(emr);
+    emr.ptlOrigin.x = x;
+    emr.ptlOrigin.y = y;
+    return emfdc_record( get_dc_emf( dc_attr ), &emr.emr );
+}
 
 BOOL EMFDC_SetTextColor( DC_ATTR *dc_attr, COLORREF color )
 {
@@ -2236,6 +2286,25 @@ BOOL EMFDC_SetMapMode( DC_ATTR *dc_attr, INT mode )
     emr.emr.iType = EMR_SETMAPMODE;
     emr.emr.nSize = sizeof(emr);
     emr.iMode = mode;
+    return emfdc_record( get_dc_emf( dc_attr ), &emr.emr );
+}
+
+BOOL EMFDC_SetMetaRgn( DC_ATTR *dc_attr )
+{
+    EMRSETMETARGN emr;
+
+    emr.emr.iType = EMR_SETMETARGN;
+    emr.emr.nSize = sizeof(emr);
+    return emfdc_record( get_dc_emf( dc_attr ), &emr.emr );
+}
+
+BOOL EMFDC_SetMiterLimit( DC_ATTR *dc_attr, FLOAT limit )
+{
+    struct emr_set_miter_limit emr;
+
+    emr.emr.iType = EMR_SETMITERLIMIT;
+    emr.emr.nSize = sizeof(emr);
+    emr.eMiterLimit = limit;
     return emfdc_record( get_dc_emf( dc_attr ), &emr.emr );
 }
 
@@ -2461,20 +2530,22 @@ BOOL WINAPI GdiComment( HDC hdc, UINT bytes, const BYTE *buffer )
 {
     DC_ATTR *dc_attr;
     EMRGDICOMMENT *emr;
-    UINT total, rounded_size;
+    UINT total;
     BOOL ret;
 
     if (!(dc_attr = get_dc_attr( hdc )) || !get_dc_emf( dc_attr )) return FALSE;
 
-    rounded_size = (bytes+3) & ~3;
-    total = offsetof(EMRGDICOMMENT,Data) + rounded_size;
+    total = offsetof(EMRGDICOMMENT,Data) + aligned_size(bytes);
 
     emr = HeapAlloc(GetProcessHeap(), 0, total);
+    if (!emr)
+        return FALSE;
+
     emr->emr.iType = EMR_GDICOMMENT;
     emr->emr.nSize = total;
     emr->cbData = bytes;
-    memset(&emr->Data[bytes], 0, rounded_size - bytes);
     memcpy(&emr->Data[0], buffer, bytes);
+    pad_record(&emr->Data[0], bytes);
 
     ret = emfdc_record( get_dc_emf( dc_attr ), &emr->emr );
 
@@ -2583,6 +2654,7 @@ static struct emf *emf_create( HDC hdc, const RECT *rect, const WCHAR *descripti
     DWORD size = 0, length = 0;
     DC_ATTR *dc_attr;
     struct emf *emf;
+    void *ptr;
 
     if (!(dc_attr = get_dc_attr( hdc )) || !(emf = HeapAlloc( GetProcessHeap(), 0, sizeof(*emf) )))
         return NULL;
@@ -2594,7 +2666,7 @@ static struct emf *emf_create( HDC hdc, const RECT *rect, const WCHAR *descripti
         length += 3;
         length *= 2;
     }
-    size = sizeof(ENHMETAHEADER) + (length + 3) / 4 * 4;
+    size = sizeof(ENHMETAHEADER) + aligned_size(length);
 
     if (!(emf->emh = HeapAlloc( GetProcessHeap(), 0, size )) ||
         !(emf->handles = HeapAlloc( GetProcessHeap(), 0,
@@ -2619,7 +2691,8 @@ static struct emf *emf_create( HDC hdc, const RECT *rect, const WCHAR *descripti
     emf->emh->nDescription = length / 2;
     emf->emh->offDescription = length ? sizeof(ENHMETAHEADER) : 0;
 
-    memcpy( (char *)emf->emh + sizeof(ENHMETAHEADER), description, length );
+    ptr = memcpy( (char *)emf->emh + sizeof(ENHMETAHEADER), description, length );
+    pad_record( ptr, length );
 
     emf_reset( dc_attr, rect );
     return emf;

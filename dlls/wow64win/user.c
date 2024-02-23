@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "ntuser.h"
+#include "shellapi.h"
 #include "wow64win_private.h"
 #include "wine/debug.h"
 
@@ -1596,6 +1597,26 @@ NTSTATUS WINAPI wow64_NtUserBeginPaint( UINT *args )
     return HandleToUlong( ret );
 }
 
+NTSTATUS WINAPI wow64_NtUserBuildHimcList( UINT *args )
+{
+    ULONG thread_id = get_ulong( &args );
+    ULONG count = get_ulong( &args );
+    UINT32 *buffer32 = get_ptr( &args );
+    UINT *size = get_ptr( &args );
+
+    HIMC *buffer = NULL;
+    ULONG i;
+    NTSTATUS status;
+
+    if (buffer32 && !(buffer = Wow64AllocateTemp( count * sizeof(*buffer) )))
+        return STATUS_NO_MEMORY;
+
+    if ((status = NtUserBuildHimcList( thread_id, count, buffer, size ))) return status;
+
+    for (i = 0; i < *size; i++) buffer32[i] = HandleToUlong( buffer[i] );
+    return status;
+}
+
 NTSTATUS WINAPI wow64_NtUserBuildHwndList( UINT *args )
 {
     HDESK desktop = get_handle( &args );
@@ -2065,6 +2086,13 @@ NTSTATUS WINAPI wow64_NtUserEnableMenuItem( UINT *args )
     UINT flags = get_ulong( &args );
 
     return NtUserEnableMenuItem( handle, id, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserEnableMouseInPointer( UINT *args )
+{
+    UINT enable = get_ulong( &args );
+
+    return NtUserEnableMouseInPointer( enable );
 }
 
 NTSTATUS WINAPI wow64_NtUserEnableScrollBar( UINT *args )
@@ -2694,6 +2722,20 @@ NTSTATUS WINAPI wow64_NtUserGetOpenClipboardWindow( UINT *args )
     return HandleToUlong( NtUserGetOpenClipboardWindow() );
 }
 
+NTSTATUS WINAPI wow64_NtUserGetPointerInfoList( UINT *args )
+{
+    UINT id = get_ulong( &args );
+    UINT type = get_ulong( &args );
+    UINT unk0 = get_ulong( &args );
+    UINT unk1 = get_ulong( &args );
+    UINT size = get_ulong( &args );
+    void *entry_count = get_ptr( &args );
+    void *pointer_count = get_ptr( &args );
+    void *pointer_info = get_ptr( &args );
+
+    return NtUserGetPointerInfoList( id, type, unk0, unk1, size, entry_count, pointer_count, pointer_info );
+}
+
 NTSTATUS WINAPI wow64_NtUserGetPriorityClipboardFormat( UINT *args )
 {
     UINT *list = get_ptr( &args );
@@ -3179,6 +3221,11 @@ NTSTATUS WINAPI wow64_NtUserIsClipboardFormatAvailable( UINT *args )
     return NtUserIsClipboardFormatAvailable( format );
 }
 
+NTSTATUS WINAPI wow64_NtUserIsMouseInPointerEnabled( UINT *args )
+{
+    return NtUserIsMouseInPointerEnabled();
+}
+
 NTSTATUS WINAPI wow64_NtUserKillTimer( UINT *args )
 {
     HWND hwnd = get_handle( &args );
@@ -3230,6 +3277,7 @@ static LRESULT message_call_32to64( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     {
     case WM_NCCREATE:
     case WM_CREATE:
+        if (lparam)
         {
             CREATESTRUCT32 *cs32 = (void *)lparam;
             CREATESTRUCTW cs;
@@ -3248,6 +3296,7 @@ static LRESULT message_call_32to64( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             cs32->dwExStyle      = cs.dwExStyle;
             return ret;
         }
+        return NtUserMessageCall( hwnd, msg, wparam, lparam, result_info, type, ansi );
 
     case WM_MDICREATE:
         {
@@ -3537,6 +3586,73 @@ NTSTATUS WINAPI wow64_NtUserMessageCall( UINT *args )
     case NtUserSpyGetMsgName:
         /* no argument conversion */
         return NtUserMessageCall( hwnd, msg, wparam, lparam, result_info, type, ansi );
+
+    case NtUserImeDriverCall:
+        {
+            struct
+            {
+                ULONG himc;
+                ULONG state;
+                ULONG compstr;
+            } *params32 = result_info;
+            struct ime_driver_call_params params;
+            params.himc = UlongToPtr( params32->himc );
+            params.state = UlongToPtr( params32->state );
+            params.compstr = UlongToPtr( params32->compstr );
+            return NtUserMessageCall( hwnd, msg, wparam, lparam, &params, type, ansi );
+        }
+
+    case NtUserSystemTrayCall:
+        switch (msg)
+        {
+        case WINE_SYSTRAY_NOTIFY_ICON:
+        {
+            struct
+            {
+                DWORD cbSize;
+                ULONG hWnd;
+                UINT uID;
+                UINT uFlags;
+                UINT uCallbackMessage;
+                ULONG hIcon;
+                WCHAR szTip[128];
+                DWORD dwState;
+                DWORD dwStateMask;
+                WCHAR szInfo[256];
+                UINT uTimeout;
+                WCHAR szInfoTitle[64];
+                DWORD dwInfoFlags;
+                GUID guidItem;
+                ULONG hBalloonIcon;
+            } *params32 = result_info;
+
+            NOTIFYICONDATAW params = {.cbSize = sizeof(params)};
+            params.hWnd = UlongToHandle( params32->hWnd );
+            params.uID = params32->uID;
+            params.uFlags = params32->uFlags;
+            params.uCallbackMessage = params32->uCallbackMessage;
+            params.hIcon = UlongToHandle( params32->hIcon );
+            if (params.uFlags & NIF_TIP) wcscpy( params.szTip, params32->szTip );
+            params.dwState = params32->dwState;
+            params.dwStateMask = params32->dwStateMask;
+
+            if (params.uFlags & NIF_INFO)
+            {
+                wcscpy( params.szInfoTitle, params32->szInfoTitle );
+                wcscpy( params.szInfo, params32->szInfo );
+                params.uTimeout = params32->uTimeout;
+                params.dwInfoFlags = params32->dwInfoFlags;
+            }
+
+            params.guidItem = params32->guidItem;
+            params.hBalloonIcon = UlongToHandle( params32->hBalloonIcon );
+
+            return NtUserMessageCall( hwnd, msg, wparam, lparam, &params, type, ansi );
+        }
+
+        default:
+            return NtUserMessageCall( hwnd, msg, wparam, lparam, result_info, type, ansi );
+        }
     }
 
     return message_call_32to64( hwnd, msg, wparam, lparam, result_info, type, ansi );
@@ -3573,6 +3689,15 @@ NTSTATUS WINAPI wow64_NtUserMsgWaitForMultipleObjectsEx( UINT *args )
     for (i = 0; i < count; i++) handles[i] = LongToHandle( handles32[i] );
 
     return NtUserMsgWaitForMultipleObjectsEx( count, handles, timeout, mask, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserNotifyIMEStatus( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    ULONG status = get_ulong( &args );
+
+    NtUserNotifyIMEStatus( hwnd, status );
+    return 0;
 }
 
 NTSTATUS WINAPI wow64_NtUserNotifyWinEvent( UINT *args )
@@ -3675,6 +3800,18 @@ NTSTATUS WINAPI wow64_NtUserPrintWindow( UINT *args )
     UINT flags = get_ulong( &args );
 
     return NtUserPrintWindow( hwnd, hdc, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserQueryDisplayConfig( UINT *args )
+{
+    UINT32 flags = get_ulong( &args );
+    UINT32 *paths_count = get_ptr( &args );
+    DISPLAYCONFIG_PATH_INFO *paths = get_ptr( &args );
+    UINT32 *modes_count = get_ptr( &args );
+    DISPLAYCONFIG_MODE_INFO *modes = get_ptr( &args );
+    DISPLAYCONFIG_TOPOLOGY_ID *topology_id = get_ptr( &args );
+
+    return NtUserQueryDisplayConfig( flags, paths_count, paths, modes_count, modes, topology_id );
 }
 
 NTSTATUS WINAPI wow64_NtUserQueryInputContext( UINT *args )
@@ -4709,6 +4846,12 @@ NTSTATUS WINAPI wow64_NtUserDisplayConfigGetDeviceInfo( UINT *args )
     return NtUserDisplayConfigGetDeviceInfo( packet );
 }
 
+NTSTATUS WINAPI wow64___wine_send_input( UINT *args )
+{
+    ERR( "not supported\n" );
+    return 0;
+}
+
 NTSTATUS WINAPI wow64___wine_get_current_process_explicit_app_user_model_id( UINT *args )
 {
     /* CW Hack 22310 */
@@ -4726,10 +4869,4 @@ NTSTATUS WINAPI wow64___wine_set_current_process_explicit_app_user_model_id( UIN
     const WCHAR *aumid = get_ptr( &args );
 
     return __wine_set_current_process_explicit_app_user_model_id( aumid );
-}
-
-NTSTATUS WINAPI wow64___wine_send_input( UINT *args )
-{
-    ERR( "not supported\n ");
-    return 0;
 }

@@ -49,15 +49,14 @@
 #include <stdlib.h>
 #include <time.h>
 #ifdef __APPLE__
-# include <mach/mach.h>
-# include <mach/task.h>
-# include <mach/semaphore.h>
 # include <mach/mach_time.h>
+#endif
+#ifdef HAVE_KQUEUE
+# include <sys/event.h>
 #endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winternl.h"
 #include "ddk/wdm.h"
@@ -264,8 +263,8 @@ static unsigned int validate_open_object_attributes( const OBJECT_ATTRIBUTES *at
 /******************************************************************************
  *              NtCreateSemaphore (NTDLL.@)
  */
-NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
-                                   LONG initial, LONG max )
+NTSTATUS WINAPI GPT_IMPORT(NtCreateSemaphore)( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+                                               LONG initial, LONG max )
 {
     unsigned int ret;
     data_size_t len;
@@ -296,6 +295,18 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
     return ret;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+                                                            LONG initial, LONG max )
+{
+    return sysv_NtCreateSemaphore( handle, access, attr, initial, max );
+}
+
+GPT_ABI_WRAPPER( NtCreateSemaphore );
+
+#endif
 
 /******************************************************************************
  *              NtOpenSemaphore (NTDLL.@)
@@ -372,7 +383,7 @@ NTSTATUS WINAPI NtQuerySemaphore( HANDLE handle, SEMAPHORE_INFORMATION_CLASS cla
 /******************************************************************************
  *              NtReleaseSemaphore (NTDLL.@)
  */
-NTSTATUS WINAPI NtReleaseSemaphore( HANDLE handle, ULONG count, ULONG *previous )
+NTSTATUS WINAPI GPT_IMPORT(NtReleaseSemaphore)( HANDLE handle, ULONG count, ULONG *previous )
 {
     unsigned int ret;
 
@@ -395,12 +406,23 @@ NTSTATUS WINAPI NtReleaseSemaphore( HANDLE handle, ULONG count, ULONG *previous 
     return ret;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtReleaseSemaphore( HANDLE handle, ULONG count, ULONG *previous )
+{
+    return sysv_NtReleaseSemaphore( handle, count, previous );
+}
+
+GPT_ABI_WRAPPER( NtReleaseSemaphore );
+
+#endif
 
 /**************************************************************************
  *              NtCreateEvent (NTDLL.@)
  */
-NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
-                               EVENT_TYPE type, BOOLEAN state )
+NTSTATUS WINAPI GPT_IMPORT(NtCreateEvent)( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+                                           EVENT_TYPE type, BOOLEAN state )
 {
     unsigned int ret;
     data_size_t len;
@@ -432,6 +454,18 @@ NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_
     return ret;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+                                                        EVENT_TYPE type, BOOLEAN state )
+{
+    return sysv_NtCreateEvent( handle, access, attr, type, state );
+}
+
+GPT_ABI_WRAPPER( NtCreateEvent );
+
+#endif
 
 /******************************************************************************
  *              NtOpenEvent (NTDLL.@)
@@ -467,7 +501,7 @@ NTSTATUS WINAPI NtOpenEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
 /******************************************************************************
  *              NtSetEvent (NTDLL.@)
  */
-NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
+NTSTATUS WINAPI GPT_IMPORT(NtSetEvent)( HANDLE handle, LONG *prev_state )
 {
     /* This comment is a dummy to make sure this patch applies in the right place. */
     unsigned int ret;
@@ -489,11 +523,22 @@ NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
     return ret;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtSetEvent( HANDLE handle, LONG *prev_state )
+{
+    return sysv_NtSetEvent( handle, prev_state );
+}
+
+GPT_ABI_WRAPPER( NtSetEvent );
+
+#endif
 
 /******************************************************************************
  *              NtResetEvent (NTDLL.@)
  */
-NTSTATUS WINAPI NtResetEvent( HANDLE handle, LONG *prev_state )
+NTSTATUS WINAPI GPT_IMPORT(NtResetEvent)( HANDLE handle, LONG *prev_state )
 {
     /* This comment is a dummy to make sure this patch applies in the right place. */
     unsigned int ret;
@@ -516,21 +561,44 @@ NTSTATUS WINAPI NtResetEvent( HANDLE handle, LONG *prev_state )
     return ret;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtResetEvent( HANDLE handle, LONG *prev_state )
+{
+    return sysv_NtResetEvent( handle, prev_state );
+}
+
+GPT_ABI_WRAPPER( NtResetEvent );
+
+#endif
 
 /******************************************************************************
  *              NtClearEvent (NTDLL.@)
  */
-NTSTATUS WINAPI NtClearEvent( HANDLE handle )
+NTSTATUS WINAPI GPT_IMPORT(NtClearEvent)( HANDLE handle )
 {
     /* FIXME: same as NtResetEvent ??? */
     return NtResetEvent( handle, NULL );
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtClearEvent( HANDLE handle )
+{
+    return sysv_NtClearEvent( handle );
+}
+
+GPT_ABI_WRAPPER( NtClearEvent );
+
+#endif
+
 
 /******************************************************************************
  *              NtPulseEvent (NTDLL.@)
  */
-NTSTATUS WINAPI NtPulseEvent( HANDLE handle, LONG *prev_state )
+NTSTATUS WINAPI GPT_IMPORT(NtPulseEvent)( HANDLE handle, LONG *prev_state )
 {
     unsigned int ret;
 
@@ -551,6 +619,17 @@ NTSTATUS WINAPI NtPulseEvent( HANDLE handle, LONG *prev_state )
     return ret;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtPulseEvent( HANDLE handle, LONG *prev_state )
+{
+    return sysv_NtPulseEvent( handle, prev_state );
+}
+
+GPT_ABI_WRAPPER( NtPulseEvent );
+
+#endif
 
 /******************************************************************************
  *              NtQueryEvent (NTDLL.@)
@@ -1100,14 +1179,47 @@ static NTSTATUS event_data_to_state_change( const debug_event_t *data, DBGUI_WAI
         info->DebugInfoFileOffset = data->load_dll.dbg_offset;
         info->DebugInfoSize       = data->load_dll.dbg_size;
         info->NamePointer         = wine_server_get_ptr( data->load_dll.name );
+        if ((DWORD_PTR)data->load_dll.base != data->load_dll.base)
+            return STATUS_PARTIAL_COPY;
         return STATUS_SUCCESS;
     }
     case DbgUnloadDllStateChange:
         state->StateInfo.UnloadDll.BaseAddress = wine_server_get_ptr( data->unload_dll.base );
+        if ((DWORD_PTR)data->unload_dll.base != data->unload_dll.base)
+            return STATUS_PARTIAL_COPY;
         return STATUS_SUCCESS;
     }
     return STATUS_INTERNAL_ERROR;
 }
+
+#ifndef _WIN64
+/* helper to NtWaitForDebugEvent; retrieve machine from PE image */
+static NTSTATUS get_image_machine( HANDLE handle, USHORT *machine )
+{
+    IMAGE_DOS_HEADER dos_hdr;
+    IMAGE_NT_HEADERS nt_hdr;
+    IO_STATUS_BLOCK iosb;
+    LARGE_INTEGER offset;
+    FILE_POSITION_INFORMATION pos_info;
+    NTSTATUS status;
+
+    offset.QuadPart = 0;
+    status = NtReadFile( handle, NULL, NULL, NULL,
+                         &iosb, &dos_hdr, sizeof(dos_hdr), &offset, NULL );
+    if (!status)
+    {
+        offset.QuadPart = dos_hdr.e_lfanew;
+        status = NtReadFile( handle, NULL, NULL, NULL, &iosb,
+                             &nt_hdr, FIELD_OFFSET(IMAGE_NT_HEADERS, OptionalHeader), &offset, NULL );
+        if (!status)
+            *machine = nt_hdr.FileHeader.Machine;
+        /* Reset file pos at beginning of file */
+        pos_info.CurrentByteOffset.QuadPart = 0;
+        NtSetInformationFile( handle, &iosb, &pos_info, sizeof(pos_info), FilePositionInformation );
+    }
+    return status;
+}
+#endif
 
 /**********************************************************************
  *           NtWaitForDebugEvent  (NTDLL.@)
@@ -1126,8 +1238,9 @@ NTSTATUS WINAPI NtWaitForDebugEvent( HANDLE handle, BOOLEAN alertable, LARGE_INT
             req->debug = wine_server_obj_handle( handle );
             wine_server_set_reply( req, &data, sizeof(data) );
             ret = wine_server_call( req );
-            if (!ret && !(ret = event_data_to_state_change( &data, state )))
+            if (!ret)
             {
+                ret = event_data_to_state_change( &data, state );
                 state->NewState = data.code;
                 state->AppClientId.UniqueProcess = ULongToHandle( reply->pid );
                 state->AppClientId.UniqueThread  = ULongToHandle( reply->tid );
@@ -1135,6 +1248,24 @@ NTSTATUS WINAPI NtWaitForDebugEvent( HANDLE handle, BOOLEAN alertable, LARGE_INT
         }
         SERVER_END_REQ;
 
+#ifndef _WIN64
+        /* don't pass 64bit load events to 32bit callers */
+        if (!ret && state->NewState == DbgLoadDllStateChange)
+        {
+            USHORT machine;
+            if (!get_image_machine( state->StateInfo.LoadDll.FileHandle, &machine ) &&
+                machine != current_machine)
+                ret = STATUS_PARTIAL_COPY;
+        }
+        if (ret == STATUS_PARTIAL_COPY)
+        {
+            if (state->NewState == DbgLoadDllStateChange)
+                NtClose( state->StateInfo.LoadDll.FileHandle );
+            NtDebugContinue( handle, &state->AppClientId, DBG_CONTINUE );
+            wait = TRUE;
+            continue;
+        }
+#endif
         if (ret != STATUS_PENDING) return ret;
         if (!wait) return STATUS_TIMEOUT;
         wait = FALSE;
@@ -1597,13 +1728,6 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
                 return ret;
         }
 
-        if (do_esync())
-        {
-            NTSTATUS ret = esync_wait_objects( 0, NULL, TRUE, TRUE, timeout );
-            if (ret != STATUS_NOT_IMPLEMENTED)
-                return ret;
-        }
-
         return server_wait( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, timeout );
     }
 
@@ -1763,7 +1887,7 @@ NTSTATUS WINAPI NtSetIntervalProfile( ULONG interval, KPROFILE_SOURCE source )
 ULONG WINAPI NtGetTickCount(void)
 {
     /* note: we ignore TickCountMultiplier */
-    return user_shared_data->u.TickCount.LowPart;
+    return user_shared_data->TickCount.LowPart;
 }
 
 
@@ -1976,7 +2100,7 @@ NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE handle, ULONG_PTR *key, ULONG_PTR *
                 *key            = reply->ckey;
                 *value          = reply->cvalue;
                 io->Information = reply->information;
-                io->u.Status    = reply->status;
+                io->Status      = reply->status;
             }
         }
         SERVER_END_REQ;
@@ -2010,7 +2134,7 @@ NTSTATUS WINAPI NtRemoveIoCompletionEx( HANDLE handle, FILE_IO_COMPLETION_INFORM
                     info[i].CompletionKey             = reply->ckey;
                     info[i].CompletionValue           = reply->cvalue;
                     info[i].IoStatusBlock.Information = reply->information;
-                    info[i].IoStatusBlock.u.Status    = reply->status;
+                    info[i].IoStatusBlock.Status      = reply->status;
                 }
             }
             SERVER_END_REQ;
@@ -2285,7 +2409,7 @@ done:
 static ULONG integral_atom_name( WCHAR *buffer, ULONG len, RTL_ATOM atom )
 {
     char tmp[16];
-    int ret = sprintf( tmp, "#%u", atom );
+    int ret = snprintf( tmp, sizeof(tmp), "#%u", atom );
 
     len /= sizeof(WCHAR);
     if (len)
@@ -2432,8 +2556,8 @@ NTSTATUS WINAPI NtQueryInformationAtom( RTL_ATOM atom, ATOM_INFORMATION_CLASS cl
 
 union tid_alert_entry
 {
-#ifdef __APPLE__
-    semaphore_t sem;
+#ifdef HAVE_KQUEUE
+    int kq;
 #else
     HANDLE event;
 #ifdef __linux__
@@ -2474,15 +2598,35 @@ static union tid_alert_entry *get_tid_alert_entry( HANDLE tid )
 
     entry = &tid_alert_blocks[block_idx][idx % TID_ALERT_BLOCK_SIZE];
 
-#ifdef __APPLE__
-    if (!entry->sem)
+#ifdef HAVE_KQUEUE
+    if (!entry->kq)
     {
-        semaphore_t sem;
+        int kq = kqueue();
+        static const struct kevent init_event =
+        {
+            .ident = 1,
+            .filter = EVFILT_USER,
+            .flags = EV_ADD | EV_CLEAR,
+            .fflags = 0,
+            .data = 0,
+            .udata = NULL
+        };
 
-        if (semaphore_create( mach_task_self(), &sem, SYNC_POLICY_FIFO, 0 ))
+        if (kq == -1)
+        {
+            ERR( "kqueue failed with error: %d (%s)\n", errno, strerror( errno ) );
             return NULL;
-        if (InterlockedCompareExchange( (LONG *)&entry->sem, sem, 0 ))
-            semaphore_destroy( mach_task_self(), sem );
+        }
+
+        if (kevent( kq, &init_event, 1, NULL, 0, NULL) == -1)
+        {
+            ERR( "kevent creation failed with error: %d (%s)\n", errno, strerror( errno ) );
+            close( kq );
+            return NULL;
+        }
+
+        if (InterlockedCompareExchange( (LONG *)&entry->kq, kq, 0 ))
+            close( kq );
     }
 #else
 #ifdef __linux__
@@ -2516,9 +2660,21 @@ NTSTATUS WINAPI NtAlertThreadByThreadId( HANDLE tid )
 
     if (!entry) return STATUS_INVALID_CID;
 
-#ifdef __APPLE__
-    semaphore_signal( entry->sem );
-    return STATUS_SUCCESS;
+#ifdef HAVE_KQUEUE
+    {
+        static const struct kevent signal_event =
+        {
+            .ident = 1,
+            .filter = EVFILT_USER,
+            .flags = 0,
+            .fflags = NOTE_TRIGGER,
+            .data = 0,
+            .udata = NULL
+        };
+
+        kevent( entry->kq, &signal_event, 1, NULL, 0, NULL );
+        return STATUS_SUCCESS;
+    }
 #else
 #ifdef __linux__
     if (use_futexes())
@@ -2535,7 +2691,7 @@ NTSTATUS WINAPI NtAlertThreadByThreadId( HANDLE tid )
 }
 
 
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(HAVE_KQUEUE)
 static LONGLONG get_absolute_timeout( const LARGE_INTEGER *timeout )
 {
     LARGE_INTEGER now;
@@ -2558,7 +2714,7 @@ static LONGLONG update_timeout( ULONGLONG end )
 #endif
 
 
-#ifdef __APPLE__
+#ifdef HAVE_KQUEUE
 
 /***********************************************************************
  *             NtWaitForAlertByThreadId (NTDLL.@)
@@ -2566,14 +2722,14 @@ static LONGLONG update_timeout( ULONGLONG end )
 NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEGER *timeout )
 {
     union tid_alert_entry *entry = get_tid_alert_entry( NtCurrentTeb()->ClientId.UniqueThread );
-    semaphore_t sem;
     ULONGLONG end;
-    kern_return_t ret;
+    int ret;
+    struct timespec timespec;
+    struct kevent wait_event;
 
     TRACE( "%p %s\n", address, debugstr_timeout( timeout ) );
 
     if (!entry) return STATUS_INVALID_CID;
-    sem = entry->sem;
 
     if (timeout)
     {
@@ -2583,27 +2739,29 @@ NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEG
             end = get_absolute_timeout( timeout );
     }
 
-    for (;;)
+    do
     {
         if (timeout)
         {
             LONGLONG timeleft = update_timeout( end );
-            mach_timespec_t timespec;
 
             timespec.tv_sec = timeleft / (ULONGLONG)TICKSPERSEC;
             timespec.tv_nsec = (timeleft % TICKSPERSEC) * 100;
-            ret = semaphore_timedwait( sem, timespec );
+            if (timespec.tv_sec > 0x7FFFFFFF) timeout = NULL;
         }
-        else
-            ret = semaphore_wait( sem );
 
-        switch (ret)
-        {
-        case KERN_SUCCESS: return STATUS_ALERTED;
-        case KERN_ABORTED: continue;
-        case KERN_OPERATION_TIMED_OUT: return STATUS_TIMEOUT;
-        default: return STATUS_INVALID_HANDLE;
-        }
+        ret = kevent( entry->kq, NULL, 0, &wait_event, 1, timeout ? &timespec : NULL );
+    } while (ret == -1 && errno == EINTR);
+
+    switch (ret)
+    {
+    case 1:
+        return STATUS_ALERTED;
+    case 0:
+        return STATUS_TIMEOUT;
+    default:
+        ERR( "kevent failed with error: %d (%s)\n", errno, strerror( errno ) );
+        return STATUS_INVALID_HANDLE;
     }
 }
 
@@ -2689,4 +2847,38 @@ void set_async_direct_result( HANDLE *async_handle, NTSTATUS status, ULONG_PTR i
         ERR( "cannot report I/O result back to server: %08x\n", ret );
 
     return;
+}
+
+/***********************************************************************
+ *           NtCreateTransaction (NTDLL.@)
+ */
+NTSTATUS WINAPI NtCreateTransaction( HANDLE *handle, ACCESS_MASK mask, OBJECT_ATTRIBUTES *obj_attr, GUID *guid, HANDLE tm,
+        ULONG options, ULONG isol_level, ULONG isol_flags, PLARGE_INTEGER timeout, UNICODE_STRING *description )
+{
+    FIXME( "%p, %#x, %p, %s, %p, 0x%08x, 0x%08x, 0x%08x, %p, %p stub.\n", handle, (int)mask, obj_attr, debugstr_guid(guid), tm,
+            (int)options, (int)isol_level, (int)isol_flags, timeout, description );
+
+    *handle = ULongToHandle(1);
+
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           NtCommitTransaction (NTDLL.@)
+ */
+NTSTATUS WINAPI NtCommitTransaction( HANDLE transaction, BOOLEAN wait )
+{
+    FIXME( "%p, %d stub.\n", transaction, wait );
+
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           NtRollbackTransaction (NTDLL.@)
+ */
+NTSTATUS WINAPI NtRollbackTransaction( HANDLE transaction, BOOLEAN wait )
+{
+    FIXME( "%p, %d stub.\n", transaction, wait );
+
+    return STATUS_ACCESS_VIOLATION;
 }

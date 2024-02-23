@@ -49,8 +49,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(event);
 WINE_DECLARE_DEBUG_CHANNEL(xdnd);
 
-extern BOOL ximInComposeMode;
-
 #define DndNotDnd       -1    /* OffiX drag&drop */
 #define DndUnknown      0
 #define DndRawData      1
@@ -472,33 +470,16 @@ static BOOL process_events( Display *display, Bool (*filter)(Display*, XEvent*,X
 
 
 /***********************************************************************
- *           MsgWaitForMultipleObjectsEx   (X11DRV.@)
+ *           ProcessEvents   (X11DRV.@)
  */
-NTSTATUS X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
-                                             const LARGE_INTEGER *timeout, DWORD mask, DWORD flags )
+BOOL X11DRV_ProcessEvents( DWORD mask )
 {
     struct x11drv_thread_data *data = x11drv_thread_data();
-    NTSTATUS ret;
 
-    if (!data)
-    {
-        if (!count && timeout && !timeout->QuadPart) return WAIT_TIMEOUT;
-        return NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
-                                         !!(flags & MWMO_ALERTABLE), timeout );
-    }
-
+    if (!data) return FALSE;
     if (data->current_event) mask = 0;  /* don't process nested events */
 
-    if (process_events( data->display, filter_event, mask )) ret = count - 1;
-    else if (count || !timeout || timeout->QuadPart)
-    {
-        ret = NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
-                                        !!(flags & MWMO_ALERTABLE), timeout );
-        if (ret == count - 1) process_events( data->display, filter_event, mask );
-    }
-    else ret = WAIT_TIMEOUT;
-
-    return ret;
+    return process_events( data->display, filter_event, mask );
 }
 
 /***********************************************************************
@@ -622,12 +603,8 @@ static void handle_manager_message( HWND hwnd, XClientMessageEvent *event )
 
     if (systray_atom && event->data.l[1] == systray_atom)
     {
-        struct systray_change_owner_params params;
-
         TRACE( "new owner %lx\n", event->data.l[2] );
-
-        params.event_handle = (UINT_PTR)event;
-        x11drv_client_func( client_func_systray_change_owner, &params, sizeof(params) );
+        NtUserPostMessage( systray_hwnd, WM_USER + 1, 0, 0 );
     }
 }
 
@@ -765,45 +742,47 @@ static const char * const focus_modes[] =
     "NotifyWhileGrabbed"
 };
 
+BOOL is_current_process_focused(void)
+{
+    Display *display = x11drv_thread_data()->display;
+    Window focus;
+    int revert;
+    HWND hwnd;
+
+    XGetInputFocus( display, &focus, &revert );
+    if (focus && !XFindContext( display, focus, winContext, (char **)&hwnd )) return TRUE;
+    return FALSE;
+}
+
 /**********************************************************************
  *              X11DRV_FocusIn
  */
 static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
 {
     XFocusChangeEvent *event = &xev->xfocus;
-    XIC xic;
+    BOOL was_grabbed;
 
     if (!hwnd) return FALSE;
 
     TRACE( "win %p xwin %lx detail=%s mode=%s\n", hwnd, event->window, focus_details[event->detail], focus_modes[event->mode] );
 
     if (event->detail == NotifyPointer) return FALSE;
+    /* when focusing in the virtual desktop window, re-apply the cursor clipping rect */
+    if (is_virtual_desktop() && hwnd == NtUserGetDesktopWindow()) retry_grab_clipping_window();
     if (hwnd == NtUserGetDesktopWindow()) return FALSE;
 
-    switch (event->mode)
-    {
-    case NotifyGrab:
-        /* these are received when moving undecorated managed windows on mutter */
-        keyboard_grabbed = TRUE;
-        return FALSE;
-    case NotifyWhileGrabbed:
-        keyboard_grabbed = TRUE;
-        break;
-    case NotifyNormal:
-        keyboard_grabbed = FALSE;
-        break;
-    case NotifyUngrab:
-        keyboard_grabbed = FALSE;
-        retry_grab_clipping_window();
-        return TRUE; /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
-    }
+    x11drv_thread_data()->keymapnotify_hwnd = hwnd;
 
-    if ((xic = X11DRV_get_ic( hwnd ))) XSetICFocus( xic );
-    if (use_take_focus)
-    {
-        if (hwnd == NtUserGetForegroundWindow()) clip_fullscreen_window( hwnd, FALSE );
-        return TRUE;
-    }
+    /* when keyboard grab is released, re-apply the cursor clipping rect */
+    was_grabbed = keyboard_grabbed;
+    keyboard_grabbed = event->mode == NotifyGrab || event->mode == NotifyWhileGrabbed;
+    if (was_grabbed > keyboard_grabbed) retry_grab_clipping_window();
+    /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
+    if (event->mode == NotifyGrab || event->mode == NotifyUngrab) return FALSE;
+
+    xim_set_focus( hwnd, TRUE );
+
+    if (use_take_focus) return TRUE;
 
     if (!can_activate_window(hwnd))
     {
@@ -822,21 +801,12 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
  */
 static void focus_out( Display *display , HWND hwnd )
  {
-    HWND hwnd_tmp;
-    Window focus_win;
-    int revert;
-    XIC xic;
-
-    if (ximInComposeMode) return;
+    if (xim_in_compose_mode()) return;
 
     x11drv_thread_data()->last_focus = hwnd;
-    if ((xic = X11DRV_get_ic( hwnd ))) XUnsetICFocus( xic );
+    xim_set_focus( hwnd, FALSE );
 
-    if (is_virtual_desktop())
-    {
-        if (hwnd == NtUserGetDesktopWindow()) reset_clipping_window();
-        return;
-    }
+    if (is_virtual_desktop()) return;
     if (hwnd != NtUserGetForegroundWindow()) return;
     if (!(NtUserGetWindowLongW( hwnd, GWL_STYLE ) & WS_MINIMIZE))
         send_message( hwnd, WM_CANCELMODE, 0, 0 );
@@ -844,14 +814,7 @@ static void focus_out( Display *display , HWND hwnd )
     /* don't reset the foreground window, if the window which is
        getting the focus is a Wine window */
 
-    XGetInputFocus( display, &focus_win, &revert );
-    if (focus_win)
-    {
-        if (XFindContext( display, focus_win, winContext, (char **)&hwnd_tmp ) != 0)
-            focus_win = 0;
-    }
-
-    if (!focus_win)
+    if (!is_current_process_focused())
     {
         /* Abey : 6-Oct-99. Check again if the focus out window is the
            Foreground window, because in most cases the messages sent
@@ -878,34 +841,22 @@ static BOOL X11DRV_FocusOut( HWND hwnd, XEvent *xev )
 
     if (event->detail == NotifyPointer)
     {
-        if (!hwnd && event->window == x11drv_thread_data()->clip_window) reset_clipping_window();
+        if (!hwnd && event->window == x11drv_thread_data()->clip_window)
+        {
+            NtUserClipCursor( NULL );
+            /* NtUserClipCursor will ask the foreground window to ungrab the cursor, but
+             * it might not be responsive, so unmap the clipping window ourselves too */
+            XUnmapWindow( event->display, event->window );
+        }
         return TRUE;
     }
     if (!hwnd) return FALSE;
 
-    switch (event->mode)
-    {
-    case NotifyUngrab:
-        /* these are received when moving undecorated managed windows on mutter */
-        keyboard_grabbed = FALSE;
-        return FALSE;
-    case NotifyNormal:
-        keyboard_grabbed = FALSE;
-        break;
-    case NotifyWhileGrabbed:
-        keyboard_grabbed = TRUE;
-        break;
-    case NotifyGrab:
-        keyboard_grabbed = TRUE;
-
-        /* This will do nothing due to keyboard_grabbed == TRUE, but it
-         * will save the current clipping rect so we can restore it on
-         * FocusIn with NotifyUngrab mode.
-         */
-        retry_grab_clipping_window();
-
-        return TRUE; /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
-    }
+    /* in virtual desktop mode or when keyboard is grabbed, release any cursor grab but keep the clipping rect */
+    keyboard_grabbed = event->mode == NotifyGrab || event->mode == NotifyWhileGrabbed;
+    if (is_virtual_desktop() || keyboard_grabbed) ungrab_clipping_window();
+    /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
+    if (event->mode == NotifyGrab || event->mode == NotifyUngrab) return FALSE;
 
     focus_out( event->display, hwnd );
     return TRUE;

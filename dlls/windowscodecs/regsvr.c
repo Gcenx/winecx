@@ -1620,6 +1620,36 @@ static const struct reader_containers pngchrm_containers[] = {
     { NULL } /* list terminator */
 };
 
+static const BYTE hIST[] = "hIST";
+
+static const struct metadata_pattern pnghist_metadata_pattern[] = {
+    { 4, 4, hIST, mask_all, 4 },
+    { 0 }
+};
+
+static const struct reader_containers pnghist_containers[] = {
+    {
+        &GUID_ContainerFormatPng,
+        pnghist_metadata_pattern
+    },
+    { NULL } /* list terminator */
+};
+
+static const BYTE tIME[] = "tIME";
+
+static const struct metadata_pattern pngtime_metadata_pattern[] = {
+    { 4, 4, tIME, mask_all, 4 },
+    { 0 }
+};
+
+static const struct reader_containers pngtime_containers[] = {
+    {
+        &GUID_ContainerFormatPng,
+        pngtime_metadata_pattern
+    },
+    { NULL } /* list terminator */
+};
+
 static const struct metadata_pattern lsd_metadata_patterns[] = {
     { 0, 6, gif87a_magic, mask_all, 0 },
     { 0, 6, gif89a_magic, mask_all, 0 },
@@ -1735,6 +1765,16 @@ static struct regsvr_metadatareader const metadatareader_list[] = {
         0, 0, 0,
         pnggama_containers
     },
+    {   &CLSID_WICPngHistMetadataReader,
+        "The Wine Project",
+        "Chunk hIST Reader",
+        "1.0.0.0",
+        "1.0.0.0",
+        &GUID_VendorMicrosoft,
+        &GUID_MetadataFormatChunkhIST,
+        0, 0, 0,
+        pnghist_containers
+    },
     {   &CLSID_WICPngTextMetadataReader,
         "The Wine Project",
         "Chunk tEXt Reader",
@@ -1744,6 +1784,16 @@ static struct regsvr_metadatareader const metadatareader_list[] = {
         &GUID_MetadataFormatChunktEXt,
         0, 0, 0,
         pngtext_containers
+    },
+    {   &CLSID_WICPngTimeMetadataReader,
+        "The Wine Project",
+        "Chunk tIME Reader",
+        "1.0.0.0",
+        "1.0.0.0",
+        &GUID_VendorMicrosoft,
+        &GUID_MetadataFormatChunktIME,
+        0, 0, 0,
+        pngtime_containers
     },
     {   &CLSID_WICLSDMetadataReader,
         "The Wine Project",
@@ -2270,8 +2320,8 @@ static HRESULT unregister_categories(const struct regsvr_category *list)
     return res != ERROR_SUCCESS ? HRESULT_FROM_WIN32(res) : S_OK;
 }
 
-extern HRESULT WINAPI WIC_DllRegisterServer(void) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI WIC_DllUnregisterServer(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI WIC_DllRegisterServer(void);
+extern HRESULT WINAPI WIC_DllUnregisterServer(void);
 
 HRESULT WINAPI DllRegisterServer(void)
 {

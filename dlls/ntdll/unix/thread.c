@@ -63,8 +63,6 @@
 #include <mach/mach.h>
 #endif
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "winternl.h"
@@ -204,6 +202,25 @@ static unsigned int get_server_context_flags( const void *context, USHORT machin
         break;
     }
     return ret;
+}
+
+
+/***********************************************************************
+ *           get_native_context_flags
+ *
+ * Get flags for registers that are set from the native context in WoW mode.
+ */
+static unsigned int get_native_context_flags( USHORT native_machine, USHORT wow_machine )
+{
+    switch (MAKELONG( native_machine, wow_machine ))
+    {
+    case MAKELONG( IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386 ):
+        return SERVER_CTX_DEBUG_REGISTERS | SERVER_CTX_FLOATING_POINT | SERVER_CTX_YMM_REGISTERS;
+    case MAKELONG( IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_ARMNT ):
+        return SERVER_CTX_DEBUG_REGISTERS | SERVER_CTX_FLOATING_POINT;
+    default:
+        return 0;
+    }
 }
 
 
@@ -401,7 +418,7 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         if (flags & CONTEXT_AMD64_FLOATING_POINT)
         {
             to->flags |= SERVER_CTX_FLOATING_POINT;
-            memcpy( to->fp.x86_64_regs.fpregs, &from->u.FltSave, sizeof(to->fp.x86_64_regs.fpregs) );
+            memcpy( to->fp.x86_64_regs.fpregs, &from->FltSave, sizeof(to->fp.x86_64_regs.fpregs) );
         }
         if (flags & CONTEXT_AMD64_DEBUG_REGISTERS)
         {
@@ -462,8 +479,8 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
             I386_FLOATING_SAVE_AREA fpu;
 
             to->flags |= SERVER_CTX_EXTENDED_REGISTERS | SERVER_CTX_FLOATING_POINT;
-            memcpy( to->ext.i386_regs, &from->u.FltSave, sizeof(to->ext.i386_regs) );
-            fpux_to_fpu( &fpu, &from->u.FltSave );
+            memcpy( to->ext.i386_regs, &from->FltSave, sizeof(to->ext.i386_regs) );
+            fpux_to_fpu( &fpu, &from->FltSave );
             to->fp.i386_regs.ctrl     = fpu.ControlWord;
             to->fp.i386_regs.status   = fpu.StatusWord;
             to->fp.i386_regs.tag      = fpu.TagWord;
@@ -528,7 +545,7 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         if (flags & CONTEXT_ARM_FLOATING_POINT)
         {
             to->flags |= SERVER_CTX_FLOATING_POINT;
-            for (i = 0; i < 32; i++) to->fp.arm_regs.d[i] = from->u.D[i];
+            for (i = 0; i < 32; i++) to->fp.arm_regs.d[i] = from->D[i];
             to->fp.arm_regs.fpscr = from->Fpscr;
         }
         if (flags & CONTEXT_ARM_DEBUG_REGISTERS)
@@ -550,8 +567,8 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         if (flags & CONTEXT_ARM64_CONTROL)
         {
             to->flags |= SERVER_CTX_CONTROL;
-            to->integer.arm64_regs.x[29] = from->u.s.Fp;
-            to->integer.arm64_regs.x[30] = from->u.s.Lr;
+            to->integer.arm64_regs.x[29] = from->Fp;
+            to->integer.arm64_regs.x[30] = from->Lr;
             to->ctl.arm64_regs.sp     = from->Sp;
             to->ctl.arm64_regs.pc     = from->Pc;
             to->ctl.arm64_regs.pstate = from->Cpsr;
@@ -559,15 +576,15 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         if (flags & CONTEXT_ARM64_INTEGER)
         {
             to->flags |= SERVER_CTX_INTEGER;
-            for (i = 0; i <= 28; i++) to->integer.arm64_regs.x[i] = from->u.X[i];
+            for (i = 0; i <= 28; i++) to->integer.arm64_regs.x[i] = from->X[i];
         }
         if (flags & CONTEXT_ARM64_FLOATING_POINT)
         {
             to->flags |= SERVER_CTX_FLOATING_POINT;
             for (i = 0; i < 32; i++)
             {
-                to->fp.arm64_regs.q[i].low = from->V[i].s.Low;
-                to->fp.arm64_regs.q[i].high = from->V[i].s.High;
+                to->fp.arm64_regs.q[i].low = from->V[i].Low;
+                to->fp.arm64_regs.q[i].high = from->V[i].High;
             }
             to->fp.arm64_regs.fpcr = from->Fpcr;
             to->fp.arm64_regs.fpsr = from->Fpsr;
@@ -582,6 +599,10 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         }
         return STATUS_SUCCESS;
     }
+
+    case MAKELONG( IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_I386 ):
+    case MAKELONG( IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_ARM64 ):
+        return STATUS_SUCCESS;
 
     default:
         return STATUS_INVALID_PARAMETER;
@@ -797,8 +818,8 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         if ((from->flags & SERVER_CTX_FLOATING_POINT) && (to_flags & CONTEXT_AMD64_FLOATING_POINT))
         {
             to->ContextFlags |= CONTEXT_AMD64_FLOATING_POINT;
-            memcpy( &to->u.FltSave, from->fp.x86_64_regs.fpregs, sizeof(from->fp.x86_64_regs.fpregs) );
-            to->MxCsr = to->u.FltSave.MxCsr;
+            memcpy( &to->FltSave, from->fp.x86_64_regs.fpregs, sizeof(from->fp.x86_64_regs.fpregs) );
+            to->MxCsr = to->FltSave.MxCsr;
         }
         if ((from->flags & SERVER_CTX_DEBUG_REGISTERS) && (to_flags & CONTEXT_AMD64_DEBUG_REGISTERS))
         {
@@ -864,7 +885,7 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         if ((from->flags & SERVER_CTX_EXTENDED_REGISTERS) && (to_flags & CONTEXT_AMD64_FLOATING_POINT))
         {
             to->ContextFlags |= CONTEXT_AMD64_FLOATING_POINT;
-            memcpy( &to->u.FltSave, from->ext.i386_regs, sizeof(to->u.FltSave) );
+            memcpy( &to->FltSave, from->ext.i386_regs, sizeof(to->FltSave) );
         }
         else if ((from->flags & SERVER_CTX_FLOATING_POINT) && (to_flags & CONTEXT_AMD64_FLOATING_POINT))
         {
@@ -880,7 +901,7 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
             fpu.DataSelector  = from->fp.i386_regs.data_sel;
             fpu.Cr0NpxState   = from->fp.i386_regs.cr0npx;
             memcpy( fpu.RegisterArea, from->fp.i386_regs.regs, sizeof(fpu.RegisterArea) );
-            fpu_to_fpux( &to->u.FltSave, &fpu );
+            fpu_to_fpux( &to->FltSave, &fpu );
         }
         if ((from->flags & SERVER_CTX_DEBUG_REGISTERS) && (to_flags & CONTEXT_AMD64_DEBUG_REGISTERS))
         {
@@ -943,7 +964,7 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         if ((from->flags & SERVER_CTX_FLOATING_POINT) && (to_flags & CONTEXT_ARM_FLOATING_POINT))
         {
             to->ContextFlags |= CONTEXT_ARM_FLOATING_POINT;
-            for (i = 0; i < 32; i++) to->u.D[i] = from->fp.arm_regs.d[i];
+            for (i = 0; i < 32; i++) to->D[i] = from->fp.arm_regs.d[i];
             to->Fpscr = from->fp.arm_regs.fpscr;
         }
         if ((from->flags & SERVER_CTX_DEBUG_REGISTERS) && (to_flags & CONTEXT_ARM_DEBUG_REGISTERS))
@@ -962,28 +983,27 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         ARM64_NT_CONTEXT *to = dst;
 
         to_flags = to->ContextFlags & ~CONTEXT_ARM64;
-        to->ContextFlags = CONTEXT_ARM64;
         if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_ARM64_CONTROL))
         {
             to->ContextFlags |= CONTEXT_ARM64_CONTROL;
-            to->u.s.Fp = from->integer.arm64_regs.x[29];
-            to->u.s.Lr = from->integer.arm64_regs.x[30];
-            to->Sp     = from->ctl.arm64_regs.sp;
-            to->Pc     = from->ctl.arm64_regs.pc;
-            to->Cpsr   = from->ctl.arm64_regs.pstate;
+            to->Fp   = from->integer.arm64_regs.x[29];
+            to->Lr   = from->integer.arm64_regs.x[30];
+            to->Sp   = from->ctl.arm64_regs.sp;
+            to->Pc   = from->ctl.arm64_regs.pc;
+            to->Cpsr = from->ctl.arm64_regs.pstate;
         }
         if ((from->flags & SERVER_CTX_INTEGER) && (to_flags & CONTEXT_ARM64_INTEGER))
         {
             to->ContextFlags |= CONTEXT_ARM64_INTEGER;
-            for (i = 0; i <= 28; i++) to->u.X[i] = from->integer.arm64_regs.x[i];
+            for (i = 0; i <= 28; i++) to->X[i] = from->integer.arm64_regs.x[i];
         }
         if ((from->flags & SERVER_CTX_FLOATING_POINT) && (to_flags & CONTEXT_ARM64_FLOATING_POINT))
         {
             to->ContextFlags |= CONTEXT_ARM64_FLOATING_POINT;
             for (i = 0; i < 32; i++)
             {
-                to->V[i].s.Low = from->fp.arm64_regs.q[i].low;
-                to->V[i].s.High = from->fp.arm64_regs.q[i].high;
+                to->V[i].Low = from->fp.arm64_regs.q[i].low;
+                to->V[i].High = from->fp.arm64_regs.q[i].high;
             }
             to->Fpcr = from->fp.arm64_regs.fpcr;
             to->Fpsr = from->fp.arm64_regs.fpsr;
@@ -998,6 +1018,10 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         }
         return STATUS_SUCCESS;
     }
+
+    case MAKELONG( IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_I386 ):
+    case MAKELONG( IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_ARM64 ):
+        return STATUS_SUCCESS;
 
     default:
         return STATUS_INVALID_PARAMETER;
@@ -1054,7 +1078,7 @@ static void contexts_from_server( CONTEXT *context, context_t server_contexts[2]
 /***********************************************************************
  *           pthread_exit_wrapper
  */
-static void pthread_exit_wrapper( int status )
+static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
 {
     close( ntdll_get_thread_data()->wait_fd[0] );
     close( ntdll_get_thread_data()->wait_fd[1] );
@@ -1117,7 +1141,7 @@ void *get_cpu_area( USHORT machine )
     WOW64_CPURESERVED *cpu;
     ULONG align;
 
-    if (!NtCurrentTeb()->WowTebOffset) return NULL;
+    if (!is_wow64()) return NULL;
 #ifdef _WIN64
     cpu = NtCurrentTeb()->TlsSlots[WOW64_TLS_CPURESERVED];
 #else
@@ -1158,12 +1182,17 @@ void set_thread_id( TEB *teb, DWORD pid, DWORD tid )
 /***********************************************************************
  *           init_thread_stack
  */
-NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR zero_bits, SIZE_T reserve_size, SIZE_T commit_size )
+NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR limit, SIZE_T reserve_size, SIZE_T commit_size )
 {
     struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
     WOW_TEB *wow_teb = get_wow_teb( teb );
     INITIAL_TEB stack;
     NTSTATUS status;
+
+    /* kernel stack */
+    if ((status = virtual_alloc_thread_stack( &stack, limit_4g, 0, kernel_stack_size, kernel_stack_size, FALSE )))
+        return status;
+    thread_data->kernel_stack = stack.DeallocationStack;
 
     if (wow_teb)
     {
@@ -1171,31 +1200,25 @@ NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR zero_bits, SIZE_T reserve_size, 
         SIZE_T cpusize = sizeof(WOW64_CPURESERVED) +
             ((get_machine_context_size( main_image_info.Machine ) + 7) & ~7) + sizeof(ULONG64);
 
+        /* 64-bit stack */
+        if ((status = virtual_alloc_thread_stack( &stack, limit_4g, 0, 0x40000, 0x40000, TRUE ))) return status;
+        cpu = (WOW64_CPURESERVED *)(((ULONG_PTR)stack.StackBase - cpusize) & ~15);
+        cpu->Machine = main_image_info.Machine;
+
 #ifdef _WIN64
+        teb->Tib.StackBase = teb->TlsSlots[WOW64_TLS_CPURESERVED] = cpu;
+        teb->Tib.StackLimit = stack.StackLimit;
+        teb->DeallocationStack = stack.DeallocationStack;
+
         /* 32-bit stack */
-        if ((status = virtual_alloc_thread_stack( &stack, zero_bits ? zero_bits : 0x7fffffff,
-                                                  reserve_size, commit_size, 0 )))
+        if (!limit || limit > user_space_wow_limit) limit = user_space_wow_limit;
+        if ((status = virtual_alloc_thread_stack( &stack, 0, limit, reserve_size, commit_size, TRUE )))
             return status;
         wow_teb->Tib.StackBase = PtrToUlong( stack.StackBase );
         wow_teb->Tib.StackLimit = PtrToUlong( stack.StackLimit );
         wow_teb->DeallocationStack = PtrToUlong( stack.DeallocationStack );
-
-        /* 64-bit stack */
-        if ((status = virtual_alloc_thread_stack( &stack, 0, 0x40000, 0x40000, kernel_stack_size )))
-            return status;
-        cpu = (WOW64_CPURESERVED *)(((ULONG_PTR)stack.StackBase - cpusize) & ~15);
-        cpu->Machine = main_image_info.Machine;
-        teb->Tib.StackBase = teb->TlsSlots[WOW64_TLS_CPURESERVED] = cpu;
-        teb->Tib.StackLimit = stack.StackLimit;
-        teb->DeallocationStack = stack.DeallocationStack;
-        thread_data->kernel_stack = stack.StackBase;
         return STATUS_SUCCESS;
 #else
-        /* 64-bit stack */
-        if ((status = virtual_alloc_thread_stack( &stack, 0, 0x40000, 0x40000, 0 ))) return status;
-
-        cpu = (WOW64_CPURESERVED *)(((ULONG_PTR)stack.StackBase - cpusize) & ~15);
-        cpu->Machine = main_image_info.Machine;
         wow_teb->Tib.StackBase = wow_teb->TlsSlots[WOW64_TLS_CPURESERVED] = PtrToUlong( cpu );
         wow_teb->Tib.StackLimit = PtrToUlong( stack.StackLimit );
         wow_teb->DeallocationStack = PtrToUlong( stack.DeallocationStack );
@@ -1203,13 +1226,11 @@ NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR zero_bits, SIZE_T reserve_size, 
     }
 
     /* native stack */
-    if ((status = virtual_alloc_thread_stack( &stack, zero_bits, reserve_size,
-                                              commit_size, kernel_stack_size )))
+    if ((status = virtual_alloc_thread_stack( &stack, 0, limit, reserve_size, commit_size, TRUE )))
         return status;
     teb->Tib.StackBase = stack.StackBase;
     teb->Tib.StackLimit = stack.StackLimit;
     teb->DeallocationStack = stack.DeallocationStack;
-    thread_data->kernel_stack = stack.StackBase;
     return STATUS_SUCCESS;
 }
 
@@ -1255,10 +1276,10 @@ NTSTATUS WINAPI NtCreateThread( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRI
 /***********************************************************************
  *              NtCreateThreadEx   (NTDLL.@)
  */
-NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
-                                  HANDLE process, PRTL_THREAD_START_ROUTINE start, void *param,
-                                  ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
-                                  SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
+NTSTATUS WINAPI GPT_IMPORT(NtCreateThreadEx)( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+                                              HANDLE process, PRTL_THREAD_START_ROUTINE start, void *param,
+                                              ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
+                                              SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
 {
     static const ULONG supported_flags = THREAD_CREATE_FLAGS_CREATE_SUSPENDED | THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER;
     sigset_t sigset;
@@ -1277,7 +1298,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
 
     if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
 #ifndef _WIN64
-    if (!is_wow64 && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
+    if (!is_old_wow64() && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
 #endif
 
     if (process != NtCurrentProcess())
@@ -1347,7 +1368,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
 
     if ((status = virtual_alloc_teb( &teb ))) goto done;
 
-    if ((status = init_thread_stack( teb, zero_bits, stack_reserve, stack_commit )))
+    if ((status = init_thread_stack( teb, get_zero_bits_limit( zero_bits ), stack_reserve, stack_commit )))
     {
         virtual_free_teb( teb );
         goto done;
@@ -1361,8 +1382,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
     thread_data->param = param;
 
     pthread_attr_init( &pthread_attr );
-    pthread_attr_setstack( &pthread_attr, teb->DeallocationStack,
-                           (char *)thread_data->kernel_stack + kernel_stack_size - (char *)teb->DeallocationStack );
+    pthread_attr_setstack( &pthread_attr, thread_data->kernel_stack, kernel_stack_size );
     pthread_attr_setguardsize( &pthread_attr, 0 );
     pthread_attr_setscope( &pthread_attr, PTHREAD_SCOPE_SYSTEM ); /* force creating a kernel thread */
     InterlockedIncrement( &nb_threads );
@@ -1386,6 +1406,21 @@ done:
     return STATUS_SUCCESS;
 }
 
+/* CW Hack 23015 */
+#if defined(__APPLE__) && defined(__x86_64__)
+
+NTSTATUS __attribute__((ms_abi)) msthunk_NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+                                                           HANDLE process, PRTL_THREAD_START_ROUTINE start, void *param,
+                                                           ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
+                                                           SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
+{
+    return sysv_NtCreateThreadEx( handle, access, attr, process, start, param, flags,
+                                  zero_bits, stack_commit, stack_reserve, attr_list );
+}
+
+GPT_ABI_WRAPPER( NtCreateThreadEx );
+
+#endif
 
 /***********************************************************************
  *           abort_thread
@@ -1394,7 +1429,7 @@ void abort_thread( int status )
 {
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
     if (InterlockedDecrement( &nb_threads ) <= 0) abort_process( status );
-    signal_exit_thread( status, pthread_exit_wrapper, NtCurrentTeb() );
+    pthread_exit_wrapper( status );
 }
 
 
@@ -1417,6 +1452,8 @@ static DECLSPEC_NORETURN void exit_thread( int status )
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
 
+    if (InterlockedDecrement( &nb_threads ) <= 0) exit_process( status );
+
     if ((teb = InterlockedExchangePointer( &prev_teb, NtCurrentTeb() )))
     {
         struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
@@ -1427,7 +1464,7 @@ static DECLSPEC_NORETURN void exit_thread( int status )
             virtual_free_teb( teb );
         }
     }
-    signal_exit_thread( status, pthread_exit_wrapper, NtCurrentTeb() );
+    pthread_exit_wrapper( status );
 }
 
 
@@ -1437,7 +1474,7 @@ static DECLSPEC_NORETURN void exit_thread( int status )
 void exit_process( int status )
 {
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
-    signal_exit_thread( get_unix_exit_code( status ), process_exit_wrapper, NtCurrentTeb() );
+    process_exit_wrapper( get_unix_exit_code( status ));
 }
 
 
@@ -1668,19 +1705,20 @@ NTSTATUS WINAPI NtQueueApcThread( HANDLE handle, PNTAPCFUNC func, ULONG_PTR arg1
                                   ULONG_PTR arg2, ULONG_PTR arg3 )
 {
     unsigned int ret;
+    apc_call_t call;
 
     SERVER_START_REQ( queue_apc )
     {
         req->handle = wine_server_obj_handle( handle );
         if (func)
         {
-            req->call.type         = APC_USER;
-            req->call.user.func    = wine_server_client_ptr( func );
-            req->call.user.args[0] = arg1;
-            req->call.user.args[1] = arg2;
-            req->call.user.args[2] = arg3;
+            call.type         = APC_USER;
+            call.user.func    = wine_server_client_ptr( func );
+            call.user.args[0] = arg1;
+            call.user.args[1] = arg2;
+            call.user.args[2] = arg3;
+            wine_server_add_data( req, &call, sizeof(call) );
         }
-        else req->call.type = APC_NONE;  /* wake up only */
         ret = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -1704,6 +1742,7 @@ NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USH
     SERVER_START_REQ( set_thread_context )
     {
         req->handle  = wine_server_obj_handle( handle );
+        req->native_flags = server_contexts[0].flags & get_native_context_flags( native_machine, machine );
         wine_server_add_data( req, server_contexts, count * sizeof(server_contexts[0]) );
         ret = wine_server_call( req );
         *self = reply->self;
@@ -1730,6 +1769,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
         req->handle  = wine_server_obj_handle( handle );
         req->flags   = flags;
         req->machine = machine;
+        req->native_flags = flags & get_native_context_flags( native_machine, machine );
         wine_server_set_reply( req, server_contexts, sizeof(server_contexts) );
         ret = wine_server_call( req );
         *self = reply->self;
@@ -1747,6 +1787,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
             req->context = wine_server_obj_handle( context_handle );
             req->flags   = flags;
             req->machine = machine;
+            req->native_flags = flags & get_native_context_flags( native_machine, machine );
             wine_server_set_reply( req, server_contexts, sizeof(server_contexts) );
             ret = wine_server_call( req );
             count = wine_server_reply_size( reply ) / sizeof(server_contexts[0]);
@@ -1783,9 +1824,9 @@ BOOL get_thread_times(int unix_pid, int unix_tid, LARGE_INTEGER *kernel_time, LA
     int i;
 
     if (unix_tid == -1)
-        sprintf( buf, "/proc/%u/stat", unix_pid );
+        snprintf( buf, sizeof(buf), "/proc/%u/stat", unix_pid );
     else
-        sprintf( buf, "/proc/%u/task/%u/stat", unix_pid, unix_tid );
+        snprintf( buf, sizeof(buf), "/proc/%u/task/%u/stat", unix_pid, unix_tid );
     if (!(f = fopen( buf, "r" )))
     {
         WARN("Failed to open %s: %s\n", buf, strerror(errno));
@@ -1888,7 +1929,7 @@ static void set_native_thread_name( HANDLE handle, const UNICODE_STRING *name )
     }
 
     len = ntdll_wcstoumbs( name->Buffer, name->Length / sizeof(WCHAR), nameA, sizeof(nameA), FALSE );
-    sprintf(path, "/proc/%u/task/%u/comm", unix_pid, unix_tid);
+    snprintf(path, sizeof(path), "/proc/%u/task/%u/comm", unix_pid, unix_tid);
     if ((fd = open( path, O_WRONLY )) != -1)
     {
         write( fd, nameA, len );
@@ -1934,14 +1975,13 @@ static void set_native_thread_name( HANDLE handle, const UNICODE_STRING *name )
 #endif
 }
 
-#ifndef _WIN64
 static BOOL is_process_wow64( const CLIENT_ID *id )
 {
     HANDLE handle;
     ULONG_PTR info;
     BOOL ret = FALSE;
 
-    if (id->UniqueProcess == ULongToHandle(GetCurrentProcessId())) return is_wow64;
+    if (id->UniqueProcess == ULongToHandle(GetCurrentProcessId())) return is_old_wow64();
     if (!NtOpenProcess( &handle, PROCESS_QUERY_LIMITED_INFORMATION, NULL, id ))
     {
         if (!NtQueryInformationProcess( handle, ProcessWow64Information, &info, sizeof(info), NULL ))
@@ -1950,7 +1990,6 @@ static BOOL is_process_wow64( const CLIENT_ID *id )
     }
     return ret;
 }
-#endif
 
 /******************************************************************************
  *              NtQueryInformationThread  (NTDLL.@)
@@ -1986,15 +2025,13 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
         SERVER_END_REQ;
         if (status == STATUS_SUCCESS)
         {
-#ifndef _WIN64
-            if (is_wow64)
+            if (is_old_wow64())
             {
                 if (is_process_wow64( &info.ClientId ))
                     info.TebBaseAddress = (char *)info.TebBaseAddress + teb_offset;
                 else
                     info.TebBaseAddress = NULL;
             }
-#endif
             if (data) memcpy( data, &info, min( length, sizeof(info) ));
             if (ret_len) *ret_len = min( length, sizeof(info) );
         }
@@ -2131,6 +2168,25 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
         if (ret_len) *ret_len = sizeof(BOOL);
         return STATUS_SUCCESS;
 
+    case ThreadIsTerminated:
+    {
+        ULONG terminated;
+
+        if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        SERVER_START_REQ( get_thread_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            if (!(status = wine_server_call( req ))) terminated = !!(reply->flags & GET_THREAD_INFO_FLAG_TERMINATED);
+        }
+        SERVER_END_REQ;
+        if (!status)
+        {
+            *(ULONG *)data = terminated;
+            if (ret_len) *ret_len = sizeof(ULONG);
+        }
+        return status;
+    }
+
     case ThreadSuspendCount:
         if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!data) return STATUS_ACCESS_VIOLATION;
@@ -2184,7 +2240,7 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
             req->handle = wine_server_obj_handle( handle );
             req->access = THREAD_QUERY_INFORMATION;
             if ((status = wine_server_call( req ))) return status;
-            *(BOOLEAN*)data = reply->dbg_hidden;
+            *(BOOLEAN*)data = !!(reply->flags & GET_THREAD_INFO_FLAG_DBG_HIDDEN);
         }
         SERVER_END_REQ;
         if (ret_len) *ret_len = sizeof(BOOLEAN);

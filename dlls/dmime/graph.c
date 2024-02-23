@@ -18,31 +18,38 @@
  */
 
 #include "dmime_private.h"
-#include "dmobject.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmime);
 
-struct IDirectMusicGraphImpl {
-  IDirectMusicGraph IDirectMusicGraph_iface;
-  struct dmobject dmobj;
-  LONG ref;
-  WORD              num_tools;
-  struct list       Tools;
+struct tool_entry
+{
+    struct list entry;
+    IDirectMusicTool *tool;
+    DWORD delivery;
 };
 
-static inline IDirectMusicGraphImpl *impl_from_IDirectMusicGraph(IDirectMusicGraph *iface)
+struct graph
 {
-    return CONTAINING_RECORD(iface, IDirectMusicGraphImpl, IDirectMusicGraph_iface);
+    IDirectMusicGraph IDirectMusicGraph_iface;
+    struct dmobject dmobj;
+    LONG ref;
+
+    struct list tools;
+};
+
+static inline struct graph *impl_from_IDirectMusicGraph(IDirectMusicGraph *iface)
+{
+    return CONTAINING_RECORD(iface, struct graph, IDirectMusicGraph_iface);
 }
 
-static inline IDirectMusicGraphImpl *impl_from_IPersistStream(IPersistStream *iface)
+static inline struct graph *impl_from_IPersistStream(IPersistStream *iface)
 {
-    return CONTAINING_RECORD(iface, IDirectMusicGraphImpl, dmobj.IPersistStream_iface);
+    return CONTAINING_RECORD(iface, struct graph, dmobj.IPersistStream_iface);
 }
 
-static HRESULT WINAPI DirectMusicGraph_QueryInterface(IDirectMusicGraph *iface, REFIID riid, void **ret_iface)
+static HRESULT WINAPI graph_QueryInterface(IDirectMusicGraph *iface, REFIID riid, void **ret_iface)
 {
-    IDirectMusicGraphImpl *This = impl_from_IDirectMusicGraph(iface);
+    struct graph *This = impl_from_IDirectMusicGraph(iface);
 
     TRACE("(%p, %s, %p)\n", This, debugstr_guid(riid), ret_iface);
 
@@ -68,123 +75,163 @@ static HRESULT WINAPI DirectMusicGraph_QueryInterface(IDirectMusicGraph *iface, 
     return E_NOINTERFACE;
 }
 
-static ULONG WINAPI DirectMusicGraph_AddRef(IDirectMusicGraph *iface)
+static ULONG WINAPI graph_AddRef(IDirectMusicGraph *iface)
 {
-    IDirectMusicGraphImpl *This = impl_from_IDirectMusicGraph(iface);
+    struct graph *This = impl_from_IDirectMusicGraph(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p): %ld\n", This, ref);
 
-    DMIME_LockModule();
     return ref;
 }
 
-static ULONG WINAPI DirectMusicGraph_Release(IDirectMusicGraph *iface)
+static ULONG WINAPI graph_Release(IDirectMusicGraph *iface)
 {
-    IDirectMusicGraphImpl *This = impl_from_IDirectMusicGraph(iface);
+    struct graph *This = impl_from_IDirectMusicGraph(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p): %ld\n", This, ref);
 
-    if (ref == 0)
-        HeapFree(GetProcessHeap(), 0, This);
+    if (!ref)
+    {
+        struct tool_entry *entry, *next;
 
-    DMIME_UnlockModule();
+        LIST_FOR_EACH_ENTRY_SAFE(entry, next, &This->tools, struct tool_entry, entry)
+        {
+            list_remove(&entry->entry);
+            IDirectMusicTool_Release(entry->tool);
+            free(entry);
+        }
+
+        free(This);
+    }
+
     return ref;
 }
 
-static HRESULT WINAPI DirectMusicGraph_StampPMsg(IDirectMusicGraph *iface, DMUS_PMSG *msg)
+static HRESULT WINAPI graph_StampPMsg(IDirectMusicGraph *iface, DMUS_PMSG *msg)
 {
-    IDirectMusicGraphImpl *This = impl_from_IDirectMusicGraph(iface);
-    FIXME("(%p, %p): stub\n", This, msg);
+    const DWORD delivery_flags = DMUS_PMSGF_TOOL_IMMEDIATE | DMUS_PMSGF_TOOL_QUEUE | DMUS_PMSGF_TOOL_ATTIME;
+    struct graph *This = impl_from_IDirectMusicGraph(iface);
+    struct tool_entry *entry, *next, *first;
+
+    TRACE("(%p, %p)\n", This, msg);
+
+    if (!msg) return E_POINTER;
+
+    first = LIST_ENTRY(This->tools.next, struct tool_entry, entry);
+    LIST_FOR_EACH_ENTRY_SAFE(entry, next, &This->tools, struct tool_entry, entry)
+        if (entry->tool == msg->pTool) break;
+    if (&entry->entry == &This->tools) next = first;
+
+    if (msg->pTool)
+    {
+        IDirectMusicTool_Release(msg->pTool);
+        msg->pTool = NULL;
+    }
+
+    if (&next->entry == &This->tools) return DMUS_S_LAST_TOOL;
+
+    if (!msg->pGraph)
+    {
+        msg->pGraph = iface;
+        IDirectMusicGraph_AddRef(msg->pGraph);
+    }
+
+    msg->pTool = next->tool;
+    IDirectMusicTool_AddRef(msg->pTool);
+
+    msg->dwFlags &= ~delivery_flags;
+    msg->dwFlags |= next->delivery;
+
     return S_OK;
 }
 
-static HRESULT WINAPI DirectMusicGraph_InsertTool(IDirectMusicGraph *iface, IDirectMusicTool* pTool, DWORD* pdwPChannels, DWORD cPChannels, LONG lIndex)
+static HRESULT WINAPI graph_InsertTool(IDirectMusicGraph *iface, IDirectMusicTool *tool,
+        DWORD *channels, DWORD channel_count, LONG index)
 {
-    IDirectMusicGraphImpl *This = impl_from_IDirectMusicGraph(iface);
-    struct list* pEntry = NULL;
-    struct list* pPrevEntry = NULL;
-    LPDMUS_PRIVATE_GRAPH_TOOL pIt = NULL;
-    LPDMUS_PRIVATE_GRAPH_TOOL pNewTool = NULL;
+    struct graph *This = impl_from_IDirectMusicGraph(iface);
+    struct tool_entry *entry, *next;
+    HRESULT hr;
 
-    FIXME("(%p, %p, %p, %ld, %li): use of pdwPChannels\n", This, pTool, pdwPChannels, cPChannels, lIndex);
-  
-    if (!pTool)
-        return E_POINTER;
+    TRACE("(%p, %p, %p, %ld, %li)\n", This, tool, channels, channel_count, index);
 
-    if (lIndex < 0)
-        lIndex = This->num_tools + lIndex;
+    if (!tool) return E_POINTER;
 
-    pPrevEntry = &This->Tools;
-    LIST_FOR_EACH(pEntry, &This->Tools)
+    LIST_FOR_EACH_ENTRY(next, &This->tools, struct tool_entry, entry)
     {
-        pIt = LIST_ENTRY(pEntry, DMUS_PRIVATE_GRAPH_TOOL, entry);
-        if (pIt->dwIndex == lIndex)
-            return DMUS_E_ALREADY_EXISTS;
-
-        if (pIt->dwIndex > lIndex)
-          break ;
-        pPrevEntry = pEntry;
+        if (next->tool == tool) return DMUS_E_ALREADY_EXISTS;
+        if (index-- <= 0) break;
     }
 
-    ++This->num_tools;
-    pNewTool = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(DMUS_PRIVATE_GRAPH_TOOL));
-    pNewTool->pTool = pTool;
-    pNewTool->dwIndex = lIndex;
-    IDirectMusicTool8_AddRef(pTool);
-    IDirectMusicTool8_Init(pTool, iface);
-    list_add_tail (pPrevEntry->next, &pNewTool->entry);
+    if (!(entry = calloc(1, sizeof(*entry)))) return E_OUTOFMEMORY;
+    entry->tool = tool;
+    IDirectMusicTool_AddRef(tool);
+    IDirectMusicTool_Init(tool, iface);
+    if (FAILED(hr = IDirectMusicTool_GetMsgDeliveryType(tool, &entry->delivery)))
+    {
+        WARN("Failed to get delivery type from tool %p, hr %#lx\n", tool, hr);
+        entry->delivery = DMUS_PMSGF_TOOL_IMMEDIATE;
+    }
+    list_add_before(&next->entry, &entry->entry);
 
-#if 0
-  DWORD dwNum = 0;
-  IDirectMusicTool8_GetMediaTypes(pTool, &dwNum);
-#endif
-
-    return DS_OK;
+    return S_OK;
 }
 
-static HRESULT WINAPI DirectMusicGraph_GetTool(IDirectMusicGraph *iface, DWORD dwIndex, IDirectMusicTool** ppTool)
+static HRESULT WINAPI graph_GetTool(IDirectMusicGraph *iface, DWORD index, IDirectMusicTool **ret_tool)
 {
-    IDirectMusicGraphImpl *This = impl_from_IDirectMusicGraph(iface);
-    struct list* pEntry = NULL;
-    LPDMUS_PRIVATE_GRAPH_TOOL pIt = NULL;
+    struct graph *This = impl_from_IDirectMusicGraph(iface);
+    struct tool_entry *entry;
 
-    TRACE("(%p, %ld, %p)\n", This, dwIndex, ppTool);
+    TRACE("(%p, %ld, %p)\n", This, index, ret_tool);
 
-    LIST_FOR_EACH (pEntry, &This->Tools)
+    if (!ret_tool) return E_POINTER;
+
+    LIST_FOR_EACH_ENTRY(entry, &This->tools, struct tool_entry, entry)
     {
-        pIt = LIST_ENTRY(pEntry, DMUS_PRIVATE_GRAPH_TOOL, entry);
-        if (pIt->dwIndex == dwIndex)
+        if (!index--)
         {
-            *ppTool = pIt->pTool;
-            if (*ppTool)
-                IDirectMusicTool_AddRef(*ppTool);
+            *ret_tool = entry->tool;
+            IDirectMusicTool_AddRef(entry->tool);
             return S_OK;
         }
-        if (pIt->dwIndex > dwIndex)
-            break ;
     }
 
     return DMUS_E_NOT_FOUND;
 }
 
-static HRESULT WINAPI DirectMusicGraph_RemoveTool(IDirectMusicGraph *iface, IDirectMusicTool* pTool)
+static HRESULT WINAPI graph_RemoveTool(IDirectMusicGraph *iface, IDirectMusicTool *tool)
 {
-    IDirectMusicGraphImpl *This = impl_from_IDirectMusicGraph(iface);
-    FIXME("(%p, %p): stub\n", This, pTool);
-    return S_OK;
+    struct graph *This = impl_from_IDirectMusicGraph(iface);
+    struct tool_entry *entry;
+
+    TRACE("(%p, %p)\n", This, tool);
+
+    if (!tool) return E_POINTER;
+
+    LIST_FOR_EACH_ENTRY(entry, &This->tools, struct tool_entry, entry)
+    {
+        if (entry->tool == tool)
+        {
+            list_remove(&entry->entry);
+            IDirectMusicTool_Release(entry->tool);
+            free(entry);
+            return S_OK;
+        }
+    }
+
+    return DMUS_E_NOT_FOUND;
 }
 
-static const IDirectMusicGraphVtbl DirectMusicGraphVtbl =
+static const IDirectMusicGraphVtbl graph_vtbl =
 {
-    DirectMusicGraph_QueryInterface,
-    DirectMusicGraph_AddRef,
-    DirectMusicGraph_Release,
-    DirectMusicGraph_StampPMsg,
-    DirectMusicGraph_InsertTool,
-    DirectMusicGraph_GetTool,
-    DirectMusicGraph_RemoveTool
+    graph_QueryInterface,
+    graph_AddRef,
+    graph_Release,
+    graph_StampPMsg,
+    graph_InsertTool,
+    graph_GetTool,
+    graph_RemoveTool,
 };
 
 static HRESULT WINAPI graph_IDirectMusicObject_ParseDescriptor(IDirectMusicObject *iface,
@@ -231,7 +278,7 @@ static const IDirectMusicObjectVtbl dmobject_vtbl = {
 
 static HRESULT WINAPI graph_IPersistStream_Load(IPersistStream *iface, IStream *stream)
 {
-    IDirectMusicGraphImpl *This = impl_from_IPersistStream(iface);
+    struct graph *This = impl_from_IPersistStream(iface);
 
     FIXME("(%p, %p): Loading not implemented yet\n", This, stream);
 
@@ -253,21 +300,17 @@ static const IPersistStreamVtbl persiststream_vtbl = {
 /* for ClassFactory */
 HRESULT create_dmgraph(REFIID riid, void **ret_iface)
 {
-    IDirectMusicGraphImpl* obj;
+    struct graph *obj;
     HRESULT hr;
 
     *ret_iface = NULL;
-  
-    obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusicGraphImpl));
-    if (!obj)
-        return E_OUTOFMEMORY;
-
-    obj->IDirectMusicGraph_iface.lpVtbl = &DirectMusicGraphVtbl;
+    if (!(obj = calloc(1, sizeof(*obj)))) return E_OUTOFMEMORY;
+    obj->IDirectMusicGraph_iface.lpVtbl = &graph_vtbl;
     obj->ref = 1;
     dmobject_init(&obj->dmobj, &CLSID_DirectMusicGraph, (IUnknown *)&obj->IDirectMusicGraph_iface);
     obj->dmobj.IDirectMusicObject_iface.lpVtbl = &dmobject_vtbl;
     obj->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
-    list_init(&obj->Tools);
+    list_init(&obj->tools);
 
     hr = IDirectMusicGraph_QueryInterface(&obj->IDirectMusicGraph_iface, riid, ret_iface);
     IDirectMusicGraph_Release(&obj->IDirectMusicGraph_iface);

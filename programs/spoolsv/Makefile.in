@@ -1,7 +1,7 @@
 MODULE    = spoolsv.exe
 IMPORTS   = advapi32
 
-EXTRADLLFLAGS = -mconsole
+EXTRADLLFLAGS = -mwindows
 
-C_SRCS = \
+SOURCES = \
 	main.c

@@ -275,6 +275,7 @@ static BOOL read_identity(IXMLDOMElement *root, struct assembly_identity *identi
 
 error:
     clear_identity(identity);
+    memset(identity, 0, sizeof(*identity));
     return FALSE;
 }
 
@@ -587,7 +588,7 @@ static BOOL read_update_package(IXMLDOMElement *child, WCHAR *tagname, void *con
             list_add_tail(update_list, &entry->entry);
             return TRUE;
         }
-        free_dependency(entry);
+        free(entry);
     }
 
     return FALSE;

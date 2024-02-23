@@ -1358,18 +1358,29 @@ void macdrv_hotkey_press(const macdrv_event *event)
 
 
 /***********************************************************************
- *              macdrv_process_text_input
+ *              ImeProcessKey (MACDRV.@)
  */
-NTSTATUS macdrv_ime_process_text_input(void *arg)
+UINT macdrv_ImeProcessKey(HIMC himc, UINT wparam, UINT lparam, const BYTE *key_state)
 {
-    struct process_text_input_params *params = arg;
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
-    const BYTE *key_state = params->key_state;
+    WORD scan = HIWORD(lparam) & 0x1ff, vkey = LOWORD(wparam);
+    BOOL repeat = !!(lparam >> 30), pressed = !(lparam >> 31);
     unsigned int flags;
-    int keyc;
+    int keyc, done = 0;
 
-    TRACE("vkey 0x%04x scan 0x%04x repeat %u himc %p\n", params->vkey, params->scan,
-          params->repeat, params->himc);
+    TRACE("himc %p, scan %#x, vkey %#x, repeat %u, pressed %u\n",
+          himc, scan, vkey, repeat, pressed);
+
+    if (!macdrv_using_input_method()) return 0;
+
+    switch (vkey)
+    {
+        case VK_SHIFT:
+        case VK_CONTROL:
+        case VK_CAPITAL:
+        case VK_MENU:
+        return 0;
+    }
 
     flags = thread_data->last_modifiers;
     if (key_state[VK_SHIFT] & 0x80)
@@ -1391,19 +1402,16 @@ NTSTATUS macdrv_ime_process_text_input(void *arg)
 
     /* Find the Mac keycode corresponding to the scan code */
     for (keyc = 0; keyc < ARRAY_SIZE(thread_data->keyc2vkey); keyc++)
-        if (thread_data->keyc2vkey[keyc] == params->vkey) break;
+        if (thread_data->keyc2vkey[keyc] == vkey) break;
 
-    if (keyc >= ARRAY_SIZE(thread_data->keyc2vkey))
-    {
-        *params->done = -1;
-        return 0;
-    }
+    if (keyc >= ARRAY_SIZE(thread_data->keyc2vkey)) return 0;
 
     TRACE("flags 0x%08x keyc 0x%04x\n", flags, keyc);
 
-    macdrv_send_text_input_event(((params->scan & 0x8000) == 0), flags, params->repeat, keyc,
-                                 params->himc, params->done);
-    return 0;
+    macdrv_send_text_input_event(pressed, flags, repeat, keyc, himc, &done);
+    while (!done) NtUserMsgWaitForMultipleObjectsEx(0, NULL, INFINITE, QS_POSTMESSAGE | QS_SENDMESSAGE, 0);
+
+    return done > 0;
 }
 
 
@@ -1523,7 +1531,7 @@ INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
             if (!len)
             {
                 char name[16];
-                len = sprintf(name, "Key 0x%02x", vkey);
+                len = snprintf(name, sizeof(name), "Key 0x%02x", vkey);
                 len = min(len + 1, size);
                 ascii_to_unicode(buffer, name, len);
                 if (len) buffer[--len] = 0;

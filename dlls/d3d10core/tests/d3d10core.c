@@ -23,7 +23,7 @@
 #define COBJMACROS
 #include "initguid.h"
 #include "d3d11_4.h"
-#include "wine/heap.h"
+#include "wine/wined3d.h"
 #include "wine/test.h"
 
 #define BITS_NNAN 0xffc00000
@@ -33,6 +33,7 @@
 #define BITS_N1_0 0xbf800000
 #define BITS_1_0  0x3f800000
 
+static bool damavand;
 static unsigned int use_adapter_idx;
 static BOOL enable_debug_layer;
 static BOOL use_warp_adapter;
@@ -86,7 +87,7 @@ static void queue_test(void (*test)(void))
     if (mt_test_count >= mt_tests_size)
     {
         mt_tests_size = max(16, mt_tests_size * 2);
-        mt_tests = heap_realloc(mt_tests, mt_tests_size * sizeof(*mt_tests));
+        mt_tests = realloc(mt_tests, mt_tests_size * sizeof(*mt_tests));
     }
     mt_tests[mt_test_count++].test = test;
 }
@@ -124,7 +125,7 @@ static void run_queued_tests(void)
 
     GetSystemInfo(&si);
     thread_count = si.dwNumberOfProcessors;
-    threads = heap_calloc(thread_count, sizeof(*threads));
+    threads = calloc(thread_count, sizeof(*threads));
     for (i = 0, test_idx = 0; i < thread_count; ++i)
     {
         threads[i] = CreateThread(NULL, 0, thread_func, &test_idx, 0, NULL);
@@ -135,7 +136,7 @@ static void run_queued_tests(void)
     {
         CloseHandle(threads[i]);
     }
-    heap_free(threads);
+    free(threads);
 }
 
 static void set_box(D3D10_BOX *box, UINT left, UINT top, UINT front, UINT right, UINT bottom, UINT back)
@@ -180,6 +181,13 @@ static HRESULT check_interface_(unsigned int line, void *iface, REFIID riid, BOO
     return hr;
 }
 
+static BOOL compare_uint(unsigned int x, unsigned int y, unsigned int max_diff)
+{
+    unsigned int diff = x > y ? x - y : y - x;
+
+    return diff <= max_diff;
+}
+
 static BOOL compare_float(float f, float g, unsigned int ulps)
 {
     int x = *(int *)&f;
@@ -190,10 +198,7 @@ static BOOL compare_float(float f, float g, unsigned int ulps)
     if (y < 0)
         y = INT_MIN - y;
 
-    if (abs(x - y) > ulps)
-        return FALSE;
-
-    return TRUE;
+    return compare_uint(x, y, ulps);
 }
 
 static BOOL compare_vec4(const struct vec4 *v1, const struct vec4 *v2, unsigned int ulps)
@@ -202,13 +207,6 @@ static BOOL compare_vec4(const struct vec4 *v1, const struct vec4 *v2, unsigned 
             && compare_float(v1->y, v2->y, ulps)
             && compare_float(v1->z, v2->z, ulps)
             && compare_float(v1->w, v2->w, ulps);
-}
-
-static BOOL compare_uint(unsigned int x, unsigned int y, unsigned int max_diff)
-{
-    unsigned int diff = x > y ? x - y : y - x;
-
-    return diff <= max_diff;
 }
 
 static BOOL compare_uvec4(const struct uvec4* v1, const struct uvec4 *v2)
@@ -240,42 +238,42 @@ static void get_srv_desc(D3D10_SHADER_RESOURCE_VIEW_DESC *d3d10_desc, const stru
     d3d10_desc->ViewDimension = desc->dimension;
     if (desc->dimension == D3D10_SRV_DIMENSION_TEXTURE1D)
     {
-        U(*d3d10_desc).Texture1D.MostDetailedMip = desc->miplevel_idx;
-        U(*d3d10_desc).Texture1D.MipLevels = desc->miplevel_count;
+        d3d10_desc->Texture1D.MostDetailedMip = desc->miplevel_idx;
+        d3d10_desc->Texture1D.MipLevels = desc->miplevel_count;
     }
     else if (desc->dimension == D3D10_SRV_DIMENSION_TEXTURE1DARRAY)
     {
-        U(*d3d10_desc).Texture1DArray.MostDetailedMip = desc->miplevel_idx;
-        U(*d3d10_desc).Texture1DArray.MipLevels = desc->miplevel_count;
-        U(*d3d10_desc).Texture1DArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture1DArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture1DArray.MostDetailedMip = desc->miplevel_idx;
+        d3d10_desc->Texture1DArray.MipLevels = desc->miplevel_count;
+        d3d10_desc->Texture1DArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture1DArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_SRV_DIMENSION_TEXTURE2D)
     {
-        U(*d3d10_desc).Texture2D.MostDetailedMip = desc->miplevel_idx;
-        U(*d3d10_desc).Texture2D.MipLevels = desc->miplevel_count;
+        d3d10_desc->Texture2D.MostDetailedMip = desc->miplevel_idx;
+        d3d10_desc->Texture2D.MipLevels = desc->miplevel_count;
     }
     else if (desc->dimension == D3D10_SRV_DIMENSION_TEXTURE2DARRAY)
     {
-        U(*d3d10_desc).Texture2DArray.MostDetailedMip = desc->miplevel_idx;
-        U(*d3d10_desc).Texture2DArray.MipLevels = desc->miplevel_count;
-        U(*d3d10_desc).Texture2DArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture2DArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture2DArray.MostDetailedMip = desc->miplevel_idx;
+        d3d10_desc->Texture2DArray.MipLevels = desc->miplevel_count;
+        d3d10_desc->Texture2DArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture2DArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_SRV_DIMENSION_TEXTURE2DMSARRAY)
     {
-        U(*d3d10_desc).Texture2DMSArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture2DMSArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture2DMSArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture2DMSArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_SRV_DIMENSION_TEXTURE3D)
     {
-        U(*d3d10_desc).Texture3D.MostDetailedMip = desc->miplevel_idx;
-        U(*d3d10_desc).Texture3D.MipLevels = desc->miplevel_count;
+        d3d10_desc->Texture3D.MostDetailedMip = desc->miplevel_idx;
+        d3d10_desc->Texture3D.MipLevels = desc->miplevel_count;
     }
     else if (desc->dimension == D3D10_SRV_DIMENSION_TEXTURECUBE)
     {
-        U(*d3d10_desc).TextureCube.MostDetailedMip = desc->miplevel_idx;
-        U(*d3d10_desc).TextureCube.MipLevels = desc->miplevel_count;
+        d3d10_desc->TextureCube.MostDetailedMip = desc->miplevel_idx;
+        d3d10_desc->TextureCube.MipLevels = desc->miplevel_count;
     }
     else if (desc->dimension != D3D10_SRV_DIMENSION_UNKNOWN
             && desc->dimension != D3D10_SRV_DIMENSION_TEXTURE2DMS)
@@ -298,54 +296,54 @@ static void check_srv_desc_(unsigned int line, const D3D10_SHADER_RESOURCE_VIEW_
 
     if (desc->ViewDimension == D3D10_SRV_DIMENSION_TEXTURE2D)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2D.MostDetailedMip == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture2D.MostDetailedMip == expected_desc->miplevel_idx,
                 "Got MostDetailedMip %u, expected %u.\n",
-                U(*desc).Texture2D.MostDetailedMip, expected_desc->miplevel_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2D.MipLevels == expected_desc->miplevel_count,
+                desc->Texture2D.MostDetailedMip, expected_desc->miplevel_idx);
+        ok_(__FILE__, line)(desc->Texture2D.MipLevels == expected_desc->miplevel_count,
                 "Got MipLevels %u, expected %u.\n",
-                U(*desc).Texture2D.MipLevels, expected_desc->miplevel_count);
+                desc->Texture2D.MipLevels, expected_desc->miplevel_count);
     }
     else if (desc->ViewDimension == D3D10_SRV_DIMENSION_TEXTURE2DARRAY)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.MostDetailedMip == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture2DArray.MostDetailedMip == expected_desc->miplevel_idx,
                 "Got MostDetailedMip %u, expected %u.\n",
-                U(*desc).Texture2DArray.MostDetailedMip, expected_desc->miplevel_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.MipLevels == expected_desc->miplevel_count,
+                desc->Texture2DArray.MostDetailedMip, expected_desc->miplevel_idx);
+        ok_(__FILE__, line)(desc->Texture2DArray.MipLevels == expected_desc->miplevel_count,
                 "Got MipLevels %u, expected %u.\n",
-                U(*desc).Texture2DArray.MipLevels, expected_desc->miplevel_count);
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.FirstArraySlice == expected_desc->layer_idx,
+                desc->Texture2DArray.MipLevels, expected_desc->miplevel_count);
+        ok_(__FILE__, line)(desc->Texture2DArray.FirstArraySlice == expected_desc->layer_idx,
                 "Got FirstArraySlice %u, expected %u.\n",
-                U(*desc).Texture2DArray.FirstArraySlice, expected_desc->layer_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.ArraySize == expected_desc->layer_count,
+                desc->Texture2DArray.FirstArraySlice, expected_desc->layer_idx);
+        ok_(__FILE__, line)(desc->Texture2DArray.ArraySize == expected_desc->layer_count,
                 "Got ArraySize %u, expected %u.\n",
-                U(*desc).Texture2DArray.ArraySize, expected_desc->layer_count);
+                desc->Texture2DArray.ArraySize, expected_desc->layer_count);
     }
     else if (desc->ViewDimension == D3D10_SRV_DIMENSION_TEXTURE2DMSARRAY)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2DMSArray.FirstArraySlice == expected_desc->layer_idx,
+        ok_(__FILE__, line)(desc->Texture2DMSArray.FirstArraySlice == expected_desc->layer_idx,
                 "Got FirstArraySlice %u, expected %u.\n",
-                U(*desc).Texture2DMSArray.FirstArraySlice, expected_desc->layer_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DMSArray.ArraySize == expected_desc->layer_count,
+                desc->Texture2DMSArray.FirstArraySlice, expected_desc->layer_idx);
+        ok_(__FILE__, line)(desc->Texture2DMSArray.ArraySize == expected_desc->layer_count,
                 "Got ArraySize %u, expected %u.\n",
-                U(*desc).Texture2DMSArray.ArraySize, expected_desc->layer_count);
+                desc->Texture2DMSArray.ArraySize, expected_desc->layer_count);
     }
     else if (desc->ViewDimension == D3D10_SRV_DIMENSION_TEXTURE3D)
     {
-        ok_(__FILE__, line)(U(*desc).Texture3D.MostDetailedMip == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture3D.MostDetailedMip == expected_desc->miplevel_idx,
                 "Got MostDetailedMip %u, expected %u.\n",
-                U(*desc).Texture3D.MostDetailedMip, expected_desc->miplevel_idx);
-        ok_(__FILE__, line)(U(*desc).Texture3D.MipLevels == expected_desc->miplevel_count,
+                desc->Texture3D.MostDetailedMip, expected_desc->miplevel_idx);
+        ok_(__FILE__, line)(desc->Texture3D.MipLevels == expected_desc->miplevel_count,
                 "Got MipLevels %u, expected %u.\n",
-                U(*desc).Texture3D.MipLevels, expected_desc->miplevel_count);
+                desc->Texture3D.MipLevels, expected_desc->miplevel_count);
     }
     else if (desc->ViewDimension == D3D10_SRV_DIMENSION_TEXTURECUBE)
     {
-        ok_(__FILE__, line)(U(*desc).TextureCube.MostDetailedMip == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->TextureCube.MostDetailedMip == expected_desc->miplevel_idx,
                 "Got MostDetailedMip %u, expected %u.\n",
-                U(*desc).TextureCube.MostDetailedMip, expected_desc->miplevel_idx);
-        ok_(__FILE__, line)(U(*desc).TextureCube.MipLevels == expected_desc->miplevel_count,
+                desc->TextureCube.MostDetailedMip, expected_desc->miplevel_idx);
+        ok_(__FILE__, line)(desc->TextureCube.MipLevels == expected_desc->miplevel_count,
                 "Got MipLevels %u, expected %u.\n",
-                U(*desc).TextureCube.MipLevels, expected_desc->miplevel_count);
+                desc->TextureCube.MipLevels, expected_desc->miplevel_count);
     }
     else if (desc->ViewDimension != D3D10_SRV_DIMENSION_TEXTURE2DMS)
     {
@@ -368,34 +366,34 @@ static void get_rtv_desc(D3D10_RENDER_TARGET_VIEW_DESC *d3d10_desc, const struct
     d3d10_desc->ViewDimension = desc->dimension;
     if (desc->dimension == D3D10_RTV_DIMENSION_TEXTURE1D)
     {
-        U(*d3d10_desc).Texture1D.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture1D.MipSlice = desc->miplevel_idx;
     }
     else if (desc->dimension == D3D10_RTV_DIMENSION_TEXTURE1DARRAY)
     {
-        U(*d3d10_desc).Texture1DArray.MipSlice = desc->miplevel_idx;
-        U(*d3d10_desc).Texture1DArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture1DArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture1DArray.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture1DArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture1DArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_RTV_DIMENSION_TEXTURE2D)
     {
-        U(*d3d10_desc).Texture2D.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture2D.MipSlice = desc->miplevel_idx;
     }
     else if (desc->dimension == D3D10_RTV_DIMENSION_TEXTURE2DARRAY)
     {
-        U(*d3d10_desc).Texture2DArray.MipSlice = desc->miplevel_idx;
-        U(*d3d10_desc).Texture2DArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture2DArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture2DArray.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture2DArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture2DArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_RTV_DIMENSION_TEXTURE2DMSARRAY)
     {
-        U(*d3d10_desc).Texture2DMSArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture2DMSArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture2DMSArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture2DMSArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_RTV_DIMENSION_TEXTURE3D)
     {
-        U(*d3d10_desc).Texture3D.MipSlice = desc->miplevel_idx;
-        U(*d3d10_desc).Texture3D.FirstWSlice = desc->layer_idx;
-        U(*d3d10_desc).Texture3D.WSize = desc->layer_count;
+        d3d10_desc->Texture3D.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture3D.FirstWSlice = desc->layer_idx;
+        d3d10_desc->Texture3D.WSize = desc->layer_count;
     }
     else if (desc->dimension != D3D10_RTV_DIMENSION_UNKNOWN
             && desc->dimension != D3D10_RTV_DIMENSION_TEXTURE2DMS)
@@ -418,42 +416,42 @@ static void check_rtv_desc_(unsigned int line, const D3D10_RENDER_TARGET_VIEW_DE
 
     if (desc->ViewDimension == D3D10_RTV_DIMENSION_TEXTURE2D)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2D.MipSlice == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture2D.MipSlice == expected_desc->miplevel_idx,
                 "Got MipSlice %u, expected %u.\n",
-                U(*desc).Texture2D.MipSlice, expected_desc->miplevel_idx);
+                desc->Texture2D.MipSlice, expected_desc->miplevel_idx);
     }
     else if (desc->ViewDimension == D3D10_RTV_DIMENSION_TEXTURE2DARRAY)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.MipSlice == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture2DArray.MipSlice == expected_desc->miplevel_idx,
                 "Got MipSlice %u, expected %u.\n",
-                U(*desc).Texture2DArray.MipSlice, expected_desc->miplevel_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.FirstArraySlice == expected_desc->layer_idx,
+                desc->Texture2DArray.MipSlice, expected_desc->miplevel_idx);
+        ok_(__FILE__, line)(desc->Texture2DArray.FirstArraySlice == expected_desc->layer_idx,
                 "Got FirstArraySlice %u, expected %u.\n",
-                U(*desc).Texture2DArray.FirstArraySlice, expected_desc->layer_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.ArraySize == expected_desc->layer_count,
+                desc->Texture2DArray.FirstArraySlice, expected_desc->layer_idx);
+        ok_(__FILE__, line)(desc->Texture2DArray.ArraySize == expected_desc->layer_count,
                 "Got ArraySize %u, expected %u.\n",
-                U(*desc).Texture2DArray.ArraySize, expected_desc->layer_count);
+                desc->Texture2DArray.ArraySize, expected_desc->layer_count);
     }
     else if (desc->ViewDimension == D3D10_RTV_DIMENSION_TEXTURE2DMSARRAY)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2DMSArray.FirstArraySlice == expected_desc->layer_idx,
+        ok_(__FILE__, line)(desc->Texture2DMSArray.FirstArraySlice == expected_desc->layer_idx,
                 "Got FirstArraySlice %u, expected %u.\n",
-                U(*desc).Texture2DMSArray.FirstArraySlice, expected_desc->layer_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DMSArray.ArraySize == expected_desc->layer_count,
+                desc->Texture2DMSArray.FirstArraySlice, expected_desc->layer_idx);
+        ok_(__FILE__, line)(desc->Texture2DMSArray.ArraySize == expected_desc->layer_count,
                 "Got ArraySize %u, expected %u.\n",
-                U(*desc).Texture2DMSArray.ArraySize, expected_desc->layer_count);
+                desc->Texture2DMSArray.ArraySize, expected_desc->layer_count);
     }
     else if (desc->ViewDimension == D3D10_RTV_DIMENSION_TEXTURE3D)
     {
-        ok_(__FILE__, line)(U(*desc).Texture3D.MipSlice == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture3D.MipSlice == expected_desc->miplevel_idx,
                 "Got MipSlice %u, expected %u.\n",
-                U(*desc).Texture3D.MipSlice, expected_desc->miplevel_idx);
-        ok_(__FILE__, line)(U(*desc).Texture3D.FirstWSlice == expected_desc->layer_idx,
+                desc->Texture3D.MipSlice, expected_desc->miplevel_idx);
+        ok_(__FILE__, line)(desc->Texture3D.FirstWSlice == expected_desc->layer_idx,
                 "Got FirstWSlice %u, expected %u.\n",
-                U(*desc).Texture3D.FirstWSlice, expected_desc->layer_idx);
-        ok_(__FILE__, line)(U(*desc).Texture3D.WSize == expected_desc->layer_count,
+                desc->Texture3D.FirstWSlice, expected_desc->layer_idx);
+        ok_(__FILE__, line)(desc->Texture3D.WSize == expected_desc->layer_count,
                 "Got WSize %u, expected %u.\n",
-                U(*desc).Texture3D.WSize, expected_desc->layer_count);
+                desc->Texture3D.WSize, expected_desc->layer_count);
     }
     else if (desc->ViewDimension != D3D10_RTV_DIMENSION_TEXTURE2DMS)
     {
@@ -476,28 +474,28 @@ static void get_dsv_desc(D3D10_DEPTH_STENCIL_VIEW_DESC *d3d10_desc, const struct
     d3d10_desc->ViewDimension = desc->dimension;
     if (desc->dimension == D3D10_DSV_DIMENSION_TEXTURE1D)
     {
-        U(*d3d10_desc).Texture1D.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture1D.MipSlice = desc->miplevel_idx;
     }
     else if (desc->dimension == D3D10_DSV_DIMENSION_TEXTURE1DARRAY)
     {
-        U(*d3d10_desc).Texture1DArray.MipSlice = desc->miplevel_idx;
-        U(*d3d10_desc).Texture1DArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture1DArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture1DArray.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture1DArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture1DArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_DSV_DIMENSION_TEXTURE2D)
     {
-        U(*d3d10_desc).Texture2D.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture2D.MipSlice = desc->miplevel_idx;
     }
     else if (desc->dimension == D3D10_DSV_DIMENSION_TEXTURE2DARRAY)
     {
-        U(*d3d10_desc).Texture2DArray.MipSlice = desc->miplevel_idx;
-        U(*d3d10_desc).Texture2DArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture2DArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture2DArray.MipSlice = desc->miplevel_idx;
+        d3d10_desc->Texture2DArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture2DArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension == D3D10_DSV_DIMENSION_TEXTURE2DMSARRAY)
     {
-        U(*d3d10_desc).Texture2DMSArray.FirstArraySlice = desc->layer_idx;
-        U(*d3d10_desc).Texture2DMSArray.ArraySize = desc->layer_count;
+        d3d10_desc->Texture2DMSArray.FirstArraySlice = desc->layer_idx;
+        d3d10_desc->Texture2DMSArray.ArraySize = desc->layer_count;
     }
     else if (desc->dimension != D3D10_DSV_DIMENSION_UNKNOWN
             && desc->dimension != D3D10_DSV_DIMENSION_TEXTURE2DMS)
@@ -520,30 +518,30 @@ static void check_dsv_desc_(unsigned int line, const D3D10_DEPTH_STENCIL_VIEW_DE
 
     if (desc->ViewDimension == D3D10_DSV_DIMENSION_TEXTURE2D)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2D.MipSlice == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture2D.MipSlice == expected_desc->miplevel_idx,
                 "Got MipSlice %u, expected %u.\n",
-                U(*desc).Texture2D.MipSlice, expected_desc->miplevel_idx);
+                desc->Texture2D.MipSlice, expected_desc->miplevel_idx);
     }
     else if (desc->ViewDimension == D3D10_DSV_DIMENSION_TEXTURE2DARRAY)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.MipSlice == expected_desc->miplevel_idx,
+        ok_(__FILE__, line)(desc->Texture2DArray.MipSlice == expected_desc->miplevel_idx,
                 "Got MipSlice %u, expected %u.\n",
-                U(*desc).Texture2DArray.MipSlice, expected_desc->miplevel_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.FirstArraySlice == expected_desc->layer_idx,
+                desc->Texture2DArray.MipSlice, expected_desc->miplevel_idx);
+        ok_(__FILE__, line)(desc->Texture2DArray.FirstArraySlice == expected_desc->layer_idx,
                 "Got FirstArraySlice %u, expected %u.\n",
-                U(*desc).Texture2DArray.FirstArraySlice, expected_desc->layer_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DArray.ArraySize == expected_desc->layer_count,
+                desc->Texture2DArray.FirstArraySlice, expected_desc->layer_idx);
+        ok_(__FILE__, line)(desc->Texture2DArray.ArraySize == expected_desc->layer_count,
                 "Got ArraySize %u, expected %u.\n",
-                U(*desc).Texture2DArray.ArraySize, expected_desc->layer_count);
+                desc->Texture2DArray.ArraySize, expected_desc->layer_count);
     }
     else if (desc->ViewDimension == D3D10_DSV_DIMENSION_TEXTURE2DMSARRAY)
     {
-        ok_(__FILE__, line)(U(*desc).Texture2DMSArray.FirstArraySlice == expected_desc->layer_idx,
+        ok_(__FILE__, line)(desc->Texture2DMSArray.FirstArraySlice == expected_desc->layer_idx,
                 "Got FirstArraySlice %u, expected %u.\n",
-                U(*desc).Texture2DMSArray.FirstArraySlice, expected_desc->layer_idx);
-        ok_(__FILE__, line)(U(*desc).Texture2DMSArray.ArraySize == expected_desc->layer_count,
+                desc->Texture2DMSArray.FirstArraySlice, expected_desc->layer_idx);
+        ok_(__FILE__, line)(desc->Texture2DMSArray.ArraySize == expected_desc->layer_count,
                 "Got ArraySize %u, expected %u.\n",
-                U(*desc).Texture2DMSArray.ArraySize, expected_desc->layer_count);
+                desc->Texture2DMSArray.ArraySize, expected_desc->layer_count);
     }
     else if (desc->ViewDimension != D3D10_DSV_DIMENSION_TEXTURE2DMS)
     {
@@ -594,8 +592,8 @@ struct resource_readback
 {
     D3D10_RESOURCE_DIMENSION dimension;
     ID3D10Resource *resource;
-    D3D10_MAPPED_TEXTURE2D map_desc;
-    unsigned int width, height, sub_resource_idx;
+    D3D10_MAPPED_TEXTURE3D map_desc;
+    unsigned int width, height, depth, sub_resource_idx;
 };
 
 static void get_buffer_readback(ID3D10Buffer *buffer, struct resource_readback *rb)
@@ -623,6 +621,7 @@ static void get_buffer_readback(ID3D10Buffer *buffer, struct resource_readback *
 
     rb->width = buffer_desc.ByteWidth;
     rb->height = 1;
+    rb->depth = 1;
     rb->sub_resource_idx = 0;
 
     ID3D10Device_CopyResource(device, rb->resource, (ID3D10Resource *)buffer);
@@ -633,6 +632,7 @@ static void get_buffer_readback(ID3D10Buffer *buffer, struct resource_readback *
         rb->resource = NULL;
     }
     rb->map_desc.RowPitch = 0;
+    rb->map_desc.DepthPitch = 0;
 
     ID3D10Device_Release(device);
 }
@@ -665,6 +665,7 @@ static void get_texture1d_readback(ID3D10Texture1D *texture, unsigned int sub_re
     miplevel = sub_resource_idx % texture_desc.MipLevels;
     rb->width = max(1, texture_desc.Width >> miplevel);
     rb->height = 1;
+    rb->depth = 1;
     rb->sub_resource_idx = sub_resource_idx;
 
     ID3D10Device_CopyResource(device, rb->resource, (ID3D10Resource *)texture);
@@ -676,6 +677,7 @@ static void get_texture1d_readback(ID3D10Texture1D *texture, unsigned int sub_re
         rb->resource = NULL;
     }
     rb->map_desc.RowPitch = 0;
+    rb->map_desc.DepthPitch = 0;
 
     ID3D10Device_Release(device);
 }
@@ -684,6 +686,7 @@ static void get_texture_readback(ID3D10Texture2D *texture, unsigned int sub_reso
         struct resource_readback *rb)
 {
     D3D10_TEXTURE2D_DESC texture_desc;
+    D3D10_MAPPED_TEXTURE2D map_desc;
     unsigned int miplevel;
     ID3D10Device *device;
     HRESULT hr;
@@ -708,10 +711,57 @@ static void get_texture_readback(ID3D10Texture2D *texture, unsigned int sub_reso
     miplevel = sub_resource_idx % texture_desc.MipLevels;
     rb->width = max(1, texture_desc.Width >> miplevel);
     rb->height = max(1, texture_desc.Height >> miplevel);
+    rb->depth = 1;
     rb->sub_resource_idx = sub_resource_idx;
 
     ID3D10Device_CopyResource(device, rb->resource, (ID3D10Resource *)texture);
     if (FAILED(hr = ID3D10Texture2D_Map((ID3D10Texture2D *)rb->resource, sub_resource_idx,
+            D3D10_MAP_READ, 0, &map_desc)))
+    {
+        trace("Failed to map sub-resource %u, hr %#lx.\n", sub_resource_idx, hr);
+        ID3D10Resource_Release(rb->resource);
+        rb->resource = NULL;
+    }
+    rb->map_desc.pData = map_desc.pData;
+    rb->map_desc.RowPitch = map_desc.RowPitch;
+    rb->map_desc.DepthPitch = 0;
+
+    ID3D10Device_Release(device);
+}
+
+static void get_texture3d_readback(ID3D10Texture3D *texture, unsigned int sub_resource_idx,
+        struct resource_readback *rb)
+{
+    D3D10_TEXTURE3D_DESC texture_desc;
+    unsigned int miplevel;
+    ID3D10Device *device;
+    HRESULT hr;
+
+    memset(rb, 0, sizeof(*rb));
+    rb->dimension = D3D10_RESOURCE_DIMENSION_TEXTURE3D;
+
+    ID3D10Texture3D_GetDevice(texture, &device);
+
+    ID3D10Texture3D_GetDesc(texture, &texture_desc);
+    texture_desc.Usage = D3D10_USAGE_STAGING;
+    texture_desc.BindFlags = 0;
+    texture_desc.CPUAccessFlags = D3D10_CPU_ACCESS_READ;
+    texture_desc.MiscFlags = 0;
+    if (FAILED(hr = ID3D10Device_CreateTexture3D(device, &texture_desc, NULL, (ID3D10Texture3D **)&rb->resource)))
+    {
+        trace("Failed to create texture, hr %#lx.\n", hr);
+        ID3D10Device_Release(device);
+        return;
+    }
+
+    miplevel = sub_resource_idx % texture_desc.MipLevels;
+    rb->width = max(1, texture_desc.Width >> miplevel);
+    rb->height = max(1, texture_desc.Height >> miplevel);
+    rb->depth = max(1, texture_desc.Depth >> miplevel);
+    rb->sub_resource_idx = sub_resource_idx;
+
+    ID3D10Device_CopyResource(device, rb->resource, (ID3D10Resource *)texture);
+    if (FAILED(hr = ID3D10Texture3D_Map((ID3D10Texture3D *)rb->resource, sub_resource_idx,
             D3D10_MAP_READ, 0, &rb->map_desc)))
     {
         trace("Failed to map sub-resource %u, hr %#lx.\n", sub_resource_idx, hr);
@@ -720,6 +770,36 @@ static void get_texture_readback(ID3D10Texture2D *texture, unsigned int sub_reso
     }
 
     ID3D10Device_Release(device);
+}
+
+static void get_resource_readback(ID3D10Resource *resource,
+        unsigned int sub_resource_idx, struct resource_readback *rb)
+{
+    D3D10_RESOURCE_DIMENSION d;
+
+    ID3D10Resource_GetType(resource, &d);
+    switch (d)
+    {
+        case D3D10_RESOURCE_DIMENSION_BUFFER:
+            get_buffer_readback((ID3D10Buffer *)resource, rb);
+            return;
+
+        case D3D10_RESOURCE_DIMENSION_TEXTURE1D:
+            get_texture1d_readback((ID3D10Texture1D *)resource, sub_resource_idx, rb);
+            return;
+
+        case D3D10_RESOURCE_DIMENSION_TEXTURE2D:
+            get_texture_readback((ID3D10Texture2D *)resource, sub_resource_idx, rb);
+            return;
+
+        case D3D10_RESOURCE_DIMENSION_TEXTURE3D:
+            get_texture3d_readback((ID3D10Texture3D *)resource, sub_resource_idx, rb);
+            return;
+
+        default:
+            memset(rb, 0, sizeof(*rb));
+            return;
+    }
 }
 
 static void *get_readback_data(struct resource_readback *rb, unsigned int x, unsigned int y, unsigned byte_width)
@@ -774,6 +854,9 @@ static void release_resource_readback(struct resource_readback *rb)
             break;
         case D3D10_RESOURCE_DIMENSION_TEXTURE2D:
             ID3D10Texture2D_Unmap((ID3D10Texture2D *)rb->resource, rb->sub_resource_idx);
+            break;
+        case D3D10_RESOURCE_DIMENSION_TEXTURE3D:
+            ID3D10Texture3D_Unmap((ID3D10Texture3D *)rb->resource, rb->sub_resource_idx);
             break;
         default:
             trace("Unhandled resource dimension %#x.\n", rb->dimension);
@@ -1406,11 +1489,16 @@ static void release_test_context_(unsigned int line, struct d3d10core_test_conte
     ok_(__FILE__, line)(!ref, "Device has %lu references left.\n", ref);
 }
 
-static void clear_backbuffer_rtv(struct d3d10core_test_context *test_context, const struct vec4 *v)
+static void clear_rtv(struct d3d10core_test_context *test_context, ID3D10RenderTargetView *rtv, const struct vec4 *v)
 {
     /* Cast to (const float *) instead of passing &v->x, since gcc warns about
      * overreading a float[4] from a float otherwise. */
     ID3D10Device_ClearRenderTargetView(test_context->device, test_context->backbuffer_rtv, (const float *)v);
+}
+
+static void clear_backbuffer_rtv(struct d3d10core_test_context *test_context, const struct vec4 *v)
+{
+    clear_rtv(test_context, test_context->backbuffer_rtv, v);
 }
 
 #define draw_quad(context) draw_quad_vs_(__LINE__, context, NULL, 0)
@@ -1901,7 +1989,7 @@ static void test_create_texture2d(void)
     unsigned int i;
     HRESULT hr;
 
-    static const struct
+    const struct
     {
         DXGI_FORMAT format;
         UINT array_size;
@@ -1991,7 +2079,7 @@ static void test_create_texture2d(void)
         {DXGI_FORMAT_D32_FLOAT,              1, D3D10_BIND_RENDER_TARGET,   0, FALSE, FALSE},
         {DXGI_FORMAT_D32_FLOAT,              1, D3D10_BIND_DEPTH_STENCIL,   0, TRUE,  FALSE},
         {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,     1, D3D10_BIND_SHADER_RESOURCE, 0, TRUE,  FALSE},
-        {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,     1, D3D10_BIND_RENDER_TARGET,   0, FALSE, FALSE},
+        {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,     1, D3D10_BIND_RENDER_TARGET,   0, FALSE, damavand},
         {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,     1, D3D10_BIND_DEPTH_STENCIL,   0, FALSE, FALSE},
     };
 
@@ -2249,7 +2337,7 @@ static void test_create_texture3d(void)
     unsigned int i;
     HRESULT hr;
 
-    static const struct
+    const struct
     {
         DXGI_FORMAT format;
         D3D10_BIND_FLAG bind_flags;
@@ -2268,7 +2356,7 @@ static void test_create_texture3d(void)
         {DXGI_FORMAT_D24_UNORM_S8_UINT,     D3D10_BIND_RENDER_TARGET,   FALSE, FALSE},
         {DXGI_FORMAT_D32_FLOAT,             D3D10_BIND_RENDER_TARGET,   FALSE, FALSE},
         {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,    D3D10_BIND_SHADER_RESOURCE, TRUE,  FALSE},
-        {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,    D3D10_BIND_RENDER_TARGET,   FALSE, FALSE},
+        {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,    D3D10_BIND_RENDER_TARGET,   FALSE, damavand},
         {DXGI_FORMAT_R9G9B9E5_SHAREDEXP,    D3D10_BIND_DEPTH_STENCIL,   FALSE, FALSE},
     };
 
@@ -2631,7 +2719,7 @@ static void test_create_depthstencil_view(void)
     ok(dsv_desc.Format == texture_desc.Format, "Got unexpected format %#x.\n", dsv_desc.Format);
     ok(dsv_desc.ViewDimension == D3D10_DSV_DIMENSION_TEXTURE2D,
             "Got unexpected view dimension %#x.\n", dsv_desc.ViewDimension);
-    ok(!U(dsv_desc).Texture2D.MipSlice, "Got unexpected mip slice %u.\n", U(dsv_desc).Texture2D.MipSlice);
+    ok(!dsv_desc.Texture2D.MipSlice, "Got unexpected mip slice %u.\n", dsv_desc.Texture2D.MipSlice);
 
     ID3D10DepthStencilView_Release(dsview);
     ID3D10Texture2D_Release(texture);
@@ -2731,7 +2819,7 @@ static void test_depthstencil_view_interfaces(void)
 
     dsv_desc.Format = texture_desc.Format;
     dsv_desc.ViewDimension = D3D10_DSV_DIMENSION_TEXTURE2D;
-    U(dsv_desc).Texture2D.MipSlice = 0;
+    dsv_desc.Texture2D.MipSlice = 0;
 
     hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, &dsv_desc, &dsview);
     ok(SUCCEEDED(hr), "Failed to create a depthstencil view, hr %#lx.\n", hr);
@@ -2748,8 +2836,8 @@ static void test_depthstencil_view_interfaces(void)
         ok(d3d11_dsv_desc.ViewDimension == (D3D11_DSV_DIMENSION)dsv_desc.ViewDimension,
                 "Got unexpected view dimension %u.\n", d3d11_dsv_desc.ViewDimension);
         ok(!d3d11_dsv_desc.Flags, "Got unexpected flags %#x.\n", d3d11_dsv_desc.Flags);
-        ok(U(d3d11_dsv_desc).Texture2D.MipSlice == U(dsv_desc).Texture2D.MipSlice,
-                "Got unexpected mip slice %u.\n", U(d3d11_dsv_desc).Texture2D.MipSlice);
+        ok(d3d11_dsv_desc.Texture2D.MipSlice == dsv_desc.Texture2D.MipSlice,
+                "Got unexpected mip slice %u.\n", d3d11_dsv_desc.Texture2D.MipSlice);
 
         ID3D11DepthStencilView_Release(d3d11_dsview);
     }
@@ -2941,8 +3029,8 @@ static void test_create_rendertarget_view(void)
 
     rtv_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_BUFFER;
-    U(rtv_desc).Buffer.ElementOffset = 0;
-    U(rtv_desc).Buffer.ElementWidth = 64;
+    rtv_desc.Buffer.ElementOffset = 0;
+    rtv_desc.Buffer.ElementWidth = 64;
 
     if (!enable_debug_layer)
     {
@@ -3160,7 +3248,7 @@ static void test_render_target_views(void)
     texture_desc.CPUAccessFlags = 0;
     texture_desc.MiscFlags = 0;
 
-    data = heap_alloc_zero(texture_desc.Width * texture_desc.Height * 4);
+    data = calloc(texture_desc.Width * texture_desc.Height, 4);
     ok(!!data, "Failed to allocate memory.\n");
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
@@ -3201,7 +3289,7 @@ static void test_render_target_views(void)
         ID3D10Texture2D_Release(texture);
     }
 
-    heap_free(data);
+    free(data);
     release_test_context(&test_context);
 }
 
@@ -3355,9 +3443,9 @@ static void test_layered_rendering(void)
 
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DARRAY;
     rtv_desc.Format = texture_desc.Format;
-    U(rtv_desc).Texture2DArray.MipSlice = 0;
-    U(rtv_desc).Texture2DArray.FirstArraySlice = 3;
-    U(rtv_desc).Texture2DArray.ArraySize = 1;
+    rtv_desc.Texture2DArray.MipSlice = 0;
+    rtv_desc.Texture2DArray.FirstArraySlice = 3;
+    rtv_desc.Texture2DArray.ArraySize = 1;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &rtv);
     ok(SUCCEEDED(hr), "Failed to create render target view, hr %#lx.\n", hr);
     ID3D10Device_OMSetRenderTargets(device, 1, &rtv, NULL);
@@ -3368,9 +3456,9 @@ static void test_layered_rendering(void)
     ID3D10RenderTargetView_Release(rtv);
 
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DARRAY;
-    U(rtv_desc).Texture2DArray.MipSlice = 1;
-    U(rtv_desc).Texture2DArray.FirstArraySlice = 0;
-    U(rtv_desc).Texture2DArray.ArraySize = ~0u;
+    rtv_desc.Texture2DArray.MipSlice = 1;
+    rtv_desc.Texture2DArray.FirstArraySlice = 0;
+    rtv_desc.Texture2DArray.ArraySize = ~0u;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &rtv);
     ok(SUCCEEDED(hr), "Failed to create render target view, hr %#lx.\n", hr);
     ID3D10Device_OMSetRenderTargets(device, 1, &rtv, NULL);
@@ -3385,11 +3473,11 @@ static void test_layered_rendering(void)
     ID3D10RenderTargetView_Release(rtv);
 
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DARRAY;
-    U(rtv_desc).Texture2DArray.MipSlice = 2;
-    U(rtv_desc).Texture2DArray.ArraySize = 1;
+    rtv_desc.Texture2DArray.MipSlice = 2;
+    rtv_desc.Texture2DArray.ArraySize = 1;
     for (i = 0; i < texture_desc.ArraySize; ++i)
     {
-        U(rtv_desc).Texture2DArray.FirstArraySlice = texture_desc.ArraySize - 1 - i;
+        rtv_desc.Texture2DArray.FirstArraySlice = texture_desc.ArraySize - 1 - i;
         hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &rtv);
         ok(SUCCEEDED(hr), "Failed to create render target view, hr %#lx.\n", hr);
         ID3D10Device_OMSetRenderTargets(device, 1, &rtv, NULL);
@@ -3569,8 +3657,8 @@ static void test_create_shader_resource_view(void)
 
     srv_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     srv_desc.ViewDimension = D3D10_SRV_DIMENSION_BUFFER;
-    U(srv_desc).Buffer.ElementOffset = 0;
-    U(srv_desc).Buffer.ElementWidth = 64;
+    srv_desc.Buffer.ElementOffset = 0;
+    srv_desc.Buffer.ElementWidth = 64;
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)buffer, &srv_desc, &srview);
@@ -4678,7 +4766,10 @@ static void test_occlusion_query(void)
 
     ID3D10Asynchronous_End(query);
     get_query_data(query, &data, sizeof(data));
-    ok(data.uint == 640 * 480, "Got unexpected query result 0x%08x%08x.\n", data.dword[1], data.dword[0]);
+    /* WARP devices randomly return zero as if the draw did not happen, much
+     * like in test_pipeline_statistics_query(). */
+    ok(data.uint == 640 * 480 || broken(is_warp_device(device) && !data.uint),
+            "Got unexpected query result 0x%08x%08x.\n", data.dword[1], data.dword[0]);
 
     memset(&data, 0xff, sizeof(data));
     hr = ID3D10Asynchronous_GetData(query, &data, sizeof(DWORD), 0);
@@ -4824,12 +4915,12 @@ static void test_pipeline_statistics_query(void)
         ok(data.IAVertices == 4, "Got unexpected IAVertices count: %u.\n", (unsigned int)data.IAVertices);
         ok(data.IAPrimitives == 2, "Got unexpected IAPrimitives count: %u.\n", (unsigned int)data.IAPrimitives);
         ok(data.VSInvocations == 4, "Got unexpected VSInvocations count: %u.\n", (unsigned int)data.VSInvocations);
-        ok(!data.GSInvocations, "Got unexpected GSInvocations count: %u.\n", (unsigned int)data.GSInvocations);
+        /* AMD has nonzero GSInvocations on Windows. */
         ok(!data.GSPrimitives, "Got unexpected GSPrimitives count: %u.\n", (unsigned int)data.GSPrimitives);
         ok(data.CInvocations == 2, "Got unexpected CInvocations count: %u.\n", (unsigned int)data.CInvocations);
         ok(data.CPrimitives == 2, "Got unexpected CPrimitives count: %u.\n", (unsigned int)data.CPrimitives);
-        todo_wine
-        ok(!data.PSInvocations, "Got unexpected PSInvocations count: %u.\n", (unsigned int)data.PSInvocations);
+        todo_wine_if (!damavand)
+            ok(!data.PSInvocations, "Got unexpected PSInvocations count: %u.\n", (unsigned int)data.PSInvocations);
     }
 
     hr = ID3D10Device_CreatePixelShader(device, ps_code, sizeof(ps_code), &ps);
@@ -4843,7 +4934,7 @@ static void test_pipeline_statistics_query(void)
     ok(data.IAVertices == 4, "Got unexpected IAVertices count: %u.\n", (unsigned int)data.IAVertices);
     ok(data.IAPrimitives == 2, "Got unexpected IAPrimitives count: %u.\n", (unsigned int)data.IAPrimitives);
     ok(data.VSInvocations == 4, "Got unexpected VSInvocations count: %u.\n", (unsigned int)data.VSInvocations);
-    ok(!data.GSInvocations, "Got unexpected GSInvocations count: %u.\n", (unsigned int)data.GSInvocations);
+    /* AMD has nonzero GSInvocations on Windows. */
     ok(!data.GSPrimitives, "Got unexpected GSPrimitives count: %u.\n", (unsigned int)data.GSPrimitives);
     ok(data.CInvocations == 2, "Got unexpected CInvocations count: %u.\n", (unsigned int)data.CInvocations);
     ok(data.CPrimitives == 2, "Got unexpected CPrimitives count: %u.\n", (unsigned int)data.CPrimitives);
@@ -5029,7 +5120,7 @@ static void test_so_statistics_query(void)
     get_query_data(query, &data, sizeof(data));
     ok(!data.NumPrimitivesWritten, "Got unexpected NumPrimitivesWritten: %u.\n",
             (unsigned int)data.NumPrimitivesWritten);
-    todo_wine
+    todo_wine_if (!damavand)
     ok(!data.PrimitivesStorageNeeded, "Got unexpected PrimitivesStorageNeeded: %u.\n",
             (unsigned int)data.PrimitivesStorageNeeded);
 
@@ -5039,7 +5130,7 @@ static void test_so_statistics_query(void)
     get_query_data(query, &data, sizeof(data));
     ok(!data.NumPrimitivesWritten, "Got unexpected NumPrimitivesWritten: %u.\n",
             (unsigned int)data.NumPrimitivesWritten);
-    todo_wine
+    todo_wine_if (!damavand)
     ok(!data.PrimitivesStorageNeeded, "Got unexpected PrimitivesStorageNeeded: %u.\n",
             (unsigned int)data.PrimitivesStorageNeeded);
 
@@ -5433,8 +5524,8 @@ float4 main(float4 color : COLOR) : SV_TARGET
 
     srv_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     srv_desc.ViewDimension = D3D10_SRV_DIMENSION_BUFFER;
-    U(srv_desc).Buffer.ElementOffset = 0;
-    U(srv_desc).Buffer.ElementWidth = 64;
+    srv_desc.Buffer.ElementOffset = 0;
+    srv_desc.Buffer.ElementWidth = 64;
 
     for (i = 0; i < D3D10_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT; ++i)
     {
@@ -7356,10 +7447,10 @@ static void test_texture(void)
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX, -1.0f, rgba_level_0},
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  0.0f, rgba_level_0},
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  0.4f, rgba_level_0},
-        {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  0.5f, level_1_colors},
+        {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  0.6f, level_1_colors},
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  1.0f, level_1_colors},
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  1.4f, level_1_colors},
-        {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  1.5f, level_2_colors},
+        {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  1.6f, level_2_colors},
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  2.0f, level_2_colors},
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  3.0f, level_2_colors},
         {&ps_sample_l,        &rgba_texture,     POINT,        0.0f, 0.0f, MIP_MAX,  4.0f, level_2_colors},
@@ -8108,15 +8199,15 @@ static void test_depth_stencil_sampling(void)
 
         dsv_desc.Format = tests[i].dsv_format;
         dsv_desc.ViewDimension = D3D10_DSV_DIMENSION_TEXTURE2D;
-        U(dsv_desc).Texture2D.MipSlice = 0;
+        dsv_desc.Texture2D.MipSlice = 0;
         hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, &dsv_desc, &dsv);
         ok(SUCCEEDED(hr), "Failed to create depth stencil view for format %#x, hr %#lx.\n",
                 dsv_desc.Format, hr);
 
         srv_desc.Format = tests[i].depth_view_format;
         srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
-        U(srv_desc).Texture2D.MostDetailedMip = 0;
-        U(srv_desc).Texture2D.MipLevels = 1;
+        srv_desc.Texture2D.MostDetailedMip = 0;
+        srv_desc.Texture2D.MipLevels = 1;
         hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)texture, &srv_desc, &depth_srv);
         ok(SUCCEEDED(hr), "Failed to create depth shader resource view for format %#x, hr %#lx.\n",
                 srv_desc.Format, hr);
@@ -8336,7 +8427,7 @@ static void test_sample_c_lz(void)
         0x0020800a, 0x00000000, 0x00000000, 0x05000036, 0x001020f2, 0x00000000, 0x00100006, 0x00000000,
         0x0100003e,
     };
-    static const float depth_values[] = {1.0f, 0.0f, 0.5f, 0.6f, 0.4f, 0.1f};
+    static const float depth_values[] = {0.0f, 1.0f, 0.5f, 0.6f, 0.4f, 0.1f};
     static const struct
     {
         unsigned int layer;
@@ -8345,8 +8436,8 @@ static void test_sample_c_lz(void)
     }
     tests[] =
     {
-        {0, 0.5f, 0.0f},
-        {1, 0.5f, 1.0f},
+        {0, 0.5f, 1.0f},
+        {1, 0.5f, 0.0f},
         {2, 0.5f, 0.0f},
         {3, 0.5f, 0.0f},
         {4, 0.5f, 1.0f},
@@ -8359,8 +8450,8 @@ static void test_sample_c_lz(void)
         {4, 0.0f, 0.0f},
         {5, 0.0f, 0.0f},
 
-        {0, 1.0f, 0.0f},
-        {1, 1.0f, 1.0f},
+        {0, 1.0f, 1.0f},
+        {1, 1.0f, 0.0f},
         {2, 1.0f, 1.0f},
         {3, 1.0f, 1.0f},
         {4, 1.0f, 1.0f},
@@ -8414,16 +8505,16 @@ static void test_sample_c_lz(void)
     {
         dsv_desc.Format = DXGI_FORMAT_D32_FLOAT;
         dsv_desc.ViewDimension = D3D10_DSV_DIMENSION_TEXTURE2DARRAY;
-        U(dsv_desc).Texture2DArray.MipSlice = 0;
-        U(dsv_desc).Texture2DArray.FirstArraySlice = i;
-        U(dsv_desc).Texture2DArray.ArraySize = 1;
+        dsv_desc.Texture2DArray.MipSlice = 0;
+        dsv_desc.Texture2DArray.FirstArraySlice = i;
+        dsv_desc.Texture2DArray.ArraySize = 1;
 
         hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, &dsv_desc, &dsv);
         ok(hr == S_OK, "Failed to create depth stencil view, hr %#lx.\n", hr);
         ID3D10Device_ClearDepthStencilView(device, dsv, D3D10_CLEAR_DEPTH, depth_values[i], 0);
         ID3D10DepthStencilView_Release(dsv);
 
-        U(dsv_desc).Texture2DArray.MipSlice = 1;
+        dsv_desc.Texture2DArray.MipSlice = 1;
         hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)texture, &dsv_desc, &dsv);
         ok(hr == S_OK, "Failed to create depth stencil view, hr %#lx.\n", hr);
         ID3D10Device_ClearDepthStencilView(device, dsv, D3D10_CLEAR_DEPTH, 1.0f, 0);
@@ -8432,8 +8523,8 @@ static void test_sample_c_lz(void)
 
     srv_desc.Format = DXGI_FORMAT_R32_FLOAT;
     srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURECUBE;
-    U(srv_desc).TextureCube.MostDetailedMip = 0;
-    U(srv_desc).TextureCube.MipLevels = ~0u;
+    srv_desc.TextureCube.MostDetailedMip = 0;
+    srv_desc.TextureCube.MipLevels = ~0u;
     hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)texture, &srv_desc, &srv);
     ok(hr == S_OK, "Failed to create shader resource view, hr %#lx.\n", hr);
 
@@ -8447,6 +8538,8 @@ static void test_sample_c_lz(void)
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
+        winetest_push_context("Layer %u, ref %f", tests[i].layer, tests[i].d_ref);
+
         ps_constant.x = tests[i].d_ref;
         ps_constant.y = tests[i].layer;
         ID3D10Device_UpdateSubresource(device, (ID3D10Resource *)cb, 0,
@@ -8456,6 +8549,8 @@ static void test_sample_c_lz(void)
         /* Avoid testing values affected by seamless cube map filtering. */
         SetRect(&rect, 100, 100, 540, 380);
         check_texture_sub_resource_float(rt_texture, 0, &rect, tests[i].expected, 2);
+
+        winetest_pop_context();
     }
 
     ID3D10Texture2D_Release(texture);
@@ -9363,7 +9458,7 @@ static void test_instanced_draw(void)
     get_texture_readback(render_target, 0, &rb);
     for (i = 0; i < ARRAY_SIZE(expected_results); ++i)
     {
-        todo_wine_if(i == 8)
+        todo_wine_if (i == 8 && !damavand)
         check_readback_data_color(&rb, &expected_results[i].rect, expected_results[i].instance_id, 0);
     }
     release_resource_readback(&rb);
@@ -10349,7 +10444,7 @@ static void test_resource_access(void)
 
     data.SysMemPitch = 0;
     data.SysMemSlicePitch = 0;
-    data.pSysMem = heap_alloc(10240);
+    data.pSysMem = malloc(10240);
     ok(!!data.pSysMem, "Failed to allocate memory.\n");
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
@@ -10496,7 +10591,7 @@ static void test_resource_access(void)
         }
     }
 
-    heap_free((void *)data.pSysMem);
+    free((void *)data.pSysMem);
 
     refcount = ID3D10Device_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
@@ -10932,7 +11027,7 @@ static void test_swapchain_views(void)
 
     rtv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2D;
-    U(rtv_desc).Texture2D.MipSlice = 0;
+    rtv_desc.Texture2D.MipSlice = 0;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)test_context.backbuffer, &rtv_desc, &rtv);
     /* This seems to work only on Windows 7. */
     ok(hr == S_OK || broken(hr == E_INVALIDARG), "Failed to create render target view, hr %#lx.\n", hr);
@@ -10941,8 +11036,8 @@ static void test_swapchain_views(void)
 
     srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
-    U(srv_desc).Texture2D.MostDetailedMip = 0;
-    U(srv_desc).Texture2D.MipLevels = 1;
+    srv_desc.Texture2D.MostDetailedMip = 0;
+    srv_desc.Texture2D.MipLevels = 1;
     hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)test_context.backbuffer, &srv_desc, &srv);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
     if (SUCCEEDED(hr))
@@ -11298,13 +11393,13 @@ static void test_clear_render_target_view_2d(void)
 
     rtv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2D;
-    U(rtv_desc).Texture2D.MipSlice = 0;
+    rtv_desc.Texture2D.MipSlice = 0;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &srgb_rtv);
     ok(SUCCEEDED(hr), "Failed to create render target view, hr %#lx.\n", hr);
 
     rtv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2D;
-    U(rtv_desc).Texture2D.MipSlice = 0;
+    rtv_desc.Texture2D.MipSlice = 0;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &rtv[0]);
     ok(SUCCEEDED(hr), "Failed to create render target view, hr %#lx.\n", hr);
 
@@ -11337,19 +11432,19 @@ static void test_clear_render_target_view_2d(void)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DARRAY;
-    U(rtv_desc).Texture2DArray.MipSlice = 0;
-    U(rtv_desc).Texture2DArray.FirstArraySlice = 0;
-    U(rtv_desc).Texture2DArray.ArraySize = 5;
+    rtv_desc.Texture2DArray.MipSlice = 0;
+    rtv_desc.Texture2DArray.FirstArraySlice = 0;
+    rtv_desc.Texture2DArray.ArraySize = 5;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &rtv[0]);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    U(rtv_desc).Texture2DArray.FirstArraySlice = 1;
-    U(rtv_desc).Texture2DArray.ArraySize = 3;
+    rtv_desc.Texture2DArray.FirstArraySlice = 1;
+    rtv_desc.Texture2DArray.ArraySize = 3;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &rtv[1]);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    U(rtv_desc).Texture2DArray.FirstArraySlice = 2;
-    U(rtv_desc).Texture2DArray.ArraySize = 1;
+    rtv_desc.Texture2DArray.FirstArraySlice = 2;
+    rtv_desc.Texture2DArray.ArraySize = 1;
     hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)texture, &rtv_desc, &rtv[2]);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
@@ -11460,7 +11555,7 @@ static void test_clear_depth_stencil_view(void)
     todo_wine check_texture_color(depth_texture, 0x00ffffff, 0);
 
     ID3D10Device_ClearDepthStencilView(device, dsv, D3D10_CLEAR_STENCIL, 0.0f, 0xff);
-    check_texture_color(depth_texture, 0xffffffff, 0);
+    todo_wine_if (damavand) check_texture_color(depth_texture, 0xffffffff, 0);
 
     ID3D10Texture2D_Release(depth_texture);
     ID3D10DepthStencilView_Release(dsv);
@@ -14091,7 +14186,7 @@ static void test_unbind_shader_resource_view(void)
     ID3D10Device_PSSetShaderResources(device, 1, 1, &srv2);
     ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, white);
     draw_quad(&test_context);
-    todo_wine check_texture_color(test_context.backbuffer, 0x00000000, 1);
+    check_texture_color(test_context.backbuffer, 0x00000000, 1);
 
     ID3D10PixelShader_Release(ps);
     ID3D10ShaderResourceView_Release(srv);
@@ -14944,7 +15039,7 @@ static void test_buffer_srv(void)
                 resource_data.SysMemSlicePitch = 0;
                 if (current_buffer->data_offset)
                 {
-                    data = heap_alloc_zero(current_buffer->byte_count);
+                    data = calloc(1, current_buffer->byte_count);
                     ok(!!data, "Failed to allocate memory.\n");
                     memcpy(data + current_buffer->data_offset, current_buffer->data,
                             current_buffer->byte_count - current_buffer->data_offset);
@@ -14956,7 +15051,7 @@ static void test_buffer_srv(void)
                 }
                 hr = ID3D10Device_CreateBuffer(device, &buffer_desc, &resource_data, &buffer);
                 ok(SUCCEEDED(hr), "Test %u: Failed to create buffer, hr %#lx.\n", i, hr);
-                heap_free(data);
+                free(data);
             }
             else
             {
@@ -14970,8 +15065,8 @@ static void test_buffer_srv(void)
         {
             srv_desc.Format = test->srv_format;
             srv_desc.ViewDimension = D3D10_SRV_DIMENSION_BUFFER;
-            U(srv_desc).Buffer.ElementOffset = test->srv_first_element;
-            U(srv_desc).Buffer.ElementWidth = test->srv_element_count;
+            srv_desc.Buffer.ElementOffset = test->srv_first_element;
+            srv_desc.Buffer.ElementWidth = test->srv_element_count;
             hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)buffer, &srv_desc, &srv);
             ok(SUCCEEDED(hr), "Test %u: Failed to create shader resource view, hr %#lx.\n", i, hr);
         }
@@ -15897,7 +15992,7 @@ static void test_stream_output_vs(void)
         for (j = 0; j < tests[i].expected_data_size; ++j)
         {
             float expected_value = tests[i].expected_data[j];
-            todo_wine_if(tests[i].todo)
+            todo_wine_if (tests[i].todo && !damavand)
             ok(compare_float(result[j], expected_value, 2),
                     "Test %u: Got %.8e, expected %.8e at %u.\n",
                     i, result[j], expected_value, j);
@@ -16008,11 +16103,13 @@ static void test_depth_bias(void)
     rasterizer_desc.SlopeScaledDepthBias = 0.0f;
     rasterizer_desc.DepthClipEnable = TRUE;
 
-    depth_values = heap_calloc(swapchain_desc.height, sizeof(*depth_values));
+    depth_values = calloc(swapchain_desc.height, sizeof(*depth_values));
     ok(!!depth_values, "Failed to allocate memory.\n");
 
     for (format_idx = 0; format_idx < ARRAY_SIZE(formats); ++format_idx)
     {
+        winetest_push_context("Format %#x", formats[format_idx]);
+
         format = formats[format_idx];
 
         ID3D10Texture2D_GetDesc(test_context.backbuffer, &texture_desc);
@@ -16061,6 +16158,8 @@ static void test_depth_bias(void)
 
                 for (k = 0; k < ARRAY_SIZE(bias_clamp_tests); ++k)
                 {
+                    winetest_push_context("z %f, bias %d, clamp %f", quads[i].z, bias_tests[j], bias_clamp_tests[k]);
+
                     rasterizer_desc.DepthBiasClamp = bias_clamp_tests[k];
                     ID3D10Device_CreateRasterizerState(device, &rasterizer_desc, &rs);
                     ok(SUCCEEDED(hr), "Failed to create rasterizer state, hr %#lx.\n", hr);
@@ -16082,7 +16181,8 @@ static void test_depth_bias(void)
                             depth = min(max(0.0f, quads[i].z + bias), 1.0f);
 
                             get_texture_readback(texture, 0, &rb);
-                            check_readback_data_u24(&rb, NULL, shift, depth * 16777215.0f + 0.5f, 1);
+                            todo_wine_if (damavand)
+                                check_readback_data_u24(&rb, NULL, shift, depth * 16777215.0f + 0.5f, 1);
                             release_resource_readback(&rb);
                             break;
                         case DXGI_FORMAT_D16_UNORM:
@@ -16098,6 +16198,8 @@ static void test_depth_bias(void)
                             break;
                     }
                     ID3D10RasterizerState_Release(rs);
+
+                    winetest_pop_context();
                 }
             }
         }
@@ -16106,6 +16208,8 @@ static void test_depth_bias(void)
         rasterizer_desc.DepthBias = 0;
         for (i = 0; i < ARRAY_SIZE(quad_slopes); ++i)
         {
+            winetest_push_context("slope %f", quad_slopes[i]);
+
             for (j = 0; j < ARRAY_SIZE(vertices); ++j)
                 vertices[j].z = j == 1 || j == 3 ? 0.0f : quad_slopes[i];
             ID3D10Device_UpdateSubresource(device, (ID3D10Resource *)test_context.vb,
@@ -16144,6 +16248,9 @@ static void test_depth_bias(void)
                 for (k = 0; k < ARRAY_SIZE(bias_clamp_tests); ++k)
                 {
                     BOOL all_match = TRUE;
+
+                    winetest_push_context("scale %f, clamp %f", slope_scaled_bias_tests[j], bias_clamp_tests[k]);
+
                     rasterizer_desc.DepthBiasClamp = bias_clamp_tests[k];
                     ID3D10Device_CreateRasterizerState(device, &rasterizer_desc, &rs);
                     ok(SUCCEEDED(hr), "Failed to create rasterizer state, hr %#lx.\n", hr);
@@ -16170,10 +16277,10 @@ static void test_depth_bias(void)
                                 u32_value = *u32 >> shift;
                                 expected_value = depth * 16777215.0f + 0.5f;
                                 all_match = compare_uint(u32_value, expected_value, 3);
-                                ok(all_match,
-                                        "Got value %#x (%.8e), expected %#x (%.8e).\n",
-                                        u32_value, u32_value / 16777215.0f,
-                                        expected_value, expected_value / 16777215.0f);
+                                todo_wine_if (damavand && expected_value != 0.0f)
+                                    ok(all_match, "Got value %#x (%.8e), expected %#x (%.8e).\n",
+                                            u32_value, u32_value / 16777215.0f,
+                                            expected_value, expected_value / 16777215.0f);
                                 break;
                             case DXGI_FORMAT_D16_UNORM:
                                 u16 = get_readback_data(&rb, 0, y, sizeof(*u16));
@@ -16189,15 +16296,21 @@ static void test_depth_bias(void)
                     }
                     release_resource_readback(&rb);
                     ID3D10RasterizerState_Release(rs);
+
+                    winetest_pop_context();
                 }
             }
+
+            winetest_pop_context();
         }
 
         ID3D10Texture2D_Release(texture);
         ID3D10DepthStencilView_Release(dsv);
+
+        winetest_pop_context();
     }
 
-    heap_free(depth_values);
+    free(depth_values);
     release_test_context(&test_context);
 }
 
@@ -17108,60 +17221,6 @@ static void test_combined_clip_and_cull_distances(void)
 
 static void test_generate_mips(void)
 {
-    static const DWORD ps_code[] =
-    {
-#if 0
-        Texture2D t;
-        SamplerState s;
-
-        float4 main(float4 position : SV_POSITION) : SV_Target
-        {
-            float2 p;
-
-            p.x = position.x / 640.0f;
-            p.y = position.y / 480.0f;
-            return t.Sample(s, p);
-        }
-#endif
-        0x43425844, 0x1ce9b612, 0xc8176faa, 0xd37844af, 0xdb515605, 0x00000001, 0x00000134, 0x00000003,
-        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
-        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
-        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
-        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000098, 0x00000040,
-        0x00000026, 0x0300005a, 0x00106000, 0x00000000, 0x04001858, 0x00107000, 0x00000000, 0x00005555,
-        0x04002064, 0x00101032, 0x00000000, 0x00000001, 0x03000065, 0x001020f2, 0x00000000, 0x02000068,
-        0x00000001, 0x0a000038, 0x00100032, 0x00000000, 0x00101046, 0x00000000, 0x00004002, 0x3acccccd,
-        0x3b088889, 0x00000000, 0x00000000, 0x09000045, 0x001020f2, 0x00000000, 0x00100046, 0x00000000,
-        0x00107e46, 0x00000000, 0x00106000, 0x00000000, 0x0100003e,
-    };
-    static const DWORD ps_code_3d[] =
-    {
-#if 0
-        Texture3D t;
-        SamplerState s;
-
-        float4 main(float4 position : SV_POSITION) : SV_Target
-        {
-            float3 p;
-
-            p.x = position.x / 640.0f;
-            p.y = position.y / 480.0f;
-            p.z = 0.5f;
-            return t.Sample(s, p);
-        }
-#endif
-        0x43425844, 0xa1e26083, 0xeb45763e, 0x1e5a5089, 0xdfbbe0df, 0x00000001, 0x00000148, 0x00000003,
-        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
-        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
-        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
-        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x000000ac, 0x00000040,
-        0x0000002b, 0x0300005a, 0x00106000, 0x00000000, 0x04002858, 0x00107000, 0x00000000, 0x00005555,
-        0x04002064, 0x00101032, 0x00000000, 0x00000001, 0x03000065, 0x001020f2, 0x00000000, 0x02000068,
-        0x00000001, 0x0a000038, 0x00100032, 0x00000000, 0x00101046, 0x00000000, 0x00004002, 0x3acccccd,
-        0x3b088889, 0x00000000, 0x00000000, 0x05000036, 0x00100042, 0x00000000, 0x00004001, 0x3f000000,
-        0x09000045, 0x001020f2, 0x00000000, 0x00100246, 0x00000000, 0x00107e46, 0x00000000, 0x00106000,
-        0x00000000, 0x0100003e,
-    };
     static const struct
     {
         D3D10_RESOURCE_DIMENSION dim;
@@ -17215,65 +17274,37 @@ static void test_generate_mips(void)
     }
     expected[] =
     {
-        {{200, 200}, 0xffff0000},
-        {{280, 200}, 0xffff0000},
-        {{360, 200}, 0xff00ff00},
-        {{440, 200}, 0xff00ff00},
-        {{200, 270}, 0xff0000ff},
-        {{280, 270}, 0xff0000ff},
-        {{360, 270}, 0xff000000},
-        {{440, 270}, 0xff000000},
+        {{10, 12}, 0xffff0000},
+        {{14, 12}, 0xffff0000},
+        {{18, 12}, 0xff00ff00},
+        {{22, 12}, 0xff00ff00},
+        {{10, 18}, 0xff0000ff},
+        {{14, 18}, 0xff0000ff},
+        {{18, 18}, 0xff000000},
+        {{22, 18}, 0xff000000},
     };
-    static const struct vec4 white = {1.0f, 1.0f, 1.0f, 1.0f};
     static const RECT r1 = {8, 8, 16, 16};
     static const RECT r2 = {16, 8, 24, 16};
     static const RECT r3 = {8, 16, 16, 24};
     static const RECT r4 = {16, 16, 24, 24};
     unsigned int *data, *zero_data, color, expected_color, i, j, k, x, y, z;
-    ID3D10ShaderResourceView *srv, *srv_sampling;
     struct d3d10core_test_context test_context;
     D3D10_SHADER_RESOURCE_VIEW_DESC srv_desc;
     D3D10_TEXTURE2D_DESC texture2d_desc;
     D3D10_TEXTURE3D_DESC texture3d_desc;
-    ID3D10SamplerState *sampler_state;
-    D3D10_SAMPLER_DESC sampler_desc;
+    ID3D10ShaderResourceView *srv;
     D3D10_BUFFER_DESC buffer_desc;
-    ID3D10PixelShader *ps, *ps_3d;
     struct resource_readback rb;
     ID3D10Resource *resource;
     ID3D10Device *device;
-    HRESULT hr;
+    HRESULT hr = S_OK;
 
     if (!init_test_context(&test_context))
         return;
 
     device = test_context.device;
 
-    hr = ID3D10Device_CreatePixelShader(device, ps_code, sizeof(ps_code), &ps);
-    ok(SUCCEEDED(hr), "Failed to create pixel shader, hr %#lx.\n", hr);
-
-    hr = ID3D10Device_CreatePixelShader(device, ps_code_3d, sizeof(ps_code_3d), &ps_3d);
-    ok(SUCCEEDED(hr), "Failed to create pixel shader, hr %#lx.\n", hr);
-
-    sampler_desc.Filter = D3D10_FILTER_MIN_MAG_MIP_POINT;
-    sampler_desc.AddressU = D3D10_TEXTURE_ADDRESS_CLAMP;
-    sampler_desc.AddressV = D3D10_TEXTURE_ADDRESS_CLAMP;
-    sampler_desc.AddressW = D3D10_TEXTURE_ADDRESS_CLAMP;
-    sampler_desc.MipLODBias = 0.0f;
-    sampler_desc.MaxAnisotropy = 0;
-    sampler_desc.ComparisonFunc = D3D10_COMPARISON_NEVER;
-    sampler_desc.BorderColor[0] = 0.0f;
-    sampler_desc.BorderColor[1] = 0.0f;
-    sampler_desc.BorderColor[2] = 0.0f;
-    sampler_desc.BorderColor[3] = 0.0f;
-    sampler_desc.MinLOD = 0.0f;
-    sampler_desc.MaxLOD = D3D10_FLOAT32_MAX;
-
-    hr = ID3D10Device_CreateSamplerState(device, &sampler_desc, &sampler_state);
-    ok(SUCCEEDED(hr), "Failed to create sampler state, hr %#lx.\n", hr);
-    ID3D10Device_PSSetSamplers(device, 0, 1, &sampler_state);
-
-    data = heap_alloc(sizeof(*data) * 32 * 32 * 32);
+    data = malloc(sizeof(*data) * 32 * 32 * 32);
 
     for (z = 0; z < 32; ++z)
     {
@@ -17300,7 +17331,7 @@ static void test_generate_mips(void)
         }
     }
 
-    zero_data = heap_alloc_zero(sizeof(*zero_data) * 16 * 16 * 16);
+    zero_data = calloc(16 * 16 * 16, sizeof(*zero_data));
 
     for (i = 0; i < ARRAY_SIZE(resource_types); ++i)
     {
@@ -17425,35 +17456,17 @@ static void test_generate_mips(void)
 
             ID3D10Device_GenerateMips(device, srv);
 
-            clear_backbuffer_rtv(&test_context, &white);
-
-            srv_desc.Format = tests[j].texture_format == DXGI_FORMAT_R8G8B8A8_UINT
-                    ? DXGI_FORMAT_R8G8B8A8_UINT : DXGI_FORMAT_R8G8B8A8_UNORM;
-            srv_desc.ViewDimension = resource_types[i].dim == D3D10_RESOURCE_DIMENSION_TEXTURE3D
-                    ? D3D10_SRV_DIMENSION_TEXTURE3D : D3D10_SRV_DIMENSION_TEXTURE2D;
-            srv_desc.Texture2D.MostDetailedMip = tests[j].base_level + 1;
-            srv_desc.Texture2D.MipLevels = ~0u;
-            hr = ID3D10Device_CreateShaderResourceView(device, resource, &srv_desc, &srv_sampling);
-            ok(SUCCEEDED(hr), "Resource type %u, test %u: failed to create shader resource view, "
-                    "hr %#lx.\n", i, j, hr);
-            ID3D10Device_PSSetShader(device, resource_types[i].dim
-                    == D3D10_RESOURCE_DIMENSION_TEXTURE3D ? ps_3d : ps);
-            ID3D10Device_PSSetShaderResources(device, 0, 1, &srv_sampling);
-
-            draw_quad(&test_context);
-
-            get_texture_readback(test_context.backbuffer, 0, &rb);
+            get_resource_readback(resource, tests[j].base_level + 1, &rb);
             for (k = 0; k < ARRAY_SIZE(expected); ++k)
             {
-                color = get_readback_color(&rb, expected[k].pos.x, expected[k].pos.y);
+                color = get_readback_color(&rb, expected[k].pos.x >> 1, expected[k].pos.y >> 1);
                 expected_color = tests[j].expected_mips ? expected[k].color : 0;
                 ok(color == expected_color, "Resource type %u, test %u: pixel (%ld, %ld) "
                         "has color %08x, expected %08x.\n",
-                        i, j, expected[k].pos.x, expected[k].pos.y, color, expected_color);
+                        i, j, expected[k].pos.x >> 1, expected[k].pos.y >> 1, color, expected_color);
             }
             release_resource_readback(&rb);
 
-            ID3D10ShaderResourceView_Release(srv_sampling);
             ID3D10ShaderResourceView_Release(srv);
             ID3D10Resource_Release(resource);
         }
@@ -17462,11 +17475,8 @@ static void test_generate_mips(void)
     if (is_warp_device(device))
     {
         win_skip("Creating the next texture crashes WARP on some testbot boxes.\n");
-        heap_free(zero_data);
-        heap_free(data);
-        ID3D10SamplerState_Release(sampler_state);
-        ID3D10PixelShader_Release(ps_3d);
-        ID3D10PixelShader_Release(ps);
+        free(zero_data);
+        free(data);
         release_test_context(&test_context);
         return;
     }
@@ -17507,26 +17517,13 @@ static void test_generate_mips(void)
 
     ID3D10Device_GenerateMips(device, srv);
 
-    clear_backbuffer_rtv(&test_context, &white);
-
-    srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
-    srv_desc.Texture2D.MostDetailedMip = 1;
-    srv_desc.Texture2D.MipLevels = ~0u;
-    hr = ID3D10Device_CreateShaderResourceView(device, resource, &srv_desc, &srv_sampling);
-    ok(SUCCEEDED(hr), "Failed to create shader resource view, hr %#lx.\n", hr);
-    ID3D10Device_PSSetShader(device, ps);
-    ID3D10Device_PSSetShaderResources(device, 0, 1, &srv_sampling);
-
-    draw_quad(&test_context);
-
-    get_texture_readback(test_context.backbuffer, 0, &rb);
-    color = get_readback_color(&rb, 320, 240);
-    ok(compare_color(color, 0x7fbcbcbc, 1) || broken(compare_color(color, 0x7f7f7f7f, 1)), /* AMD */
-            "Unexpected color %08x.\n", color);
+    get_resource_readback(resource, 1, &rb);
+    color = get_readback_color(&rb, 8, 8);
+    todo_wine_if (damavand)
+        ok(compare_color(color, 0x7fbcbcbc, 1) || broken(compare_color(color, 0x7f7f7f7f, 1)), /* AMD */
+                "Unexpected color %08x.\n", color);
     release_resource_readback(&rb);
 
-    ID3D10ShaderResourceView_Release(srv_sampling);
     ID3D10ShaderResourceView_Release(srv);
 
     srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -17539,34 +17536,17 @@ static void test_generate_mips(void)
 
     ID3D10Device_GenerateMips(device, srv);
 
-    clear_backbuffer_rtv(&test_context, &white);
-
-    srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
-    srv_desc.Texture2D.MostDetailedMip = 1;
-    srv_desc.Texture2D.MipLevels = ~0u;
-    hr = ID3D10Device_CreateShaderResourceView(device, resource, &srv_desc, &srv_sampling);
-    ok(SUCCEEDED(hr), "Failed to create shader resource view, hr %#lx.\n", hr);
-    ID3D10Device_PSSetShader(device, ps);
-    ID3D10Device_PSSetShaderResources(device, 0, 1, &srv_sampling);
-
-    draw_quad(&test_context);
-
-    get_texture_readback(test_context.backbuffer, 0, &rb);
+    get_resource_readback(resource, 1, &rb);
     check_readback_data_color(&rb, NULL, 0x7f7f7f7f, 1);
     release_resource_readback(&rb);
 
-    ID3D10ShaderResourceView_Release(srv_sampling);
     ID3D10ShaderResourceView_Release(srv);
 
     ID3D10Resource_Release(resource);
 
-    heap_free(zero_data);
-    heap_free(data);
+    free(zero_data);
+    free(data);
 
-    ID3D10SamplerState_Release(sampler_state);
-    ID3D10PixelShader_Release(ps_3d);
-    ID3D10PixelShader_Release(ps);
     release_test_context(&test_context);
 }
 
@@ -17689,11 +17669,11 @@ static void test_alpha_to_coverage(void)
         SetRect(&rect, 0, 0, 200, 200);
         check_readback_data_color(&rb, &rect, expected_color, 1);
         SetRect(&rect, 200, 0, 640, 200);
-        todo_wine
-        check_readback_data_color(&rb, &rect, 0xffffffff, 1);
+        todo_wine_if (!damavand)
+            check_readback_data_color(&rb, &rect, 0xffffffff, 1);
         SetRect(&rect, 0, 200, 640, 480);
-        todo_wine
-        check_readback_data_color(&rb, &rect, 0xffffffff, 1);
+        todo_wine_if (!damavand)
+            check_readback_data_color(&rb, &rect, 0xffffffff, 1);
         release_resource_readback(&rb);
 
         if (i > 0)
@@ -17716,11 +17696,11 @@ static void test_alpha_to_coverage(void)
     SetRect(&rect, 0, 0, 200, 200);
     check_readback_data_color(&rb, &rect, 0xffff0000, 1);
     SetRect(&rect, 200, 0, 640, 200);
-    todo_wine
-    check_readback_data_color(&rb, &rect, 0xffffffff, 1);
+    todo_wine_if (!damavand)
+        check_readback_data_color(&rb, &rect, 0xffffffff, 1);
     SetRect(&rect, 0, 200, 640, 480);
-    todo_wine
-    check_readback_data_color(&rb, &rect, 0xffffffff, 1);
+    todo_wine_if (!damavand)
+        check_readback_data_color(&rb, &rect, 0xffffffff, 1);
     release_resource_readback(&rb);
 
     ID3D10Texture2D_Release(render_targets[0]);
@@ -18316,7 +18296,7 @@ static void test_multisample_resolve(void)
 
         /* Found broken on AMD Radeon HD 6310 */
         if (!broken(is_amd_device(device) && tests[i].format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB))
-            todo_wine_if(tests[i].todo) check_texture_color(texture, tests[i].expected_color, 2);
+            todo_wine_if(tests[i].todo && !damavand) check_texture_color(texture, tests[i].expected_color, 2);
 
         ID3D10RenderTargetView_Release(rtv);
         ID3D10Texture2D_Release(ms_texture);
@@ -19092,7 +19072,7 @@ static void test_texture_compressed_3d(void)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Simply test all combinations of r0 and r1. */
-    texture_data = heap_alloc(256 * 256 * sizeof(UINT64));
+    texture_data = malloc(256 * 256 * sizeof(UINT64));
     for (r1 = 0; r1 < 256; ++r1)
     {
         for (r0 = 0; r0 < 256; ++r0)
@@ -19117,7 +19097,7 @@ static void test_texture_compressed_3d(void)
     texture_desc.MiscFlags = 0;
     hr = ID3D10Device_CreateTexture3D(device, &texture_desc, &resource_data, &texture);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    heap_free(texture_data);
+    free(texture_data);
 
     hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)texture, NULL, &srv);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -19354,8 +19334,9 @@ static void test_rtv_depth_slice(void)
         unsigned int x = 320, y = 60 + i * 480 / 4;
 
         colour = get_readback_color(&rb, x, y);
-        todo_wine ok(colour == colours[i].output, "Got unexpected colour 0x%08x at (%u, %u), expected 0x%08x.\n",
-                colour, x, y, colours[i].output);
+        todo_wine_if (!damavand)
+            ok(colour == colours[i].output, "Got unexpected colour 0x%08x at (%u, %u), expected 0x%08x.\n",
+                    colour, x, y, colours[i].output);
     }
     release_resource_readback(&rb);
 
@@ -19430,10 +19411,316 @@ static void test_stencil_only_write_after_clear(void)
     release_test_context(&test_context);
 }
 
+static void test_vertex_formats(void)
+{
+    struct d3d10core_test_context test_context;
+    ID3D10RenderTargetView *rtv;
+    ID3D10Device *device;
+    ID3D10Texture2D *rt;
+    unsigned int i;
+    HRESULT hr;
+
+    static const D3D10_TEXTURE2D_DESC rt_desc =
+    {
+        .Width = 4,
+        .Height = 4,
+        .MipLevels = 1,
+        .ArraySize = 1,
+        .Format = DXGI_FORMAT_R32G32B32A32_FLOAT,
+        .SampleDesc.Count = 1,
+        .Usage = D3D10_USAGE_DEFAULT,
+        .BindFlags = D3D10_BIND_RENDER_TARGET,
+    };
+
+    static const struct quad
+    {
+        struct vec2 position;
+        unsigned int color[4];
+    }
+    quad[] =
+    {
+        {{-1.0f, -1.0f}, {0x87654321, 0x12345678, 0xcccccccc, 0xdeadbeef}},
+        {{-1.0f,  1.0f}, {0x87654321, 0x12345678, 0xcccccccc, 0xdeadbeef}},
+        {{ 1.0f, -1.0f}, {0x87654321, 0x12345678, 0xcccccccc, 0xdeadbeef}},
+        {{ 1.0f,  1.0f}, {0x87654321, 0x12345678, 0xcccccccc, 0xdeadbeef}},
+    };
+
+    static const unsigned int vs_code[] =
+    {
+#if 0
+        void main(inout float4 position : sv_position, inout float4 color : COLOR)
+        {
+        }
+#endif
+        0x43425844, 0xc2f6fe60, 0x8a304938, 0x14c1a190, 0xe6f3e35e, 0x00000001, 0x00000144, 0x00000003,
+        0x0000002c, 0x00000080, 0x000000d4, 0x4e475349, 0x0000004c, 0x00000002, 0x00000008, 0x00000038,
+        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000f0f, 0x00000044, 0x00000000, 0x00000000,
+        0x00000003, 0x00000001, 0x00000f0f, 0x705f7673, 0x7469736f, 0x006e6f69, 0x4f4c4f43, 0xabab0052,
+        0x4e47534f, 0x0000004c, 0x00000002, 0x00000008, 0x00000038, 0x00000000, 0x00000001, 0x00000003,
+        0x00000000, 0x0000000f, 0x00000044, 0x00000000, 0x00000000, 0x00000003, 0x00000001, 0x0000000f,
+        0x705f7673, 0x7469736f, 0x006e6f69, 0x4f4c4f43, 0xabab0052, 0x52444853, 0x00000068, 0x00010040,
+        0x0000001a, 0x0300005f, 0x001010f2, 0x00000000, 0x0300005f, 0x001010f2, 0x00000001, 0x04000067,
+        0x001020f2, 0x00000000, 0x00000001, 0x03000065, 0x001020f2, 0x00000001, 0x05000036, 0x001020f2,
+        0x00000000, 0x00101e46, 0x00000000, 0x05000036, 0x001020f2, 0x00000001, 0x00101e46, 0x00000001,
+        0x0100003e,
+    };
+
+    static const unsigned int ps_code[] =
+    {
+#if 0
+        float4 main(float4 position : sv_position, float4 color : COLOR) : sv_target
+        {
+            return color;
+        }
+#endif
+        0x43425844, 0xb9b047ca, 0x73193a19, 0xb9a919ed, 0x21c2ff5f, 0x00000001, 0x000000f4, 0x00000003,
+        0x0000002c, 0x00000080, 0x000000b4, 0x4e475349, 0x0000004c, 0x00000002, 0x00000008, 0x00000038,
+        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000000f, 0x00000044, 0x00000000, 0x00000000,
+        0x00000003, 0x00000001, 0x00000f0f, 0x705f7673, 0x7469736f, 0x006e6f69, 0x4f4c4f43, 0xabab0052,
+        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
+        0x00000000, 0x0000000f, 0x745f7673, 0x65677261, 0xabab0074, 0x52444853, 0x00000038, 0x00000040,
+        0x0000000e, 0x03001062, 0x001010f2, 0x00000001, 0x03000065, 0x001020f2, 0x00000000, 0x05000036,
+        0x001020f2, 0x00000000, 0x00101e46, 0x00000001, 0x0100003e,
+    };
+
+    static const struct vec4 white = {1.0f, 1.0f, 1.0f, 1.0f};
+
+    static const struct
+    {
+        DXGI_FORMAT format;
+        struct vec4 expect;
+    }
+    tests[] =
+    {
+        {DXGI_FORMAT_R32G32B32A32_FLOAT,    {-1.72477726e-34,  5.69045661e-28, -1.07374176e+08, -6.25985340e+18}},
+        {DXGI_FORMAT_R32G32B32_FLOAT,       {-1.72477726e-34,  5.69045661e-28, -1.07374176e+08,  1.0}},
+        {DXGI_FORMAT_R32G32_FLOAT,          {-1.72477726e-34,  5.69045661e-28,  0.0,             1.0}},
+        {DXGI_FORMAT_R32_FLOAT,             {-1.72477726e-34,  0.0,             0.0,             1.0}},
+
+        {DXGI_FORMAT_R10G10B10A2_UNORM,     { 7.82991230e-01,  3.28445762e-01,  1.15347020e-01,  6.66666666e-01}},
+
+        {DXGI_FORMAT_R11G11B10_FLOAT,       { 1.89453125e-01,  1.30000000e+01,  3.81250000e+00,  1.0}},
+
+        {DXGI_FORMAT_R16G16B16A16_FLOAT,    { 3.56445313e+00, -1.12831593e-04,  1.03500000e+02,  7.57217407e-04}},
+        {DXGI_FORMAT_R16G16B16A16_UNORM,    { 2.62226284e-01,  5.28892934e-01,  3.37773710e-01,  7.11070448e-02}},
+        {DXGI_FORMAT_R16G16B16A16_SNORM,    { 5.24460614e-01, -9.42258954e-01,  6.75557733e-01,  1.42216250e-01}},
+        {DXGI_FORMAT_R16G16_FLOAT,          { 3.56445313e+00, -1.12831593e-04,  0.0,             1.0}},
+        {DXGI_FORMAT_R16G16_UNORM,          { 2.62226284e-01,  5.28892934e-01,  0.0,             1.0}},
+        {DXGI_FORMAT_R16G16_SNORM,          { 5.24460614e-01, -9.42258954e-01,  0.0,             1.0}},
+        {DXGI_FORMAT_R16_FLOAT,             { 3.56445313e+00,  0.0,             0.0,             1.0}},
+        {DXGI_FORMAT_R16_UNORM,             { 2.62226284e-01,  0.0,             0.0,             1.0}},
+        {DXGI_FORMAT_R16_SNORM,             { 5.24460614e-01,  0.0,             0.0,             1.0}},
+
+        {DXGI_FORMAT_R8G8B8A8_UNORM,        { 1.29411772e-01,  2.62745112e-01,  3.96078438e-01,  5.29411793e-01}},
+        {DXGI_FORMAT_R8G8B8A8_SNORM,        { 2.59842515e-01,  5.27559042e-01,  7.95275569e-01, -9.52755928e-01}},
+        {DXGI_FORMAT_R8G8_UNORM,            { 1.29411772e-01,  2.62745112e-01,  0.0,             1.0}},
+        {DXGI_FORMAT_R8G8_SNORM,            { 2.59842515e-01,  5.27559042e-01,  0.0,             1.0}},
+        {DXGI_FORMAT_R8_UNORM,              { 1.29411772e-01,  0.0,             0.0,             1.0}},
+        {DXGI_FORMAT_R8_SNORM,              { 2.59842515e-01,  0.0,             0.0,             1.0}},
+
+        {DXGI_FORMAT_B8G8R8A8_UNORM,        { 3.96078438e-01,  2.62745112e-01,  1.29411772e-01,  5.29411793e-01}},
+        {DXGI_FORMAT_B8G8R8X8_UNORM,        { 3.96078438e-01,  2.62745112e-01,  1.29411772e-01,  1.0}},
+    };
+
+    if (!init_test_context(&test_context))
+        return;
+    device = test_context.device;
+
+    hr = ID3D10Device_CreateTexture2D(device, &rt_desc, NULL, &rt);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)rt, NULL, &rtv);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = ID3D10Device_CreateVertexShader(device, vs_code, sizeof(vs_code), &test_context.vs);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = ID3D10Device_CreatePixelShader(device, ps_code, sizeof(ps_code), &test_context.ps);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    test_context.vb = create_buffer(device, D3D10_BIND_VERTEX_BUFFER, sizeof(quad), quad);
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        const D3D10_INPUT_ELEMENT_DESC layout_desc[] =
+        {
+            {
+                .SemanticName = "sv_position",
+                .SemanticIndex = 0,
+                .Format = DXGI_FORMAT_R32G32_FLOAT,
+                .InputSlot = 0,
+                .AlignedByteOffset = offsetof(struct quad, position),
+                .InputSlotClass = D3D10_INPUT_PER_VERTEX_DATA,
+            },
+            {
+                .SemanticName = "COLOR",
+                .SemanticIndex = 0,
+                .Format = tests[i].format,
+                .InputSlot = 0,
+                .AlignedByteOffset = offsetof(struct quad, color),
+                .InputSlotClass = D3D10_INPUT_PER_VERTEX_DATA,
+            },
+        };
+
+        static const unsigned int stride = sizeof(*quad);
+        static const unsigned int offset = 0;
+        ID3D10InputLayout *input_layout;
+        unsigned int format_support;
+
+        hr = ID3D10Device_CheckFormatSupport(device, tests[i].format, &format_support);
+        ok(hr == S_OK || hr == E_FAIL, "Got hr %#lx.\n", hr);
+
+        if (!(format_support & D3D10_FORMAT_SUPPORT_IA_VERTEX_BUFFER))
+            continue;
+
+        winetest_push_context("Format %#x", tests[i].format);
+
+        hr = ID3D10Device_CreateInputLayout(device, layout_desc, ARRAY_SIZE(layout_desc),
+                vs_code, sizeof(vs_code), &input_layout);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+        clear_rtv(&test_context, rtv, &white);
+        ID3D10Device_OMSetRenderTargets(device, 1, &rtv, NULL);
+        ID3D10Device_IASetInputLayout(device, input_layout);
+        ID3D10Device_IASetPrimitiveTopology(device, D3D10_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        ID3D10Device_IASetVertexBuffers(device, 0, 1, &test_context.vb, &stride, &offset);
+        ID3D10Device_VSSetShader(device, test_context.vs);
+        ID3D10Device_PSSetShader(device, test_context.ps);
+        ID3D10Device_Draw(device, 4, 0);
+
+        todo_wine_if (damavand && tests[i].format == DXGI_FORMAT_B8G8R8X8_UNORM)
+            check_texture_vec4(rt, &tests[i].expect, 1);
+
+        ID3D10InputLayout_Release(input_layout);
+
+        winetest_pop_context();
+    }
+
+    ID3D10RenderTargetView_Release(rtv);
+    ID3D10Texture2D_Release(rt);
+    release_test_context(&test_context);
+}
+
+/* This is a regression test for a specific code path triggered by
+ * "Sonic Colors: Ultimate" and "My Place".
+ *
+ * GL_ARB_geometry_shader4 requires that either all or none of the FBO
+ * attachments are layered, where "layered" notably means whether they were
+ * array textures attached with glFramebufferTexture(), and does *not* depend
+ * on whether the attachment has more than one layer. */
+static void test_layered_rtv_mismatch(void)
+{
+    static const struct vec4 black = {0.0f, 0.0f, 0.0f, 0.0f};
+    static const struct vec4 green = {0.0f, 1.0f, 0.0f, 1.0f};
+    struct d3d10core_test_context test_context;
+    ID3D10Texture2D *rt_texture, *ds_texture;
+    D3D10_RENDER_TARGET_VIEW_DESC rtv_desc;
+    D3D10_TEXTURE2D_DESC texture_desc;
+    struct resource_readback rb;
+    ID3D10RenderTargetView *rtv;
+    ID3D10DepthStencilView *dsv;
+    const struct vec4 *colour;
+    ID3D10Device *device;
+    HRESULT hr;
+
+    if (!init_test_context(&test_context))
+        return;
+    device = test_context.device;
+
+    ID3D10Texture2D_GetDesc(test_context.backbuffer, &texture_desc);
+    texture_desc.Format = DXGI_FORMAT_D32_FLOAT;
+    texture_desc.BindFlags = D3D10_BIND_DEPTH_STENCIL;
+    hr = ID3D10Device_CreateTexture2D(device, &texture_desc, NULL, &ds_texture);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = ID3D10Device_CreateDepthStencilView(device, (ID3D10Resource *)ds_texture, NULL, &dsv);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ID3D10Texture2D_GetDesc(test_context.backbuffer, &texture_desc);
+    texture_desc.Format = DXGI_FORMAT_R32G32B32A32_TYPELESS;
+    texture_desc.ArraySize = 2;
+    hr = ID3D10Device_CreateTexture2D(device, &texture_desc, NULL, &rt_texture);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    rtv_desc.Format = DXGI_FORMAT_R32G32B32A32_UINT;
+    rtv_desc.ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DARRAY;
+    rtv_desc.Texture2DArray.ArraySize = 1;
+    rtv_desc.Texture2DArray.FirstArraySlice = 0;
+    rtv_desc.Texture2DArray.MipSlice = 0;
+    hr = ID3D10Device_CreateRenderTargetView(device, (ID3D10Resource *)rt_texture, &rtv_desc, &rtv);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ID3D10Device_OMSetRenderTargets(device, 1, &rtv, dsv);
+    clear_rtv(&test_context, rtv, &black);
+    ID3D10Device_ClearDepthStencilView(device, dsv, D3D10_CLEAR_DEPTH, 1.0f, 0);
+
+    draw_color_quad(&test_context, &green);
+
+    get_texture_readback(rt_texture, 0, &rb);
+    colour = get_readback_vec4(&rb, 320, 240);
+    ok(compare_vec4(colour, &green, 0), "Got colour {%.8e, %.8e, %.8e, %.8e}.\n",
+            colour->x, colour->y, colour->z, colour->w);
+    release_resource_readback(&rb);
+
+    ID3D10Texture2D_Release(rt_texture);
+    ID3D10Texture2D_Release(ds_texture);
+    ID3D10RenderTargetView_Release(rtv);
+    ID3D10DepthStencilView_Release(dsv);
+    release_test_context(&test_context);
+}
+
+/* A regression test for a broken clear path in the Vulkan renderer. */
+static void test_clear_after_draw(void)
+{
+    static const struct vec4 black = {0.0f, 0.0f, 0.0f, 1.0f};
+    static const struct vec4 green = {0.0f, 1.0f, 0.0f, 1.0f};
+    static const struct vec4 red = {1.0f, 0.0f, 0.0f, 1.0f};
+    struct d3d10core_test_context test_context;
+    struct resource_readback rb;
+    ID3D10Device *device;
+    unsigned int colour;
+
+    static const struct vec3 quad[] =
+    {
+        {-1.0f, -1.0f, 0.0f},
+        {-1.0f,  0.0f, 0.0f},
+        { 0.0f, -1.0f, 0.0f},
+        { 0.0f,  0.0f, 0.0f},
+    };
+
+    if (!init_test_context(&test_context))
+        return;
+    device = test_context.device;
+
+    test_context.vb = create_buffer(device, D3D11_BIND_VERTEX_BUFFER, sizeof(quad), quad);
+
+    clear_backbuffer_rtv(&test_context, &black);
+    draw_color_quad(&test_context, &green);
+    clear_backbuffer_rtv(&test_context, &red);
+    draw_color_quad(&test_context, &green);
+
+    get_texture_readback(test_context.backbuffer, 0, &rb);
+    colour = get_readback_color(&rb, 160, 120);
+    ok(colour == 0xff0000ff, "Got unexpected colour 0x%08x.\n", colour);
+    colour = get_readback_color(&rb, 160, 360);
+    ok(colour == 0xff00ff00, "Got unexpected colour 0x%08x.\n", colour);
+    release_resource_readback(&rb);
+
+    release_test_context(&test_context);
+}
+
 START_TEST(d3d10core)
 {
     unsigned int argc, i;
+    HMODULE wined3d;
     char **argv;
+
+    if ((wined3d = GetModuleHandleA("wined3d.dll")))
+    {
+        enum wined3d_renderer (CDECL *p_wined3d_get_renderer)(void);
+
+        if ((p_wined3d_get_renderer = (void *)GetProcAddress(wined3d, "wined3d_get_renderer"))
+                && p_wined3d_get_renderer() == WINED3D_RENDERER_VULKAN)
+            damavand = true;
+    }
 
     use_mt = !getenv("WINETEST_NO_MT_D3D");
     /* Some host drivers (MacOS, Mesa radeonsi) never unmap memory even when
@@ -19562,6 +19849,9 @@ START_TEST(d3d10core)
     queue_test(test_dynamic_map_synchronization);
     queue_test(test_rtv_depth_slice);
     queue_test(test_stencil_only_write_after_clear);
+    queue_test(test_vertex_formats);
+    queue_test(test_layered_rtv_mismatch);
+    queue_test(test_clear_after_draw);
 
     run_queued_tests();
 

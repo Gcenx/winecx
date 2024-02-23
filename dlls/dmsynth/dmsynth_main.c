@@ -25,11 +25,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmsynth);
 
-LONG DMSYNTH_refCount = 0;
-
 typedef struct {
         IClassFactory IClassFactory_iface;
-        HRESULT (*fnCreateInstance)(REFIID riid, void **ppv);
+        HRESULT (*create_instance)(IUnknown **ret_iface);
 } IClassFactoryImpl;
 
 /******************************************************************
@@ -62,40 +60,37 @@ static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID r
 
 static ULONG WINAPI ClassFactory_AddRef(IClassFactory *iface)
 {
-        DMSYNTH_LockModule();
-
         return 2; /* non-heap based object */
 }
 
 static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
 {
-        DMSYNTH_UnlockModule();
-
         return 1; /* non-heap based object */
 }
 
-static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown *pUnkOuter,
-        REFIID riid, void **ppv)
+static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown *unk_outer,
+        REFIID riid, void **ret_iface)
 {
-        IClassFactoryImpl *This = impl_from_IClassFactory(iface);
+    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
+    IUnknown *object;
+    HRESULT hr;
 
-        TRACE ("(%p, %s, %p)\n", pUnkOuter, debugstr_dmguid(riid), ppv);
+    TRACE("(%p, %s, %p)\n", unk_outer, debugstr_dmguid(riid), ret_iface);
 
-        if (pUnkOuter)
-            return CLASS_E_NOAGGREGATION;
+    *ret_iface = NULL;
+    if (unk_outer) return CLASS_E_NOAGGREGATION;
+    if (SUCCEEDED(hr = This->create_instance(&object)))
+    {
+        hr = IUnknown_QueryInterface(object, riid, ret_iface);
+        IUnknown_Release(object);
+    }
 
-        return This->fnCreateInstance(riid, ppv);
+    return hr;
 }
 
 static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL dolock)
 {
         TRACE("(%d)\n", dolock);
-
-        if (dolock)
-                DMSYNTH_LockModule();
-        else
-                DMSYNTH_UnlockModule();
-
         return S_OK;
 }
 
@@ -107,19 +102,8 @@ static const IClassFactoryVtbl classfactory_vtbl = {
         ClassFactory_LockServer
 };
 
-static IClassFactoryImpl Synth_CF = {{&classfactory_vtbl}, DMUSIC_CreateDirectMusicSynthImpl};
-static IClassFactoryImpl SynthSink_CF = {{&classfactory_vtbl},
-                                         DMUSIC_CreateDirectMusicSynthSinkImpl};
-
-/******************************************************************
- *		DllCanUnloadNow (DMSYNTH.@)
- *
- *
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-	return DMSYNTH_refCount != 0 ? S_FALSE : S_OK;
-}
+static IClassFactoryImpl Synth_CF = {{&classfactory_vtbl}, synth_create};
+static IClassFactoryImpl SynthSink_CF = {{&classfactory_vtbl}, synth_sink_create};
 
 
 /******************************************************************

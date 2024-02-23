@@ -1646,7 +1646,7 @@ static HANDLE xcv_alloc_handle(const WCHAR *name, PRINTER_DEFAULTSW *def, BOOL *
 {
     static const WCHAR xcv_monitor[] = L"XcvMonitor ";
     static const WCHAR xcv_port[] = L"XcvPort ";
-    BOOL mon, port;
+    BOOL mon;
     xcv_t *xcv;
 
     *stop_search = FALSE;
@@ -1664,11 +1664,9 @@ static HANDLE xcv_alloc_handle(const WCHAR *name, PRINTER_DEFAULTSW *def, BOOL *
     }
     else
     {
-        port = !wcsncmp(name, xcv_port, ARRAY_SIZE(xcv_port) - 1);
+        if (wcsncmp(name, xcv_port, ARRAY_SIZE(xcv_port) - 1)) return NULL;
         name += ARRAY_SIZE(xcv_port) - 1;
     }
-    if (!port && !mon)
-        return NULL;
 
     *stop_search = TRUE;
     xcv = calloc(1, sizeof(*xcv));
@@ -2474,6 +2472,36 @@ static BOOL WINAPI fpDeleteMonitor(LPWSTR pName, LPWSTR pEnvironment, LPWSTR pMo
     return FALSE;
 }
 
+static BOOL WINAPI fpResetPrinter(HANDLE hprinter, PRINTER_DEFAULTSW *def)
+{
+    printer_t *printer = (printer_t *)hprinter;
+
+    if (!printer || printer->header.type != HANDLE_PRINTER)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    if (!def)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    free(printer->datatype);
+    if (def->pDatatype)
+        printer->datatype = wcsdup(def->pDatatype);
+    else
+        printer->datatype = NULL;
+
+    free(printer->devmode);
+    if (def->pDevMode)
+        printer->devmode = dup_devmode(def->pDevMode);
+    else
+        printer->devmode = NULL;
+    return TRUE;
+}
+
 /*****************************************************************************
  * fpDeletePort [exported through PRINTPROVIDOR]
  *
@@ -3044,7 +3072,7 @@ static void fill_builtin_form_info( BYTE **base, WCHAR **strings, const struct b
                                     DWORD size, DWORD *used )
 {
     FORM_INFO_2W *info = *(FORM_INFO_2W**)base;
-    DWORD name_len = wcslen( form->name ) + 1, res_len, keyword_len, total_size;
+    DWORD name_len = wcslen( form->name ) + 1, res_len = 0, keyword_len, total_size;
     static const WCHAR dll_name[] = L"localspl.dll";
     const WCHAR *resource;
 
@@ -4113,7 +4141,7 @@ static const PRINTPROVIDOR backend = {
         NULL,   /* fpPrinterMessageBox */
         fpAddMonitor,
         fpDeleteMonitor,
-        NULL,   /* fpResetPrinter */
+        fpResetPrinter,
         NULL,   /* fpGetPrinterDriverEx */
         NULL,   /* fpFindFirstPrinterChangeNotification */
         NULL,   /* fpFindClosePrinterChangeNotification */

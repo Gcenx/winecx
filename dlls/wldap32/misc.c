@@ -219,13 +219,19 @@ WCHAR * CDECL ldap_first_attributeW( LDAP *ld, WLDAP32_LDAPMessage *entry, WLDAP
     if (ld && entry) retU = ldap_first_attribute( CTX(ld), MSG(entry), &berU );
     else return NULL;
 
-    if (retU && (ber = malloc( sizeof(*ber) )))
+    if (!retU)
+        return NULL;
+
+    if (!(ber = malloc( sizeof(*ber) )))
     {
-        ber->opaque = (char *)berU;
-        *ptr = ber;
-        ret = strUtoW( retU );
+        ld->ld_errno = WLDAP32_LDAP_NO_MEMORY;
+        ldap_memfree( retU );
+        return NULL;
     }
 
+    ber->opaque = (char *)berU;
+    *ptr = ber;
+    ret = strUtoW( retU );
     ldap_memfree( retU );
     return ret;
 }
@@ -359,12 +365,18 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_next_entry( LDAP *ld, WLDAP32_LDAPMessa
     if (entry->lm_next) return entry->lm_next;
 
     msgU = ldap_next_entry( CTX(ld), MSG(entry) );
-    if (msgU && (msg = calloc( 1, sizeof(*msg) )))
+
+    if (!msgU)
+        return NULL;
+
+    if (!(msg = calloc( 1, sizeof(*msg) )))
     {
-        MSG(msg) = msgU;
-        entry->lm_next = msg;
+        ld->ld_errno = WLDAP32_LDAP_NO_MEMORY;
+        return NULL;
     }
 
+    MSG(msg) = msgU;
+    entry->lm_next = msg;
     return msg;
 }
 
@@ -383,12 +395,18 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_next_reference( LDAP *ld, WLDAP32_LDAPM
     if (entry->lm_next) return entry->lm_next;
 
     msgU = ldap_next_reference( CTX(ld), MSG(entry) );
-    if (msgU && (msg = calloc( 1, sizeof(*msg) )))
+
+    if (!msgU)
+        return NULL;
+
+    if (!(msg = calloc( 1, sizeof(*msg) )))
     {
-        MSG(msg) = msgU;
-        entry->lm_next = msg;
+        ld->ld_errno = WLDAP32_LDAP_NO_MEMORY;
+        return NULL;
     }
 
+    MSG(msg) = msgU;
+    entry->lm_next = msg;
     return msg;
 }
 
@@ -414,12 +432,18 @@ ULONG CDECL WLDAP32_ldap_result( LDAP *ld, ULONG msgid, ULONG all, struct l_time
 
         ret = ldap_result( CTX(ld), msgid, all, timeout ? &timeval : NULL, &msgU );
     }
-    if (msgU && (msg = calloc( 1, sizeof(*msg) )))
+
+    if (!msgU)
+        return ret;
+
+    if (!(msg = calloc( 1, sizeof(*msg) )))
     {
-        MSG(msg) = msgU;
-        *res = msg;
+        free( msgU );
+        return WLDAP32_LDAP_NO_MEMORY;
     }
 
+    MSG(msg) = msgU;
+    *res = msg;
     return ret;
 }
 

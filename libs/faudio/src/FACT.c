@@ -1,6 +1,6 @@
 /* FAudio - XAudio Reimplementation for FNA
  *
- * Copyright (c) 2011-2022 Ethan Lee, Luigi Auriemma, and the MonoGame Team
+ * Copyright (c) 2011-2023 Ethan Lee, Luigi Auriemma, and the MonoGame Team
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -290,6 +290,7 @@ uint32_t FACTAudioEngine_Initialize(
 			NULL
 		) != 0) {
 			FAudio_Release(pEngine->audio);
+			FAudio_PlatformUnlockMutex(pEngine->apiLock);
 			return FAUDIO_E_INVALID_CALL;
 		}
 	}
@@ -731,6 +732,7 @@ uint32_t FACTAudioEngine_RegisterNotification(
 	/* WaveBanks */
 	#define PERSIST_ACTION pEngine->wb_context = pNotificationDescription->pvContext;
 	else HANDLE_PERSIST(WAVEBANKPREPARED)
+	else HANDLE_PERSIST(WAVEBANKSTREAMING_INVALIDCONTENT)
 	#undef PERSIST_ACTION
 
 	/* Anything else? */
@@ -854,6 +856,7 @@ uint32_t FACTAudioEngine_UnRegisterNotification(
 	/* WaveBanks */
 	#define PERSIST_ACTION pEngine->wb_context = pNotificationDescription->pvContext;
 	else HANDLE_PERSIST(WAVEBANKPREPARED)
+	else HANDLE_PERSIST(WAVEBANKSTREAMING_INVALIDCONTENT)
 	#undef PERSIST_ACTION
 
 	/* Anything else? */
@@ -1419,16 +1422,13 @@ uint32_t FACTSoundBank_Destroy(FACTSoundBank *pSoundBank)
 		FACTCue_Destroy(pSoundBank->cueList);
 	}
 
-	if (pSoundBank->parentEngine != NULL)
-	{
-		/* Remove this SoundBank from the Engine list */
-		LinkedList_RemoveEntry(
-			&pSoundBank->parentEngine->sbList,
-			pSoundBank,
-			pSoundBank->parentEngine->sbLock,
-			pSoundBank->parentEngine->pFree
-		);
-	}
+	/* Remove this SoundBank from the Engine list */
+	LinkedList_RemoveEntry(
+		&pSoundBank->parentEngine->sbList,
+		pSoundBank,
+		pSoundBank->parentEngine->sbLock,
+		pSoundBank->parentEngine->pFree
+	);
 
 	/* SoundBank Name */
 	pSoundBank->parentEngine->pFree(pSoundBank->name);
@@ -1595,16 +1595,13 @@ uint32_t FACTWaveBank_Destroy(FACTWaveBank *pWaveBank)
 		}
 	}
 
-	if (pWaveBank->parentEngine != NULL)
-	{
-		/* Remove this WaveBank from the Engine list */
-		LinkedList_RemoveEntry(
-			&pWaveBank->parentEngine->wbList,
-			pWaveBank,
-			pWaveBank->parentEngine->wbLock,
-			pWaveBank->parentEngine->pFree
-		);
-	}
+	/* Remove this WaveBank from the Engine list */
+	LinkedList_RemoveEntry(
+		&pWaveBank->parentEngine->wbList,
+		pWaveBank,
+		pWaveBank->parentEngine->wbLock,
+		pWaveBank->parentEngine->pFree
+	);
 
 	/* Free everything, finally. */
 	pWaveBank->parentEngine->pFree(pWaveBank->name);

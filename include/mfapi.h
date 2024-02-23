@@ -507,6 +507,7 @@ typedef enum
 
 struct tagVIDEOINFOHEADER;
 typedef struct tagVIDEOINFOHEADER VIDEOINFOHEADER;
+typedef struct _AMMediaType AM_MEDIA_TYPE;
 
 HRESULT WINAPI MFAddPeriodicCallback(MFPERIODICCALLBACK callback, IUnknown *context, DWORD *key);
 HRESULT WINAPI MFAllocateSerialWorkQueue(DWORD target_queue, DWORD *queue);
@@ -544,6 +545,7 @@ HRESULT WINAPI MFCreateMediaBufferFromMediaType(IMFMediaType *media_type, LONGLO
 HRESULT WINAPI MFCreateMediaEvent(MediaEventType type, REFGUID extended_type, HRESULT status,
                                   const PROPVARIANT *value, IMFMediaEvent **event);
 HRESULT WINAPI MFCreateMediaType(IMFMediaType **type);
+HRESULT WINAPI MFCreateAMMediaTypeFromMFMediaType(IMFMediaType *media_type, GUID format_type, AM_MEDIA_TYPE **am_type);
 HRESULT WINAPI MFCreateMFVideoFormatFromMFMediaType(IMFMediaType *media_type, MFVIDEOFORMAT **video_format, UINT32 *size);
 HRESULT WINAPI MFCreateSample(IMFSample **sample);
 HRESULT WINAPI MFCreateTempFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE openmode, MF_FILE_FLAGS flags,
@@ -587,6 +589,7 @@ HRESULT WINAPI MFTGetInfo(CLSID clsid, WCHAR **name, MFT_REGISTER_TYPE_INFO **in
         MFT_REGISTER_TYPE_INFO **output_types, UINT32 *output_types_count, IMFAttributes **attributes);
 BOOL WINAPI MFIsFormatYUV(DWORD format);
 HRESULT WINAPI MFInitAttributesFromBlob(IMFAttributes *attributes, const UINT8 *buffer, UINT size);
+HRESULT WINAPI MFInitAMMediaTypeFromMFMediaType(IMFMediaType *media_type, GUID format, AM_MEDIA_TYPE *am_type);
 HRESULT WINAPI MFInitMediaTypeFromAMMediaType(IMFMediaType *mediatype, const AM_MEDIA_TYPE *am_type);
 HRESULT WINAPI MFInitMediaTypeFromVideoInfoHeader(IMFMediaType *media_type, const VIDEOINFOHEADER *vih,
         UINT32 size, const GUID *subtype);

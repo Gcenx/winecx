@@ -54,7 +54,7 @@ static HRESULT set_mixing_mode(IBaseFilter *filter)
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
     hr = IVMRFilterConfig_SetNumberOfStreams(config, 2);
-    todo_wine ok(hr == VFW_E_DDRAW_CAPS_NOT_SUITABLE || hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(hr == VFW_E_DDRAW_CAPS_NOT_SUITABLE || hr == S_OK, "Got hr %#lx.\n", hr);
 
     IVMRFilterConfig_Release(config);
     return hr;
@@ -171,7 +171,7 @@ static void test_filter_config(void)
     hr = IVMRFilterConfig_SetNumberOfStreams(config, 3);
     if (hr != VFW_E_DDRAW_CAPS_NOT_SUITABLE)
     {
-        todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
         hr = IVMRFilterConfig_GetNumberOfStreams(config, &count);
         todo_wine {
@@ -502,7 +502,7 @@ static void test_enum_pins(void)
     if (SUCCEEDED(set_mixing_mode(filter)))
     {
         hr = IEnumPins_Next(enum1, 1, pins, NULL);
-        todo_wine ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
+        ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
 
         hr = IEnumPins_Reset(enum1);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
@@ -512,8 +512,9 @@ static void test_enum_pins(void)
         IPin_Release(pins[0]);
 
         hr = IEnumPins_Next(enum1, 1, pins, NULL);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-        IPin_Release(pins[0]);
+        todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        if (hr == S_OK)
+            IPin_Release(pins[0]);
 
         hr = IEnumPins_Next(enum1, 1, pins, NULL);
         ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
@@ -522,19 +523,21 @@ static void test_enum_pins(void)
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
         hr = IEnumPins_Next(enum1, 2, pins, &count);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-        ok(count == 2, "Got count %lu.\n", count);
+        todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        todo_wine ok(count == 2, "Got count %lu.\n", count);
         IPin_Release(pins[0]);
-        IPin_Release(pins[1]);
+        if (count == 2)
+            IPin_Release(pins[1]);
 
         hr = IEnumPins_Reset(enum1);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
         hr = IEnumPins_Next(enum1, 3, pins, &count);
         ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
-        ok(count == 2, "Got count %lu.\n", count);
+        todo_wine ok(count == 2, "Got count %lu.\n", count);
         IPin_Release(pins[0]);
-        IPin_Release(pins[1]);
+        if (count == 2)
+            IPin_Release(pins[1]);
     }
     else
         skip("Mixing mode is not supported.\n");
@@ -584,12 +587,15 @@ static void test_find_pin(void)
         IPin_Release(pin2);
 
         hr = IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-        hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-        ok(pin == pin2, "Pins did not match.\n");
-        IPin_Release(pin);
-        IPin_Release(pin2);
+        todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        if (hr == S_OK)
+        {
+            hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
+            ok(hr == S_OK, "Got hr %#lx.\n", hr);
+            ok(pin == pin2, "Pins did not match.\n");
+            IPin_Release(pin);
+            IPin_Release(pin2);
+        }
 
         hr = IBaseFilter_FindPin(filter, L"VMR Input2", &pin);
         ok(hr == VFW_E_NOT_FOUND, "Got hr %#lx.\n", hr);
@@ -635,26 +641,30 @@ static void test_pin_info(void)
 
     if (SUCCEEDED(set_mixing_mode(filter)))
     {
-        IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
-        hr = IPin_QueryPinInfo(pin, &info);
-        ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
-        ok(info.dir == PINDIR_INPUT, "Got direction %d.\n", info.dir);
-        ok(!wcscmp(info.achName, L"VMR Input1"), "Got name %s.\n", wine_dbgstr_w(info.achName));
-        IBaseFilter_Release(info.pFilter);
+        hr = IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
+        todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        if (hr == S_OK)
+        {
+            hr = IPin_QueryPinInfo(pin, &info);
+            ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
+            ok(info.dir == PINDIR_INPUT, "Got direction %d.\n", info.dir);
+            ok(!wcscmp(info.achName, L"VMR Input1"), "Got name %s.\n", wine_dbgstr_w(info.achName));
+            IBaseFilter_Release(info.pFilter);
 
-        hr = IPin_QueryDirection(pin, &dir);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-        ok(dir == PINDIR_INPUT, "Got direction %d.\n", dir);
+            hr = IPin_QueryDirection(pin, &dir);
+            ok(hr == S_OK, "Got hr %#lx.\n", hr);
+            ok(dir == PINDIR_INPUT, "Got direction %d.\n", dir);
 
-        hr = IPin_QueryId(pin, &id);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-        ok(!wcscmp(id, L"VMR Input1"), "Got id %s.\n", wine_dbgstr_w(id));
-        CoTaskMemFree(id);
+            hr = IPin_QueryId(pin, &id);
+            ok(hr == S_OK, "Got hr %#lx.\n", hr);
+            ok(!wcscmp(id, L"VMR Input1"), "Got id %s.\n", wine_dbgstr_w(id));
+            CoTaskMemFree(id);
 
-        hr = IPin_QueryInternalConnections(pin, NULL, &count);
-        ok(hr == E_NOTIMPL, "Got hr %#lx.\n", hr);
+            hr = IPin_QueryInternalConnections(pin, NULL, &count);
+            ok(hr == E_NOTIMPL, "Got hr %#lx.\n", hr);
 
-        IPin_Release(pin);
+            IPin_Release(pin);
+        }
     }
     else
         skip("Mixing mode is not supported.\n");
@@ -3143,6 +3153,176 @@ static void test_unconnected_eos(void)
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
 }
 
+static void test_default_presenter_allocate(void)
+{
+    IDirectDrawSurface7 *frontbuffer, *backbuffer, *backbuffer2, *backbuffer3;
+    IDirectDraw7 *ddraw, *prev_ddraw = NULL;
+    IVMRSurfaceAllocator *allocator;
+    VMRALLOCATIONINFO info;
+    DDSURFACEDESC2 desc;
+    HRESULT hr;
+    LONG ref;
+
+    BITMAPINFOHEADER bitmap_header =
+    {
+        .biSize = sizeof(BITMAPINFOHEADER),
+        .biWidth = 32,
+        .biHeight = 16,
+        .biCompression = mmioFOURCC('Y','U','Y','2'),
+        .biBitCount = 16,
+        .biPlanes = 1,
+    };
+
+    static const struct
+    {
+        WORD depth;
+        DWORD compression;
+        DDPIXELFORMAT format;
+    }
+    tests[] =
+    {
+        {32, BI_RGB},
+        {12, mmioFOURCC('N','V','1','2')},
+        {12, mmioFOURCC('Y','V','1','2')},
+        {16, mmioFOURCC('U','Y','V','Y')},
+        {16, mmioFOURCC('Y','U','Y','2')},
+    };
+
+    hr = CoCreateInstance(&CLSID_AllocPresenter, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IVMRSurfaceAllocator, (void **)&allocator);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IVMRSurfaceAllocator_FreeSurface(allocator, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    info.dwFlags = AMAP_DIRECTED_FLIP | AMAP_ALLOW_SYSMEM;
+    info.dwMinBuffers = 2;
+    info.dwMaxBuffers = 2;
+    info.dwInterlaceFlags = 0;
+    info.szNativeSize.cx = info.szAspectRatio.cx = 640;
+    info.szNativeSize.cy = info.szAspectRatio.cy = 480;
+    info.lpHdr = &bitmap_header;
+    info.lpPixFmt = NULL;
+
+    for (unsigned int i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        DWORD count = 2;
+
+        winetest_push_context("Compression %#lx, depth %u", tests[i].compression, tests[i].depth);
+
+        bitmap_header.biBitCount = tests[i].depth;
+        bitmap_header.biCompression = tests[i].compression;
+
+        hr = IVMRSurfaceAllocator_AllocateSurface(allocator, 0, &info, &count, &frontbuffer);
+        if (hr == VFW_E_DDRAW_CAPS_NOT_SUITABLE)
+        {
+            skip("Format is not supported.\n");
+            winetest_pop_context();
+            continue;
+        }
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        ok(count == 3, "Got count %lu.\n", count);
+
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+        hr = IDirectDrawSurface7_GetSurfaceDesc(frontbuffer, &desc);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        todo_wine ok(desc.dwFlags == (DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH | DDSD_PIXELFORMAT),
+                "Got flags %#lx.\n", desc.dwFlags);
+        todo_wine ok(desc.ddsCaps.dwCaps == (DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY | DDSCAPS_OFFSCREENPLAIN
+                | DDSCAPS_FRONTBUFFER | DDSCAPS_FLIP), "Got caps %#lx.\n", desc.ddsCaps.dwCaps);
+        ok(!desc.ddsCaps.dwCaps2, "Got caps2 %#lx.\n", desc.ddsCaps.dwCaps2);
+        ok(!desc.ddsCaps.dwCaps3, "Got caps2 %#lx.\n", desc.ddsCaps.dwCaps3);
+        ok(!desc.ddsCaps.dwCaps4, "Got caps2 %#lx.\n", desc.ddsCaps.dwCaps4);
+        ok(desc.dwWidth == 32, "Got width %lu.\n", desc.dwWidth);
+        ok(desc.dwHeight == 16, "Got height %lu.\n", desc.dwHeight);
+        ok(desc.ddpfPixelFormat.dwSize == sizeof(desc.ddpfPixelFormat),
+                "Got size %lu.\n", desc.ddpfPixelFormat.dwSize);
+        if (tests[i].compression)
+        {
+            ok(desc.ddpfPixelFormat.dwFlags == DDPF_FOURCC, "Got flags %#lx.\n", desc.ddpfPixelFormat.dwFlags);
+            ok(desc.ddpfPixelFormat.dwFourCC == bitmap_header.biCompression,
+                    "Got fourcc %08lx.\n", desc.ddpfPixelFormat.dwFourCC);
+        }
+        else
+        {
+            ok(desc.ddpfPixelFormat.dwFlags == DDPF_RGB, "Got flags %#lx.\n", desc.ddpfPixelFormat.dwFlags);
+            ok(desc.ddpfPixelFormat.dwRGBBitCount == 32, "Got depth %lu.\n", desc.ddpfPixelFormat.dwRGBBitCount);
+            ok(desc.ddpfPixelFormat.dwRBitMask == 0x00ff0000, "Got red mask %#lx.\n", desc.ddpfPixelFormat.dwRBitMask);
+            ok(desc.ddpfPixelFormat.dwGBitMask == 0x0000ff00, "Got green mask %#lx.\n", desc.ddpfPixelFormat.dwGBitMask);
+            ok(desc.ddpfPixelFormat.dwBBitMask == 0x000000ff, "Got blue mask %#lx.\n", desc.ddpfPixelFormat.dwBBitMask);
+        }
+
+        desc.ddsCaps.dwCaps = DDSCAPS_FLIP;
+        hr = IDirectDrawSurface7_GetAttachedSurface(frontbuffer, &desc.ddsCaps, &backbuffer);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+        hr = IDirectDrawSurface7_GetSurfaceDesc(backbuffer, &desc);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        todo_wine ok(desc.dwFlags == (DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH | DDSD_PIXELFORMAT),
+                "Got flags %#lx.\n", desc.dwFlags);
+        todo_wine ok(desc.ddsCaps.dwCaps == (DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY | DDSCAPS_OFFSCREENPLAIN
+                | DDSCAPS_BACKBUFFER | DDSCAPS_FLIP), "Got caps %#lx.\n", desc.ddsCaps.dwCaps);
+
+        desc.ddsCaps.dwCaps = DDSCAPS_FLIP;
+        hr = IDirectDrawSurface7_GetAttachedSurface(backbuffer, &desc.ddsCaps, &backbuffer2);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+        hr = IDirectDrawSurface7_GetSurfaceDesc(backbuffer2, &desc);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        todo_wine ok(desc.dwFlags == (DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH | DDSD_PIXELFORMAT),
+                "Got flags %#lx.\n", desc.dwFlags);
+        todo_wine ok(desc.ddsCaps.dwCaps == (DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY | DDSCAPS_OFFSCREENPLAIN
+                | DDSCAPS_FLIP), "Got caps %#lx.\n", desc.ddsCaps.dwCaps);
+
+        desc.ddsCaps.dwCaps = DDSCAPS_VIDEOMEMORY;
+        hr = IDirectDrawSurface7_GetAttachedSurface(backbuffer2, &desc.ddsCaps, &backbuffer3);
+        todo_wine_if (tests[i].compression) ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        if (hr == S_OK)
+        {
+            ok(backbuffer3 == frontbuffer, "Expected only 2 backbuffers.\n");
+            IDirectDrawSurface7_Release(backbuffer3);
+        }
+
+        IDirectDrawSurface7_Release(backbuffer2);
+        IDirectDrawSurface7_Release(backbuffer);
+
+        hr = IDirectDrawSurface7_GetDDInterface(frontbuffer, (void **)&ddraw);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        if (prev_ddraw)
+        {
+            ok(ddraw == prev_ddraw, "Expected the same ddraw object.\n");
+            IDirectDraw7_Release(ddraw);
+        }
+        else
+        {
+            prev_ddraw = ddraw;
+        }
+
+        /* AllocateSurface does *not* give the application a reference to the
+         * surface. */
+
+        IDirectDrawSurface7_AddRef(frontbuffer);
+
+        hr = IVMRSurfaceAllocator_FreeSurface(allocator, 0);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+        ref = IDirectDrawSurface7_Release(frontbuffer);
+        ok(!ref, "Got outstanding refcount %ld.\n", ref);
+
+        winetest_pop_context();
+    }
+
+    ref = IVMRSurfaceAllocator_Release(allocator);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IDirectDraw7_Release(prev_ddraw);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
 START_TEST(vmr7)
 {
     CoInitialize(NULL);
@@ -3162,6 +3342,7 @@ START_TEST(vmr7)
     test_basic_video();
     test_windowless_size();
     test_unconnected_eos();
+    test_default_presenter_allocate();
 
     CoUninitialize();
 }

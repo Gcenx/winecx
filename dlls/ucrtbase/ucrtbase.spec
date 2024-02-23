@@ -48,14 +48,15 @@
 @ cdecl __AdjustPointer(ptr ptr)
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
-@ stdcall -arch=x86_64,arm,arm64 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxDetectRethrow(ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxExceptionFilter(ptr ptr long ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) __CxxFrameHandler
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) __CxxFrameHandler
+@ stdcall -arch=!i386 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
+@ cdecl __CxxDetectRethrow(ptr)
+@ cdecl __CxxExceptionFilter(ptr ptr long ptr)
+@ cdecl -norelay __CxxFrameHandler(ptr ptr ptr ptr)
+@ cdecl -norelay __CxxFrameHandler2(ptr ptr ptr ptr) __CxxFrameHandler
+@ cdecl -norelay __CxxFrameHandler3(ptr ptr ptr ptr) __CxxFrameHandler
+@ cdecl -arch=x86_64 __CxxFrameHandler4(ptr long ptr ptr)
 @ stdcall -arch=i386 __CxxLongjmpUnwind(ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxQueryExceptionSize()
+@ cdecl __CxxQueryExceptionSize()
 @ cdecl __CxxRegisterExceptionObject(ptr ptr)
 @ cdecl __CxxUnregisterExceptionObject(ptr long)
 @ cdecl __DestructExceptionObject(ptr)
@@ -93,13 +94,13 @@
 @ cdecl __fpecode()
 @ cdecl __initialize_lconv_for_unsigned_char() __lconv_init
 @ cdecl __intrinsic_abnormal_termination()
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __intrinsic_setjmp(ptr) MSVCRT__setjmp
-@ cdecl -arch=x86_64,arm,arm64 -norelay __intrinsic_setjmpex(ptr ptr) __wine_setjmpex
+@ cdecl -norelay __intrinsic_setjmp(ptr) MSVCRT__setjmp
+@ cdecl -arch=!i386 -norelay __intrinsic_setjmpex(ptr ptr) __wine_setjmpex
 @ cdecl __isascii(long)
 @ cdecl __iscsym(long)
 @ cdecl __iscsymf(long)
-@ stub __iswcsym
-@ stub __iswcsymf
+@ cdecl __iswcsym(long)
+@ cdecl __iswcsymf(long)
 @ stdcall -arch=arm __jump_unwind(ptr ptr) ntdll.__jump_unwind
 @ cdecl -arch=i386 -norelay __libm_sse2_acos()
 @ cdecl -arch=i386 -norelay __libm_sse2_acosf()
@@ -236,8 +237,8 @@
 @ cdecl _control87(long long)
 @ cdecl _controlfp(long long)
 @ cdecl _controlfp_s(ptr long long)
-@ cdecl _copysign(double double)
-@ cdecl _copysignf(float float)
+@ cdecl _copysign(double double) copysign
+@ cdecl _copysignf(float float) copysignf
 @ cdecl _cputs(str)
 @ cdecl _cputws(wstr)
 @ cdecl _creat(str long)
@@ -327,7 +328,7 @@
 @ cdecl _flushall()
 @ cdecl _fpclass(double)
 @ cdecl -arch=!i386 _fpclassf(float)
-@ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr)
+@ cdecl _fpieee_flt(long ptr ptr)
 @ cdecl _fpreset()
 @ cdecl _fputc_nolock(long ptr)
 @ cdecl _fputchar(long)
@@ -557,7 +558,7 @@
 @ cdecl -arch=i386 -norelay _libm_sse2_sqrt_precise() __libm_sse2_sqrt_precise
 @ cdecl -arch=i386 -norelay _libm_sse2_tan_precise() __libm_sse2_tan
 @ cdecl _loaddll(str)
-@ cdecl -arch=x86_64,arm64 _local_unwind(ptr ptr)
+@ cdecl -arch=win64 _local_unwind(ptr ptr)
 @ cdecl -arch=i386 _local_unwind2(ptr long)
 @ cdecl -arch=i386 _local_unwind4(ptr ptr long)
 @ cdecl _localtime32(ptr)
@@ -567,8 +568,8 @@
 @ cdecl _lock_file(ptr)
 @ cdecl _lock_locales()
 @ cdecl _locking(long long long)
-@ cdecl _logb(double)
-@ cdecl -arch=!i386 _logbf(float)
+@ cdecl _logb(double) logb
+@ cdecl -arch=!i386 _logbf(float) logbf
 @ cdecl -arch=i386 _longjmpex(ptr long) MSVCRT_longjmp
 @ cdecl _lrotl(long long) MSVCRT__lrotl
 @ cdecl _lrotr(long long) MSVCRT__lrotr
@@ -608,9 +609,9 @@
 @ cdecl _mbctombb_l(long ptr)
 @ cdecl _mbctoupper(long)
 @ cdecl _mbctoupper_l(long ptr)
-@ stub _mblen_l
+@ cdecl _mblen_l(str long ptr)
 @ cdecl _mbsbtype(str long)
-@ stub _mbsbtype_l
+@ cdecl _mbsbtype_l(str long ptr)
 @ cdecl _mbscat_s(ptr long str)
 @ cdecl _mbscat_s_l(ptr long str ptr)
 @ cdecl _mbschr(str long)
@@ -624,7 +625,7 @@
 @ cdecl _mbscspn(str str)
 @ cdecl _mbscspn_l(str str ptr)
 @ cdecl _mbsdec(ptr ptr)
-@ stub _mbsdec_l
+@ cdecl _mbsdec_l(ptr ptr ptr)
 @ cdecl _mbsdup(str) _strdup
 @ cdecl _mbsicmp(str str)
 @ cdecl _mbsicmp_l(str str ptr)
@@ -635,49 +636,49 @@
 @ cdecl _mbslen(str)
 @ cdecl _mbslen_l(str ptr)
 @ cdecl _mbslwr(str)
-@ stub _mbslwr_l
+@ cdecl _mbslwr_l(str ptr)
 @ cdecl _mbslwr_s(str long)
 @ cdecl _mbslwr_s_l(str long ptr)
 @ cdecl _mbsnbcat(str str long)
-@ stub _mbsnbcat_l
+@ cdecl _mbsnbcat_l(str str long ptr)
 @ cdecl _mbsnbcat_s(str long ptr long)
-@ stub _mbsnbcat_s_l
+@ cdecl _mbsnbcat_s_l(str long ptr long ptr)
 @ cdecl _mbsnbcmp(str str long)
-@ stub _mbsnbcmp_l
+@ cdecl _mbsnbcmp_l(str str long ptr)
 @ cdecl _mbsnbcnt(ptr long)
-@ stub _mbsnbcnt_l
+@ cdecl _mbsnbcnt_l(ptr long ptr)
 @ cdecl _mbsnbcoll(str str long)
 @ cdecl _mbsnbcoll_l(str str long ptr)
 @ cdecl _mbsnbcpy(ptr str long)
-@ stub _mbsnbcpy_l
+@ cdecl _mbsnbcpy_l(ptr str long ptr)
 @ cdecl _mbsnbcpy_s(ptr long str long)
 @ cdecl _mbsnbcpy_s_l(ptr long str long ptr)
 @ cdecl _mbsnbicmp(str str long)
-@ stub _mbsnbicmp_l
+@ cdecl _mbsnbicmp_l(str str long ptr)
 @ cdecl _mbsnbicoll(str str long)
 @ cdecl _mbsnbicoll_l(str str long ptr)
 @ cdecl _mbsnbset(ptr long long)
-@ stub _mbsnbset_l
+@ cdecl _mbsnbset_l(str long long ptr)
 @ stub _mbsnbset_s
 @ stub _mbsnbset_s_l
 @ cdecl _mbsncat(str str long)
-@ stub _mbsncat_l
+@ cdecl _mbsncat_l(str str long ptr)
 @ stub _mbsncat_s
 @ stub _mbsncat_s_l
 @ cdecl _mbsnccnt(str long)
-@ stub _mbsnccnt_l
+@ cdecl _mbsnccnt_l(str long ptr)
 @ cdecl _mbsncmp(str str long)
-@ stub _mbsncmp_l
+@ cdecl _mbsncmp_l(str str long ptr)
 @ stub _mbsncoll(str str long)
 @ stub _mbsncoll_l
 @ cdecl _mbsncpy(ptr str long)
-@ stub _mbsncpy_l
+@ cdecl _mbsncpy_l(ptr str long ptr)
 @ stub _mbsncpy_s
 @ stub _mbsncpy_s_l
 @ cdecl _mbsnextc(str)
 @ cdecl _mbsnextc_l(str ptr)
 @ cdecl _mbsnicmp(str str long)
-@ stub _mbsnicmp_l
+@ cdecl _mbsnicmp_l(str str long ptr)
 @ stub _mbsnicoll(str str long)
 @ stub _mbsnicoll_l
 @ cdecl _mbsninc(str long)
@@ -685,23 +686,23 @@
 @ cdecl _mbsnlen(str long)
 @ cdecl _mbsnlen_l(str long ptr)
 @ cdecl _mbsnset(ptr long long)
-@ stub _mbsnset_l
+@ cdecl _mbsnset_l(ptr long long ptr)
 @ stub _mbsnset_s
 @ stub _mbsnset_s_l
 @ cdecl _mbspbrk(str str)
-@ stub _mbspbrk_l
+@ cdecl _mbspbrk_l(str str ptr)
 @ cdecl _mbsrchr(str long)
-@ stub _mbsrchr_l
+@ cdecl _mbsrchr_l(str long ptr)
 @ cdecl _mbsrev(str)
-@ stub _mbsrev_l
+@ cdecl _mbsrev_l(str ptr)
 @ cdecl _mbsset(ptr long)
-@ stub _mbsset_l
+@ cdecl _mbsset_l(ptr long ptr)
 @ stub _mbsset_s
 @ stub _mbsset_s_l
 @ cdecl _mbsspn(str str)
 @ cdecl _mbsspn_l(str str ptr)
 @ cdecl _mbsspnp(str str)
-@ stub _mbsspnp_l
+@ cdecl _mbsspnp_l(str str ptr)
 @ cdecl _mbsstr(str str)
 @ stub _mbsstr_l
 @ cdecl _mbstok(str str)
@@ -715,7 +716,7 @@
 @ stub _mbstrnlen
 @ stub _mbstrnlen_l
 @ cdecl _mbsupr(str)
-@ stub _mbsupr_l
+@ cdecl _mbsupr_l(str ptr)
 @ cdecl _mbsupr_s(str long)
 @ cdecl _mbsupr_s_l(str long ptr)
 @ cdecl _mbtowc_l(ptr str long ptr)
@@ -730,8 +731,8 @@
 @ cdecl _mktime32(ptr)
 @ cdecl _mktime64(ptr)
 @ cdecl _msize(ptr)
-@ cdecl _nextafter(double double)
-@ cdecl -arch=x86_64 _nextafterf(float float)
+@ cdecl _nextafter(double double) nextafter
+@ cdecl -arch=x86_64 _nextafterf(float float) nextafterf
 @ cdecl -arch=i386 _o__CIacos() _CIacos
 @ cdecl -arch=i386 _o__CIasin() _CIasin
 @ cdecl -arch=i386 _o__CIatan() _CIatan
@@ -1141,8 +1142,8 @@
 @ cdecl _o__localtime64_s(ptr ptr) _localtime64_s
 @ cdecl _o__lock_file(ptr) _lock_file
 @ cdecl _o__locking(long long long) _locking
-@ cdecl _o__logb(double) _logb
-@ cdecl -arch=!i386 _o__logbf(float) _logbf
+@ cdecl _o__logb(double) logb
+@ cdecl -arch=!i386 _o__logbf(float) logbf
 @ cdecl _o__lsearch(ptr ptr ptr long ptr) _lsearch
 @ stub _o__lsearch_s
 @ cdecl _o__lseek(long long long) _lseek
@@ -1178,9 +1179,9 @@
 @ cdecl _o__mbctombb_l(long ptr) _mbctombb_l
 @ cdecl _o__mbctoupper(long) _mbctoupper
 @ cdecl _o__mbctoupper_l(long ptr) _mbctoupper_l
-@ stub _o__mblen_l
+@ cdecl _o__mblen_l(str long ptr) _mblen_l
 @ cdecl _o__mbsbtype(str long) _mbsbtype
-@ stub _o__mbsbtype_l
+@ cdecl _o__mbsbtype_l(str long ptr) _mbsbtype_l
 @ cdecl _o__mbscat_s(ptr long str) _mbscat_s
 @ cdecl _o__mbscat_s_l(ptr long str ptr) _mbscat_s_l
 @ cdecl _o__mbschr(str long) _mbschr
@@ -1194,7 +1195,7 @@
 @ cdecl _o__mbscspn(str str) _mbscspn
 @ cdecl _o__mbscspn_l(str str ptr) _mbscspn_l
 @ cdecl _o__mbsdec(ptr ptr) _mbsdec
-@ stub _o__mbsdec_l
+@ cdecl _o__mbsdec_l(ptr ptr ptr) _mbsdec_l
 @ cdecl _o__mbsicmp(str str) _mbsicmp
 @ cdecl _o__mbsicmp_l(str str ptr) _mbsicmp_l
 @ cdecl _o__mbsicoll(str str) _mbsicoll
@@ -1204,49 +1205,49 @@
 @ cdecl _o__mbslen(str) _mbslen
 @ cdecl _o__mbslen_l(str ptr) _mbslen_l
 @ cdecl _o__mbslwr(str) _mbslwr
-@ stub _o__mbslwr_l
+@ cdecl _o__mbslwr_l(str ptr) _mbslwr_l
 @ cdecl _o__mbslwr_s(str long) _mbslwr_s
 @ cdecl _o__mbslwr_s_l(str long ptr) _mbslwr_s_l
 @ cdecl _o__mbsnbcat(str str long) _mbsnbcat
-@ stub _o__mbsnbcat_l
+@ cdecl _o__mbsnbcat_l(str str long ptr) _mbsnbcat_l
 @ cdecl _o__mbsnbcat_s(str long ptr long) _mbsnbcat_s
-@ stub _o__mbsnbcat_s_l
+@ cdecl _o__mbsnbcat_s_l(str long ptr long ptr) _mbsnbcat_s_l
 @ cdecl _o__mbsnbcmp(str str long) _mbsnbcmp
-@ stub _o__mbsnbcmp_l
+@ cdecl _o_mbsnbcmp_l(str str long ptr) _mbsnbcmp_l
 @ cdecl _o__mbsnbcnt(ptr long) _mbsnbcnt
-@ stub _o__mbsnbcnt_l
+@ cdecl _o__mbsnbcnt_l(ptr long ptr) _mbsnbcnt_l
 @ cdecl _o__mbsnbcoll(str str long) _mbsnbcoll
 @ cdecl _o__mbsnbcoll_l(str str long ptr) _mbsnbcoll_l
 @ cdecl _o__mbsnbcpy(ptr str long) _mbsnbcpy
-@ stub _o__mbsnbcpy_l
+@ cdecl _o__mbsnbcpy_l(ptr str long ptr) _mbsnbcpy_l
 @ cdecl _o__mbsnbcpy_s(ptr long str long) _mbsnbcpy_s
 @ cdecl _o__mbsnbcpy_s_l(ptr long str long ptr) _mbsnbcpy_s_l
 @ cdecl _o__mbsnbicmp(str str long) _mbsnbicmp
-@ stub _o__mbsnbicmp_l
+@ cdecl _o__mbsnbicmp_l(str str long ptr) _mbsnbicmp_l
 @ cdecl _o__mbsnbicoll(str str long) _mbsnbicoll
 @ cdecl _o__mbsnbicoll_l(str str long ptr) _mbsnbicoll_l
 @ cdecl _o__mbsnbset(ptr long long) _mbsnbset
-@ stub _o__mbsnbset_l
+@ cdecl _o__mbsnbset_l(str long long ptr) _mbsnbset_l
 @ stub _o__mbsnbset_s
 @ stub _o__mbsnbset_s_l
 @ cdecl _o__mbsncat(str str long) _mbsncat
-@ stub _o__mbsncat_l
+@ cdecl _o__mbsncat_l(str str long ptr) _mbsncat_l
 @ stub _o__mbsncat_s
 @ stub _o__mbsncat_s_l
 @ cdecl _o__mbsnccnt(str long) _mbsnccnt
-@ stub _o__mbsnccnt_l
+@ cdecl _o__mbsnccnt_l(str long ptr) _mbsnccnt_l
 @ cdecl _o__mbsncmp(str str long) _mbsncmp
-@ stub _o__mbsncmp_l
+@ cdecl _o__mbsncmp_l(str str long ptr) _mbsncmp_l
 @ stub _o__mbsncoll
 @ stub _o__mbsncoll_l
 @ cdecl _o__mbsncpy(ptr str long) _mbsncpy
-@ stub _o__mbsncpy_l
+@ cdecl _o__mbsncpy_l(ptr str long ptr) _mbsncpy_l
 @ stub _o__mbsncpy_s
 @ stub _o__mbsncpy_s_l
 @ cdecl _o__mbsnextc(str) _mbsnextc
 @ cdecl _o__mbsnextc_l(str ptr) _mbsnextc_l
 @ cdecl _o__mbsnicmp(str str long) _mbsnicmp
-@ stub _o__mbsnicmp_l
+@ cdecl _o__mbsnicmp_l(str str long ptr) _mbsnicmp_l
 @ stub _o__mbsnicoll
 @ stub _o__mbsnicoll_l
 @ cdecl _o__mbsninc(str long) _mbsninc
@@ -1254,23 +1255,23 @@
 @ cdecl _o__mbsnlen(str long) _mbsnlen
 @ cdecl _o__mbsnlen_l(str long ptr) _mbsnlen_l
 @ cdecl _o__mbsnset(ptr long long) _mbsnset
-@ stub _o__mbsnset_l
+@ cdecl _o__mbsnset_l(ptr long long ptr) _mbsnset_l
 @ stub _o__mbsnset_s
 @ stub _o__mbsnset_s_l
 @ cdecl _o__mbspbrk(str str) _mbspbrk
-@ stub _o__mbspbrk_l
+@ cdecl _o__mbspbrk_l(str str ptr) _mbspbrk_l
 @ cdecl _o__mbsrchr(str long) _mbsrchr
-@ stub _o__mbsrchr_l
+@ cdecl _o__mbsrchr_l(str long ptr) _mbsrchr_l
 @ cdecl _o__mbsrev(str) _mbsrev
-@ stub _o__mbsrev_l
+@ cdecl _o__mbsrev_l(str ptr) _mbsrev_l
 @ cdecl _o__mbsset(ptr long) _mbsset
-@ stub _o__mbsset_l
+@ cdecl _o__mbsset_l(ptr long ptr) _mbsset_l
 @ stub _o__mbsset_s
 @ stub _o__mbsset_s_l
 @ cdecl _o__mbsspn(str str) _mbsspn
 @ cdecl _o__mbsspn_l(str str ptr) _mbsspn_l
 @ cdecl _o__mbsspnp(str str) _mbsspnp
-@ stub _o__mbsspnp_l
+@ cdecl _o__mbsspnp_l(str str ptr) _mbsspnp_l
 @ cdecl _o__mbsstr(str str) _mbsstr
 @ stub _o__mbsstr_l
 @ cdecl _o__mbstok(str str) _mbstok
@@ -1284,7 +1285,7 @@
 @ stub _o__mbstrnlen
 @ stub _o__mbstrnlen_l
 @ cdecl _o__mbsupr(str) _mbsupr
-@ stub _o__mbsupr_l
+@ cdecl _o__mbsupr_l(str ptr) _mbsupr_l
 @ cdecl _o__mbsupr_s(str long) _mbsupr_s
 @ cdecl _o__mbsupr_s_l(str long ptr) _mbsupr_s_l
 @ cdecl _o__mbtowc_l(ptr str long ptr) _mbtowc_l
@@ -1298,8 +1299,8 @@
 @ cdecl _o__mktime32(ptr) _mktime32
 @ cdecl _o__mktime64(ptr) _mktime64
 @ cdecl _o__msize(ptr) _msize
-@ cdecl _o__nextafter(double double) _nextafter
-@ cdecl -arch=x86_64 _o__nextafterf(float float) _nextafterf
+@ cdecl _o__nextafter(double double) nextafter
+@ cdecl -arch=x86_64 _o__nextafterf(float float) nextafterf
 @ cdecl _o__open_osfhandle(long long) _open_osfhandle
 @ cdecl _o__pclose(ptr) _pclose
 @ cdecl _o__pipe(ptr long long) _pipe
@@ -1561,12 +1562,12 @@
 @ cdecl _o_abort() abort
 @ cdecl _o_acos(double) acos
 @ cdecl -arch=!i386 _o_acosf(float) acosf
-@ cdecl _o_acosh(double) acosh
-@ cdecl _o_acoshf(float) acoshf
-@ cdecl _o_acoshl(double) acosh
+@ cdecl _o_acosh(double) MSVCRT_acosh
+@ cdecl _o_acoshf(float) MSVCRT_acoshf
+@ cdecl _o_acoshl(double) MSVCRT_acosh
 @ cdecl _o_asctime(ptr) asctime
 @ cdecl _o_asctime_s(ptr long ptr) asctime_s
-@ cdecl _o_asin(double) asin
+@ cdecl _o_asin(double) MSVCRT_asin
 @ cdecl -arch=!i386 _o_asinf(float) asinf
 @ cdecl _o_asinh(double) asinh
 @ cdecl _o_asinhf(float) asinhf
@@ -1575,9 +1576,9 @@
 @ cdecl _o_atan2(double double) atan2
 @ cdecl -arch=!i386 _o_atan2f(float float) atan2f
 @ cdecl -arch=!i386 _o_atanf(float) atanf
-@ cdecl _o_atanh(double) atanh
-@ cdecl _o_atanhf(float) atanhf
-@ cdecl _o_atanhl(double) atanh
+@ cdecl _o_atanh(double) MSVCRT_atanh
+@ cdecl _o_atanhf(float) MSVCRT_atanhf
+@ cdecl _o_atanhl(double) MSVCRT_atanh
 @ cdecl _o_atof(str) atof
 @ cdecl _o_atoi(str) atoi
 @ cdecl _o_atol(str) atol
@@ -1698,9 +1699,9 @@
 @ cdecl _o_log2(double) log2
 @ cdecl _o_log2f(float) log2f
 @ cdecl _o_log2l(double) log2
-@ cdecl _o_logb(double) _logb
-@ cdecl _o_logbf(float) _logbf
-@ cdecl _o_logbl(double) _logb
+@ cdecl _o_logb(double) logb
+@ cdecl _o_logbf(float) logbf
+@ cdecl _o_logbl(double) logb
 @ cdecl -arch=!i386 _o_logf(float) logf
 @ cdecl _o_lrint(double) lrint
 @ cdecl _o_lrintf(float) lrintf
@@ -1729,12 +1730,12 @@
 @ cdecl _o_nearbyint(double) nearbyint
 @ cdecl _o_nearbyintf(float) nearbyintf
 @ cdecl _o_nearbyintl(double) nearbyint
-@ cdecl _o_nextafter(double double) _nextafter
-@ cdecl _o_nextafterf(float float) _nextafterf
-@ cdecl _o_nextafterl(double double) _nextafter
-@ cdecl _o_nexttoward(double double) MSVCRT_nexttoward
-@ cdecl _o_nexttowardf(float double) MSVCRT_nexttowardf
-@ cdecl _o_nexttowardl(double double) MSVCRT_nexttoward
+@ cdecl _o_nextafter(double double) nextafter
+@ cdecl _o_nextafterf(float float) nextafterf
+@ cdecl _o_nextafterl(double double) nextafter
+@ cdecl _o_nexttoward(double double) __nexttoward
+@ cdecl _o_nexttowardf(float double) __nexttowardf
+@ cdecl _o_nexttowardl(double double) __nexttoward
 @ cdecl _o_pow(double double) pow
 @ cdecl -arch=!i386 _o_powf(float float) powf
 @ cdecl _o_putc(long ptr) putc
@@ -1757,9 +1758,9 @@
 @ cdecl _o_remquol(double double ptr) remquo
 @ cdecl _o_rename(str str) rename
 @ cdecl _o_rewind(ptr) rewind
-@ cdecl _o_rint(double) rint
+@ cdecl _o_rint(double) MSVCRT_rint
 @ cdecl _o_rintf(float) rintf
-@ cdecl _o_rintl(double) rint
+@ cdecl _o_rintl(double) MSVCRT_rint
 @ cdecl _o_round(double) round
 @ cdecl _o_roundf(float) roundf
 @ cdecl _o_roundl(double) round
@@ -1777,8 +1778,8 @@
 @ cdecl -arch=!i386 _o_sinf(float) sinf
 @ cdecl _o_sinh(double) sinh
 @ cdecl -arch=!i386 _o_sinhf(float) sinhf
-@ cdecl _o_sqrt(double) sqrt
-@ cdecl -arch=!i386 _o_sqrtf(float) sqrtf
+@ cdecl _o_sqrt(double) MSVCRT_sqrt
+@ cdecl -arch=!i386 _o_sqrtf(float) MSVCRT_sqrtf
 @ cdecl _o_srand(long) srand
 @ cdecl _o_strcat_s(str long str) strcat_s
 @ cdecl _o_strcoll(str str) strcoll
@@ -1876,7 +1877,7 @@
 @ cdecl -arch=x86_64 _scalbf(float long)
 @ cdecl _searchenv(str str ptr)
 @ cdecl _searchenv_s(str str ptr long)
-@ cdecl -arch=i386,x86_64,arm,arm64 _seh_filter_dll(long ptr) __CppXcptFilter
+@ cdecl _seh_filter_dll(long ptr) __CppXcptFilter
 @ cdecl _seh_filter_exe(long ptr) _XcptFilter
 @ cdecl -arch=win64 _set_FMA3_enable(long)
 @ stdcall -arch=i386 _seh_longjmp_unwind4(ptr)
@@ -2155,12 +2156,12 @@
 @ cdecl abs(long)
 @ cdecl acos(double)
 @ cdecl -arch=!i386 acosf(float)
-@ cdecl acosh(double)
-@ cdecl acoshf(float)
-@ cdecl acoshl(double) acosh
+@ cdecl acosh(double) MSVCRT_acosh
+@ cdecl acoshf(float) MSVCRT_acoshf
+@ cdecl acoshl(double) MSVCRT_acosh
 @ cdecl asctime(ptr)
 @ cdecl asctime_s(ptr long ptr)
-@ cdecl asin(double)
+@ cdecl asin(double) MSVCRT_asin
 @ cdecl -arch=!i386 asinf(float)
 @ cdecl asinh(double)
 @ cdecl asinhf(float)
@@ -2169,9 +2170,9 @@
 @ cdecl atan2(double double)
 @ cdecl -arch=!i386 atan2f(float float)
 @ cdecl -arch=!i386 atanf(float)
-@ cdecl atanh(double)
-@ cdecl atanhf(float)
-@ cdecl atanhl(double) atanh
+@ cdecl atanh(double) MSVCRT_atanh
+@ cdecl atanhf(float) MSVCRT_atanhf
+@ cdecl atanhl(double) MSVCRT_atanh
 @ cdecl atof(str)
 @ cdecl atoi(str)
 @ cdecl atol(str)
@@ -2235,9 +2236,9 @@
 @ stub conj
 @ stub conjf
 @ stub conjl
-@ cdecl copysign(double double) _copysign
-@ cdecl copysignf(float float) _copysignf
-@ cdecl copysignl(double double) _copysign
+@ cdecl copysign(double double)
+@ cdecl copysignf(float float)
+@ cdecl copysignl(double double) copysign
 @ cdecl cos(double)
 @ cdecl -arch=!i386 cosf(float)
 @ cdecl cosh(double)
@@ -2400,11 +2401,11 @@
 @ cdecl log2(double)
 @ cdecl log2f(float)
 @ cdecl log2l(double) log2
-@ cdecl logb(double) _logb
-@ cdecl logbf(float) _logbf
-@ cdecl logbl(double) _logb
+@ cdecl logb(double)
+@ cdecl logbf(float)
+@ cdecl logbl(double) logb
 @ cdecl -arch=!i386 logf(float)
-@ cdecl -arch=i386,x86_64,arm,arm64 longjmp(ptr long) MSVCRT_longjmp
+@ cdecl longjmp(ptr long) MSVCRT_longjmp
 @ cdecl lrint(double)
 @ cdecl lrintf(float)
 @ cdecl lrintl(double) lrint
@@ -2437,12 +2438,12 @@
 @ cdecl nearbyint(double)
 @ cdecl nearbyintf(float)
 @ cdecl nearbyintl(double) nearbyint
-@ cdecl nextafter(double double) _nextafter
-@ cdecl nextafterf(float float) _nextafterf
-@ cdecl nextafterl(double double) _nextafter
-@ cdecl nexttoward(double double) MSVCRT_nexttoward
-@ cdecl nexttowardf(float double) MSVCRT_nexttowardf
-@ cdecl nexttowardl(double double) MSVCRT_nexttoward
+@ cdecl nextafter(double double)
+@ cdecl nextafterf(float float)
+@ cdecl nextafterl(double double) nextafter
+@ cdecl nexttoward(double double) __nexttoward
+@ cdecl nexttowardf(float double) __nexttowardf
+@ cdecl nexttowardl(double double) __nexttoward
 @ stub norm
 @ stub normf
 @ stub norml
@@ -2469,10 +2470,11 @@
 @ cdecl remquof(float float ptr)
 @ cdecl remquol(double double ptr) remquo
 @ cdecl rename(str str)
-@ cdecl rewind(ptr)
-@ cdecl rint(double)
+@ cdecl -arch=i386 rewind(ptr) rewind_preserve_stack
+@ cdecl -arch=!i386 rewind(ptr)
+@ cdecl rint(double) MSVCRT_rint
 @ cdecl rintf(float)
-@ cdecl rintl(double) rint
+@ cdecl rintl(double) MSVCRT_rint
 @ cdecl round(double)
 @ cdecl roundf(float)
 @ cdecl roundl(double) round
@@ -2493,8 +2495,8 @@
 @ cdecl -arch=!i386 sinf(float)
 @ cdecl sinh(double)
 @ cdecl -arch=!i386 sinhf(float)
-@ cdecl sqrt(double)
-@ cdecl -arch=!i386 sqrtf(float)
+@ cdecl sqrt(double) MSVCRT_sqrt
+@ cdecl -arch=!i386 sqrtf(float) MSVCRT_sqrtf
 @ cdecl srand(long)
 @ cdecl strcat(str str)
 @ cdecl strcat_s(str long str)

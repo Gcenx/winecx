@@ -33,6 +33,24 @@
 
 #define TIMEOUT_INFINITE _I64_MAX
 
+static HANDLE create_process(const char *arg)
+{
+    STARTUPINFOA si = { 0 };
+    PROCESS_INFORMATION pi;
+    char cmdline[MAX_PATH];
+    char **argv;
+    BOOL ret;
+
+    si.cb = sizeof(si);
+    winetest_get_mainargs(&argv);
+    sprintf(cmdline, "%s %s %s", argv[0], argv[1], arg);
+    ret = CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "got %lu.\n", GetLastError());
+    ret = CloseHandle(pi.hThread);
+    ok(ret, "got %lu.\n", GetLastError());
+    return pi.hProcess;
+}
+
 static void tcp_socketpair_flags(SOCKET *src, SOCKET *dst, DWORD flags)
 {
     SOCKET server = INVALID_SOCKET;
@@ -569,13 +587,7 @@ static void test_poll(void)
 
         ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
         ok(ret == -1, "got %d\n", ret);
-        todo_wine ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        if (WSAGetLastError() == WSAECONNABORTED)
-        {
-            ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
-            ok(ret == -1, "got %d\n", ret);
-            ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        }
+        ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
 
         /* A subsequent poll call returns no events, or times out. However, this
          * can't be reliably tested, as e.g. Linux will fail the connection
@@ -1435,7 +1447,7 @@ static void test_recv(void)
     ret = listen(listener, 1);
     ok(!ret, "got error %u\n", WSAGetLastError());
     len = sizeof(addr);
-    ret = getsockname(listener, (struct sockaddr *)&addr, &len);
+    ret = getsockname(listener, &addr, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
 
     memset(&io, 0, sizeof(io));
@@ -1445,7 +1457,7 @@ static void test_recv(void)
     ok(!io.Information, "got information %#Ix\n", io.Information);
 
     client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
+    ret = connect(client, &addr, sizeof(addr));
     ok(!ret, "got error %u\n", WSAGetLastError());
     server = accept(listener, NULL, NULL);
     ok(server != -1, "got error %u\n", WSAGetLastError());
@@ -1723,7 +1735,7 @@ static void test_recv(void)
     ret = bind(client, (const struct sockaddr *)&bind_addr, sizeof(bind_addr));
     ok(!ret, "got error %u\n", WSAGetLastError());
     len = sizeof(addr);
-    ret = getsockname(client, (struct sockaddr *)&addr, &len);
+    ret = getsockname(client, &addr, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
 
     memset(buffer, 0xcc, sizeof(buffer));
@@ -1731,7 +1743,7 @@ static void test_recv(void)
             IOCTL_AFD_RECV, &params, sizeof(params), NULL, 0);
     ok(ret == STATUS_PENDING, "got %#x\n", ret);
 
-    ret = sendto(server, "data", 5, 0, (struct sockaddr *)&addr, sizeof(addr));
+    ret = sendto(server, "data", 5, 0, &addr, sizeof(addr));
     ok(ret == 5, "got %d\n", ret);
 
     ret = WaitForSingleObject(event, 200);
@@ -1747,7 +1759,7 @@ static void test_recv(void)
             IOCTL_AFD_RECV, &params, sizeof(params), NULL, 0);
     ok(ret == STATUS_PENDING, "got %#x\n", ret);
 
-    ret = sendto(server, "moredata", 9, 0, (struct sockaddr *)&addr, sizeof(addr));
+    ret = sendto(server, "moredata", 9, 0, &addr, sizeof(addr));
     ok(ret == 9, "got %d\n", ret);
 
     ret = WaitForSingleObject(event, 200);
@@ -1756,7 +1768,7 @@ static void test_recv(void)
     ok(io.Information == 6, "got %#Ix\n", io.Information);
     ok(!memcmp(buffer, "mo\xccreda\xcc", 7), "got %s\n", debugstr_an(buffer, io.Information));
 
-    ret = sendto(server, "moredata", 9, 0, (struct sockaddr *)&addr, sizeof(addr));
+    ret = sendto(server, "moredata", 9, 0, &addr, sizeof(addr));
     ok(ret == 9, "got %d\n", ret);
 
     /* wait for the data to be available */
@@ -1957,6 +1969,20 @@ static void test_get_events(void)
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 
+    SetEvent(event);
+
+    memset(&params, 0xcc, sizeof(params));
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtDeviceIoControlFile((HANDLE)client, NULL, NULL, NULL, &io,
+            IOCTL_AFD_GET_EVENTS, event, 0, &params, sizeof(params));
+    ok(!ret, "got %#x\n", ret);
+    ok(!params.flags, "got flags %#x\n", params.flags);
+    for (i = 0; i < ARRAY_SIZE(params.status); ++i)
+        ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
+
+    ret = WaitForSingleObject(event, 0);
+    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
+
     closesocket(client);
     closesocket(server);
 
@@ -2032,17 +2058,20 @@ static void test_get_events_reset(void)
 
     tcp_socketpair(&client, &server);
 
-    ret = WSAEventSelect(client, event, FD_ACCEPT | FD_CONNECT | FD_CLOSE | FD_OOB | FD_READ | FD_WRITE);
+    ret = WSAEventSelect(client, event, FD_ACCEPT | FD_CLOSE | FD_OOB | FD_READ);
     ok(!ret, "got error %lu\n", GetLastError());
 
     close_with_rst(server);
+
+    ret = WaitForSingleObject(event, 1000);
+    ok(!ret, "got %d\n", ret);
 
     memset(&params, 0xcc, sizeof(params));
     memset(&io, 0xcc, sizeof(io));
     ret = NtDeviceIoControlFile((HANDLE)client, NULL, NULL, NULL, &io,
             IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
     ok(!ret, "got %#x\n", ret);
-    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_CONNECT | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    ok(params.flags == AFD_POLL_RESET, "got flags %#x\n", params.flags);
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 
@@ -2050,17 +2079,21 @@ static void test_get_events_reset(void)
 
     tcp_socketpair(&client, &server);
 
-    ret = WSAEventSelect(server, event, FD_ACCEPT | FD_CONNECT | FD_CLOSE | FD_OOB | FD_READ | FD_WRITE);
+    ResetEvent(event);
+    ret = WSAEventSelect(server, event, FD_ACCEPT | FD_CLOSE | FD_OOB | FD_READ);
     ok(!ret, "got error %lu\n", GetLastError());
 
     close_with_rst(client);
+
+    ret = WaitForSingleObject(event, 1000);
+    ok(!ret, "got %d\n", ret);
 
     memset(&params, 0xcc, sizeof(params));
     memset(&io, 0xcc, sizeof(io));
     ret = NtDeviceIoControlFile((HANDLE)server, NULL, NULL, NULL, &io,
             IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
     ok(!ret, "got %#x\n", ret);
-    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    ok(params.flags == AFD_POLL_RESET, "got flags %#x\n", params.flags);
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 
@@ -2287,6 +2320,12 @@ static void test_bind(void)
     todo_wine ok(ret == STATUS_PENDING, "got %#x\n", ret);
     ret = WaitForSingleObject(event, 0);
     ok(!ret, "got %#x\n", ret);
+    if (io.Status == STATUS_INVALID_ADDRESS_COMPONENT)
+    {
+        skip("IPv6 not supported\n");
+        closesocket(s);
+        goto cleanup;
+    }
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr6), "got %#Ix\n", io.Information);
     ok(addr6.sin6_family == AF_INET6, "got family %u\n", addr6.sin6_family);
@@ -2321,6 +2360,7 @@ static void test_bind(void)
     closesocket(s2);
     closesocket(s);
 
+cleanup:
     CloseHandle(event);
     free(params);
 }
@@ -2351,7 +2391,7 @@ static void test_getsockname(void)
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr), "got %#Ix\n", io.Information);
     len = sizeof(addr2);
-    ret = getsockname(client, (struct sockaddr *)&addr2, &len);
+    ret = getsockname(client, &addr2, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
     ok(!memcmp(&addr, &addr2, sizeof(struct sockaddr)), "addresses didn't match\n");
 
@@ -2363,7 +2403,7 @@ static void test_getsockname(void)
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr), "got %#Ix\n", io.Information);
     len = sizeof(addr2);
-    ret = getsockname(server, (struct sockaddr *)&addr2, &len);
+    ret = getsockname(server, &addr2, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
     ok(!memcmp(&addr, &addr2, sizeof(struct sockaddr)), "addresses didn't match\n");
 
@@ -2391,7 +2431,7 @@ static void test_getsockname(void)
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr), "got %#Ix\n", io.Information);
     len = sizeof(addr2);
-    ret = getsockname(client, (struct sockaddr *)&addr2, &len);
+    ret = getsockname(client, &addr2, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
     ok(!memcmp(&addr, &addr2, sizeof(struct sockaddr)), "addresses didn't match\n");
 
@@ -2463,11 +2503,11 @@ static NTSTATUS WINAPI thread_NtDeviceIoControlFile(BOOL kill_thread, HANDLE han
     return p.ret;
 }
 
-static unsigned int test_async_thread_termination_apc_count;
+static unsigned int test_apc_count;
 
-static void WINAPI test_async_thread_termination_apc( void *arg, IO_STATUS_BLOCK *iosb, ULONG reserved )
+static void WINAPI test_apc_proc( void *arg, IO_STATUS_BLOCK *iosb, ULONG reserved )
 {
-    ++test_async_thread_termination_apc_count;
+    ++test_apc_count;
 }
 
 static void test_async_thread_termination(void)
@@ -2485,18 +2525,18 @@ static void test_async_thread_termination(void)
         {TRUE,  TRUE, NULL, NULL},
         {FALSE, FALSE, NULL, NULL},
         {TRUE,  FALSE, NULL, NULL},
-        {FALSE, TRUE, test_async_thread_termination_apc, NULL},
-        {TRUE,  TRUE, test_async_thread_termination_apc, NULL},
-        {FALSE, FALSE, test_async_thread_termination_apc, NULL},
-        {TRUE,  FALSE, test_async_thread_termination_apc, NULL},
+        {FALSE, TRUE, test_apc_proc, NULL},
+        {TRUE,  TRUE, test_apc_proc, NULL},
+        {FALSE, FALSE, test_apc_proc, NULL},
+        {TRUE,  FALSE, test_apc_proc, NULL},
         {FALSE, TRUE, NULL, (void *)0xdeadbeef},
         {TRUE,  TRUE, NULL, (void *)0xdeadbeef},
         {FALSE, FALSE, NULL, (void *)0xdeadbeef},
         {TRUE,  FALSE, NULL, (void *)0xdeadbeef},
-        {FALSE, TRUE, test_async_thread_termination_apc, (void *)0xdeadbeef},
-        {TRUE,  TRUE, test_async_thread_termination_apc, (void *)0xdeadbeef},
-        {FALSE, FALSE, test_async_thread_termination_apc, (void *)0xdeadbeef},
-        {TRUE,  FALSE, test_async_thread_termination_apc, (void *)0xdeadbeef},
+        {FALSE, TRUE, test_apc_proc, (void *)0xdeadbeef},
+        {TRUE,  TRUE, test_apc_proc, (void *)0xdeadbeef},
+        {FALSE, FALSE, test_apc_proc, (void *)0xdeadbeef},
+        {TRUE,  FALSE, test_apc_proc, (void *)0xdeadbeef},
     };
 
     const struct sockaddr_in bind_addr = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
@@ -2549,7 +2589,7 @@ static void test_async_thread_termination(void)
     }
 
     SleepEx(0, TRUE);
-    ok(!test_async_thread_termination_apc_count, "got APC.\n");
+    ok(!test_apc_count, "got APC.\n");
 
     port = CreateIoCompletionPort((HANDLE)listener, NULL, 0, 0);
 
@@ -2753,11 +2793,155 @@ static void test_read_write(void)
     CloseHandle(event);
 }
 
+static void test_async_cancel_on_handle_close(void)
+{
+    static const struct
+    {
+        BOOL event;
+        PIO_APC_ROUTINE apc;
+        void *apc_context;
+    }
+    tests[] =
+    {
+        {TRUE, NULL, NULL},
+        {FALSE, NULL, NULL},
+        {TRUE, test_apc_proc, NULL},
+        {FALSE, test_apc_proc, NULL},
+        {TRUE, NULL, (void *)0xdeadbeef},
+        {FALSE, NULL, (void *)0xdeadbeef},
+        {TRUE, test_apc_proc, (void *)0xdeadbeef},
+        {FALSE, test_apc_proc, (void *)0xdeadbeef},
+    };
+
+    const struct sockaddr_in bind_addr = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    char in_buffer[offsetof(struct afd_poll_params, sockets[3])];
+    char out_buffer[offsetof(struct afd_poll_params, sockets[3])];
+    struct afd_poll_params *in_params = (struct afd_poll_params *)in_buffer;
+    struct afd_poll_params *out_params = (struct afd_poll_params *)out_buffer;
+    unsigned int i, other_process;
+    LARGE_INTEGER zero = {{0}};
+    HANDLE process_handle;
+    ULONG_PTR key, value;
+    IO_STATUS_BLOCK io;
+    HANDLE event, port;
+    ULONG params_size;
+    SOCKET listener;
+    HANDLE handle2;
+    DWORD ret;
+    BOOL bret;
+
+    process_handle = create_process("sleep");
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+
+    in_params->count = 1;
+    in_params->exclusive = FALSE;
+    in_params->sockets[0].flags = ~0;
+    in_params->sockets[0].status = 0xdeadbeef;
+    params_size = offsetof(struct afd_poll_params, sockets[1]);
+    in_params->timeout = -10 * 1000 * 1000 * 5;
+
+    for (other_process = 0; other_process < 2; ++other_process)
+    {
+        for (i = 0; i < ARRAY_SIZE(tests); ++i)
+        {
+            winetest_push_context("other_process %u, i %u", other_process, i);
+
+            listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            ret = bind(listener, (const struct sockaddr *)&bind_addr, sizeof(bind_addr));
+            ok(!ret, "got error %u\n", WSAGetLastError());
+            ret = listen(listener, 1);
+            ok(!ret, "got error %u\n", WSAGetLastError());
+
+            port = CreateIoCompletionPort((HANDLE)listener, NULL, 0, 0);
+            ok(!!port, "got %p.\n", port);
+
+            in_params->sockets[0].socket = listener;
+
+            memset(&io, 0xcc, sizeof(io));
+            ResetEvent(event);
+            ret = NtDeviceIoControlFile((HANDLE)listener, tests[i].event ? event : NULL,
+                    tests[i].apc, tests[i].apc_context, &io, IOCTL_AFD_POLL, in_params, params_size,
+                    out_params, params_size);
+            if (tests[i].apc)
+            {
+                ok(ret == STATUS_INVALID_PARAMETER, "got %#lx\n", ret);
+                winetest_pop_context();
+                continue;
+            }
+            ok(ret == STATUS_PENDING, "got %#lx.\n", ret);
+            ok(io.Status == 0xcccccccc, "got %#lx.\n", io.Status);
+
+            bret = DuplicateHandle(GetCurrentProcess(), (HANDLE)listener,
+                    other_process ? process_handle : GetCurrentProcess(),
+                    &handle2, 0, FALSE, DUPLICATE_SAME_ACCESS);
+            ok(bret, "failed, error %lu.\n", GetLastError());
+
+            closesocket(listener);
+
+            /* Canceled asyncs with completion port and no event do not update IOSB before removing completion. */
+            todo_wine_if(other_process && tests[i].apc_context && !tests[i].event)
+            ok(io.Status == 0xcccccccc, "got %#lx\n", io.Status);
+
+            memset(&io, 0xcc, sizeof(io));
+            key = 0xcc;
+            value = 0;
+            ret = NtRemoveIoCompletion(port, &key, &value, &io, &zero);
+            if (other_process && tests[i].apc_context && !tests[i].event)
+            {
+                ok(!ret, "got %#lx\n", ret);
+                ok(!key, "got key %#Ix\n", key);
+                ok(value == 0xdeadbeef, "got value %#Ix\n", value);
+                ok(io.Status == STATUS_CANCELLED, "got %#lx\n", io.Status);
+            }
+            else
+            {
+                ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
+            }
+
+            ret = WaitForSingleObject(event, 0);
+            ok(ret == WAIT_TIMEOUT, "got %#lx.\n", ret);
+
+            if (other_process)
+            {
+                bret = DuplicateHandle(process_handle, handle2, GetCurrentProcess(), (HANDLE *)&listener, 0, FALSE,
+                        DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE);
+                ok(bret, "failed, error %lu.\n", GetLastError());
+            }
+            else
+            {
+                listener = (SOCKET)handle2;
+            }
+
+            CloseHandle((HANDLE)listener);
+            CloseHandle(port);
+            winetest_pop_context();
+        }
+    }
+    CloseHandle(event);
+    TerminateProcess(process_handle, 0);
+    WaitForSingleObject(process_handle, INFINITE);
+    CloseHandle(process_handle);
+}
+
 START_TEST(afd)
 {
     WSADATA data;
+    char **argv;
+    int argc;
 
     WSAStartup(MAKEWORD(2, 2), &data);
+
+    argc = winetest_get_mainargs(&argv);
+    if (argc >= 3)
+    {
+        if (!strcmp(argv[2], "sleep"))
+        {
+            Sleep(5000);
+            return;
+        }
+        return;
+    }
 
     test_open_device();
     test_poll();
@@ -2772,6 +2956,7 @@ START_TEST(afd)
     test_getsockname();
     test_async_thread_termination();
     test_read_write();
+    test_async_cancel_on_handle_close();
 
     WSACleanup();
 }

@@ -28,9 +28,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 
-extern const unsigned short wine_linebreak_table[] DECLSPEC_HIDDEN;
-extern const unsigned short wine_scripts_table[] DECLSPEC_HIDDEN;
-extern const unsigned short bidi_direction_table[] DECLSPEC_HIDDEN;
+extern const unsigned short wine_linebreak_table[];
+extern const unsigned short wine_scripts_table[];
+extern const unsigned short bidi_direction_table[];
 
 /* Number of characters needed for LOCALE_SNATIVEDIGITS */
 #define NATIVE_DIGITS_LEN 11
@@ -208,7 +208,7 @@ static const struct dwritescript_properties dwritescripts_properties[Script_Last
 
 const char *debugstr_sa_script(UINT16 script)
 {
-    return script < Script_LastId ? debugstr_tag(dwritescripts_properties[script].props.isoScriptCode) : "undefined";
+    return script < Script_LastId ? debugstr_fourcc(dwritescripts_properties[script].props.isoScriptCode) : "undefined";
 }
 
 static const struct fallback_description
@@ -658,7 +658,7 @@ static DWRITE_SCRIPT_ANALYSIS get_char_sa(UINT32 c)
 
     sa.script = get_char_script(c);
     sa.shapes = DWRITE_SCRIPT_SHAPES_DEFAULT;
-    if ((c >= 0x0001 && c <= 0x001f)           /* C0 controls */
+    if ((c <= 0x001f)                          /* C0 controls */
             || (c >= 0x007f && c <= 0x009f)    /* DELETE, C1 controls */
             || (c == 0x00ad)                   /* SOFT HYPHEN */
             || (c >= 0x200b && c <= 0x200f)    /* ZWSP, ZWNJ, ZWJ, LRM, RLM */
@@ -1508,7 +1508,7 @@ static void analyzer_dump_user_features(DWRITE_TYPOGRAPHIC_FEATURES const **feat
     for (i = 0, start = 0; i < feature_ranges; start += feature_range_lengths[i++]) {
         TRACE("feature range [%u,%u)\n", start, start + feature_range_lengths[i]);
         for (j = 0; j < features[i]->featureCount; j++)
-            TRACE("feature %s, parameter %u\n", debugstr_tag(features[i]->features[j].nameTag),
+            TRACE("feature %s, parameter %u\n", debugstr_fourcc(features[i]->features[j].nameTag),
                     features[i]->features[j].parameter);
     }
 }
@@ -2188,7 +2188,7 @@ static HRESULT WINAPI dwritetextanalyzer2_CheckTypographicFeature(IDWriteTextAna
     struct dwrite_fontface *font_obj;
     HRESULT hr;
 
-    TRACE("%p, %p, %u, %s, %s, %u, %p, %p.\n", iface, fontface, sa.script, debugstr_w(locale), debugstr_tag(feature),
+    TRACE("%p, %p, %u, %s, %s, %u, %p, %p.\n", iface, fontface, sa.script, debugstr_w(locale), debugstr_fourcc(feature),
             glyph_count, glyphs, feature_applies);
 
     if (sa.script > Script_LastId)

@@ -796,8 +796,9 @@ static HRESULT WINAPI sample_CopyToBuffer(IMFSample *iface, IMFMediaBuffer *buff
     struct sample *sample = impl_from_IMFSample(iface);
     DWORD total_length, dst_length, dst_current_length, src_max_length, current_length;
     BYTE *src_ptr, *dst_ptr;
-    BOOL locked;
-    HRESULT hr;
+    IMF2DBuffer *buffer2d;
+    BOOL locked = FALSE;
+    HRESULT hr = E_FAIL;
     size_t i;
 
     TRACE("%p, %p.\n", iface, buffer);
@@ -807,39 +808,64 @@ static HRESULT WINAPI sample_CopyToBuffer(IMFSample *iface, IMFMediaBuffer *buff
     total_length = sample_get_total_length(sample);
     dst_current_length = 0;
 
-    dst_ptr = NULL;
-    dst_length = current_length = 0;
-    locked = SUCCEEDED(hr = IMFMediaBuffer_Lock(buffer, &dst_ptr, &dst_length, &current_length));
-    if (locked)
+    if (sample->buffer_count == 1
+            && SUCCEEDED(IMFMediaBuffer_QueryInterface(buffer, &IID_IMF2DBuffer, (void **)&buffer2d)))
     {
-        if (dst_length < total_length)
-            hr = MF_E_BUFFERTOOSMALL;
-        else if (dst_ptr)
+        if (SUCCEEDED(IMFMediaBuffer_GetCurrentLength(sample->buffers[0], &current_length))
+                && SUCCEEDED(IMF2DBuffer_GetContiguousLength(buffer2d, &dst_length))
+                && current_length == dst_length
+                && SUCCEEDED(IMFMediaBuffer_Lock(sample->buffers[0], &src_ptr, &src_max_length, &current_length)))
         {
-            for (i = 0; i < sample->buffer_count && SUCCEEDED(hr); ++i)
-            {
-                src_ptr = NULL;
-                src_max_length = current_length = 0;
-                if (SUCCEEDED(hr = IMFMediaBuffer_Lock(sample->buffers[i], &src_ptr, &src_max_length, &current_length)))
-                {
-                    if (src_ptr)
-                    {
-                        if (current_length > dst_length)
-                            hr = MF_E_BUFFERTOOSMALL;
-                        else if (current_length)
-                        {
-                            memcpy(dst_ptr, src_ptr, current_length);
-                            dst_length -= current_length;
-                            dst_current_length += current_length;
-                            dst_ptr += current_length;
-                        }
-                    }
-                    IMFMediaBuffer_Unlock(sample->buffers[i]);
-                }
-            }
+            hr = IMF2DBuffer_ContiguousCopyFrom(buffer2d, src_ptr, current_length);
+            IMFMediaBuffer_Unlock(sample->buffers[0]);
+        }
+        IMF2DBuffer_Release(buffer2d);
+        if (SUCCEEDED(hr))
+        {
+            dst_current_length = current_length;
+            goto done;
         }
     }
 
+    dst_ptr = NULL;
+    dst_length = current_length = 0;
+    locked = SUCCEEDED(hr = IMFMediaBuffer_Lock(buffer, &dst_ptr, &dst_length, &current_length));
+    if (!locked)
+        goto done;
+
+    if (dst_length < total_length)
+    {
+        hr = MF_E_BUFFERTOOSMALL;
+        goto done;
+    }
+
+    if (!dst_ptr)
+        goto done;
+
+    for (i = 0; i < sample->buffer_count && SUCCEEDED(hr); ++i)
+    {
+        src_ptr = NULL;
+        src_max_length = current_length = 0;
+
+        if (FAILED(hr = IMFMediaBuffer_Lock(sample->buffers[i], &src_ptr, &src_max_length, &current_length)))
+            continue;
+
+        if (src_ptr)
+        {
+            if (current_length > dst_length)
+                hr = MF_E_BUFFERTOOSMALL;
+            else if (current_length)
+            {
+                memcpy(dst_ptr, src_ptr, current_length);
+                dst_length -= current_length;
+                dst_current_length += current_length;
+                dst_ptr += current_length;
+            }
+        }
+        IMFMediaBuffer_Unlock(sample->buffers[i]);
+    }
+
+done:
     IMFMediaBuffer_SetCurrentLength(buffer, dst_current_length);
 
     if (locked)

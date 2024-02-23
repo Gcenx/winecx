@@ -31,7 +31,6 @@
 #include "psdrv.h"
 #include "ddk/winddi.h"
 #include "ntf.h"
-#include "unixlib.h"
 #include "winspool.h"
 #include "wine/debug.h"
 
@@ -409,117 +408,6 @@ static void dump_devmode(const DEVMODEW *dm)
     TRACE("dmPelsHeight %lu\n", dm->dmPelsHeight);
 }
 
-static void PSDRV_UpdateDevCaps( print_ctx *ctx )
-{
-    PAGESIZE *page;
-    RESOLUTION *res;
-    INT width = 0, height = 0, resx = 0, resy = 0;
-
-    dump_devmode(&ctx->Devmode->dmPublic);
-
-    if (ctx->Devmode->dmPublic.dmFields & (DM_PRINTQUALITY | DM_YRESOLUTION | DM_LOGPIXELS))
-    {
-        if (ctx->Devmode->dmPublic.dmFields & DM_PRINTQUALITY)
-            resx = resy = ctx->Devmode->dmPublic.dmPrintQuality;
-
-        if (ctx->Devmode->dmPublic.dmFields & DM_YRESOLUTION)
-            resy = ctx->Devmode->dmPublic.dmYResolution;
-
-        if (ctx->Devmode->dmPublic.dmFields & DM_LOGPIXELS)
-            resx = resy = ctx->Devmode->dmPublic.dmLogPixels;
-
-        LIST_FOR_EACH_ENTRY(res, &ctx->pi->ppd->Resolutions, RESOLUTION, entry)
-        {
-            if (res->resx == resx && res->resy == resy)
-            {
-                ctx->logPixelsX = resx;
-                ctx->logPixelsY = resy;
-                break;
-            }
-        }
-
-        if (&res->entry == &ctx->pi->ppd->Resolutions)
-        {
-            WARN("Requested resolution %dx%d is not supported by device\n", resx, resy);
-            ctx->logPixelsX = ctx->pi->ppd->DefaultResolution;
-            ctx->logPixelsY = ctx->logPixelsX;
-        }
-    }
-    else
-    {
-        WARN("Using default device resolution %d\n", ctx->pi->ppd->DefaultResolution);
-        ctx->logPixelsX = ctx->pi->ppd->DefaultResolution;
-        ctx->logPixelsY = ctx->logPixelsX;
-    }
-
-    if(ctx->Devmode->dmPublic.dmFields & DM_PAPERSIZE) {
-        LIST_FOR_EACH_ENTRY(page, &ctx->pi->ppd->PageSizes, PAGESIZE, entry) {
-	    if(page->WinPage == ctx->Devmode->dmPublic.dmPaperSize)
-	        break;
-	}
-
-	if(&page->entry == &ctx->pi->ppd->PageSizes) {
-	    FIXME("Can't find page\n");
-            SetRectEmpty(&ctx->ImageableArea);
-	    ctx->PageSize.cx = 0;
-	    ctx->PageSize.cy = 0;
-	} else if(page->ImageableArea) {
-	  /* ctx sizes in device units; ppd sizes in 1/72" */
-            SetRect(&ctx->ImageableArea, page->ImageableArea->llx * ctx->logPixelsX / 72,
-                    page->ImageableArea->ury * ctx->logPixelsY / 72,
-                    page->ImageableArea->urx * ctx->logPixelsX / 72,
-                    page->ImageableArea->lly * ctx->logPixelsY / 72);
-	    ctx->PageSize.cx = page->PaperDimension->x *
-	      ctx->logPixelsX / 72;
-	    ctx->PageSize.cy = page->PaperDimension->y *
-	      ctx->logPixelsY / 72;
-	} else {
-	    ctx->ImageableArea.left = ctx->ImageableArea.bottom = 0;
-	    ctx->ImageableArea.right = ctx->PageSize.cx =
-	      page->PaperDimension->x * ctx->logPixelsX / 72;
-	    ctx->ImageableArea.top = ctx->PageSize.cy =
-	      page->PaperDimension->y * ctx->logPixelsY / 72;
-	}
-    } else if((ctx->Devmode->dmPublic.dmFields & DM_PAPERLENGTH) &&
-	      (ctx->Devmode->dmPublic.dmFields & DM_PAPERWIDTH)) {
-      /* ctx sizes in device units; Devmode sizes in 1/10 mm */
-        ctx->ImageableArea.left = ctx->ImageableArea.bottom = 0;
-	ctx->ImageableArea.right = ctx->PageSize.cx =
-	  ctx->Devmode->dmPublic.dmPaperWidth * ctx->logPixelsX / 254;
-	ctx->ImageableArea.top = ctx->PageSize.cy =
-	  ctx->Devmode->dmPublic.dmPaperLength * ctx->logPixelsY / 254;
-    } else {
-        FIXME("Odd dmFields %lx\n", ctx->Devmode->dmPublic.dmFields);
-        SetRectEmpty(&ctx->ImageableArea);
-	ctx->PageSize.cx = 0;
-	ctx->PageSize.cy = 0;
-    }
-
-    TRACE("ImageableArea = %s: PageSize = %ldx%ld\n", wine_dbgstr_rect(&ctx->ImageableArea),
-	  ctx->PageSize.cx, ctx->PageSize.cy);
-
-    /* these are in device units */
-    width = ctx->ImageableArea.right - ctx->ImageableArea.left;
-    height = ctx->ImageableArea.top - ctx->ImageableArea.bottom;
-
-    if(ctx->Devmode->dmPublic.dmOrientation == DMORIENT_PORTRAIT) {
-        ctx->horzRes = width;
-        ctx->vertRes = height;
-    } else {
-        ctx->horzRes = height;
-        ctx->vertRes = width;
-    }
-
-    /* these are in mm */
-    ctx->horzSize = (ctx->horzRes * 25.4) / ctx->logPixelsX;
-    ctx->vertSize = (ctx->vertRes * 25.4) / ctx->logPixelsY;
-
-    TRACE("devcaps: horzSize = %dmm, vertSize = %dmm, "
-	  "horzRes = %d, vertRes = %d\n",
-	  ctx->horzSize, ctx->vertSize,
-	  ctx->horzRes, ctx->vertRes);
-}
-
 print_ctx *create_print_ctx( HDC hdc, const WCHAR *device,
                                      const DEVMODEW *devmode )
 {
@@ -554,8 +442,7 @@ print_ctx *create_print_ctx( HDC hdc, const WCHAR *device,
     memcpy( ctx->Devmode, pi->Devmode,
             pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra );
     ctx->pi = pi;
-    ctx->logPixelsX = pi->ppd->DefaultResolution;
-    ctx->logPixelsY = pi->ppd->DefaultResolution;
+    ctx->hdc = hdc;
 
     if (devmode)
     {
@@ -563,21 +450,19 @@ print_ctx *create_print_ctx( HDC hdc, const WCHAR *device,
         PSDRV_MergeDevmodes( ctx->Devmode, devmode, pi );
     }
 
-    PSDRV_UpdateDevCaps( ctx );
-    ctx->hdc = hdc;
     SelectObject( hdc, GetStockObject( DEVICE_DEFAULT_FONT ));
     return ctx;
 }
 
 /**********************************************************************
- *	     ResetDC   (WINEPS.@)
+ *	     ResetDC
  */
-BOOL CDECL PSDRV_ResetDC( print_ctx *ctx, const DEVMODEW *lpInitData )
+BOOL PSDRV_ResetDC( print_ctx *ctx, const DEVMODEW *devmode )
 {
-    if (lpInitData)
+    if (devmode)
     {
-        PSDRV_MergeDevmodes(ctx->Devmode, lpInitData, ctx->pi);
-        PSDRV_UpdateDevCaps(ctx);
+        dump_devmode( devmode );
+        PSDRV_MergeDevmodes( ctx->Devmode, devmode, ctx->pi );
     }
     return TRUE;
 }

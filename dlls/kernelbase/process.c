@@ -23,8 +23,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -190,7 +188,11 @@ static RTL_USER_PROCESS_PARAMETERS *create_process_params( const WCHAR *filename
     }
     RtlFreeUnicodeString( &newdirW );
 
-    if (flags & CREATE_NEW_PROCESS_GROUP) params->ConsoleFlags = 1;
+    if (!(flags & CREATE_NEW_PROCESS_GROUP))
+        params->ProcessGroupId = NtCurrentTeb()->Peb->ProcessParameters->ProcessGroupId;
+    else if (!(flags & CREATE_NEW_CONSOLE))
+        params->ConsoleFlags = 1;
+
     if (flags & CREATE_NEW_CONSOLE) params->ConsoleHandle = CONSOLE_HANDLE_ALLOC;
     else if (!(flags & DETACHED_PROCESS))
     {
@@ -258,13 +260,14 @@ struct _PROC_THREAD_ATTRIBUTE_LIST
 static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUTES *psa,
                                    SECURITY_ATTRIBUTES *tsa, DWORD process_flags,
                                    RTL_USER_PROCESS_PARAMETERS *params,
-                                   RTL_USER_PROCESS_INFORMATION *info, HANDLE parent,
+                                   RTL_USER_PROCESS_INFORMATION *info,
+                                   HANDLE parent, USHORT machine,
                                    const struct proc_thread_attr *handle_list,
                                    const struct proc_thread_attr *job_list)
 {
     OBJECT_ATTRIBUTES process_attr, thread_attr;
     PS_CREATE_INFO create_info;
-    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[8] ) / sizeof(ULONG_PTR)];
+    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[9] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr = (PS_ATTRIBUTE_LIST *)buffer;
     UNICODE_STRING nameW;
     NTSTATUS status;
@@ -331,6 +334,14 @@ static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUT
             attr->Attributes[pos].ReturnLength = NULL;
             pos++;
         }
+        if (machine)
+        {
+            attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_MACHINE_TYPE;
+            attr->Attributes[pos].Size         = sizeof(machine);
+            attr->Attributes[pos].Value        = machine;
+            attr->Attributes[pos].ReturnLength = NULL;
+            pos++;
+        }
         attr->TotalLength = offsetof( PS_ATTRIBUTE_LIST, Attributes[pos] );
 
         InitializeObjectAttributes( &process_attr, NULL, 0, NULL, psa ? psa->lpSecurityDescriptor : NULL );
@@ -372,7 +383,7 @@ static NTSTATUS create_vdm_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
               winevdm, params->ImagePathName.Buffer, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, winevdm );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL );
     HeapFree( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -401,7 +412,7 @@ static NTSTATUS create_cmd_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
     swprintf( newcmdline, len, L"%s /s/c \"%s\"", comspec, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, comspec );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL );
     RtlFreeHeap( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -619,13 +630,8 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
     /* CROSSOVER HACK: bug 19537
      * Add --in-process-gpu to Foxmail's command line.
      */
-    /* CROSSOVER HACK: bug 15388
-     * Add --in-process-gpu and --use-gl=swiftshader to EO.WebBrowser CEF processes,
-     * used by Quicken.
-     * (It launches processes through rundll32.exe and already passes --no-sandbox)
-     */
     /* CROSSOVER HACK: bug 19252
-     * Add --use-angle=gl to Ubisoft Connect.
+     * Add --use-angle=vulkan to Ubisoft Connect.
      */
     /* CROSSOVER HACK: bug 20889
      * Add --in-process-gpu and --use-gl=swiftshader to qwSubprocess.exe, another
@@ -651,6 +657,13 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
     /* CROSSOVER HACK: bug 22769
      * Add --in-process-gpu --use-gl=swiftshader to cefsubprocess.exe for Marvel Snap.
      */
+    /* CROSSOVER HACK: bug 23066
+     * Add  --no-sandbox --in-process-gpu --use-gl=swiftshader to t2gp.exe for
+     * the 2k launcher (e.g. Mafia: Definitive Edition).
+     */
+    /* CROSSOVER HACK: bug 23061
+     * Add `/devicetype DX12` to Anno 1800 to force DX12.
+     */
 
     static const struct
     {
@@ -664,7 +677,6 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
         {L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu", NULL, L"--type=crashpad-handler"},
         {L"SocialClubHelper.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
         {L"Foxmail.exe", L" --in-process-gpu", NULL, NULL},
-        {L"rundll32.exe", L" --in-process-gpu --use-gl=swiftshader", L"--no-sandbox", NULL},
         {L"UplayWebCore.exe", L" --use-angle=vulkan", NULL, NULL},
         {L"qwSubprocess.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
         {L"Paradox Launcher.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
@@ -673,6 +685,9 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
         {L"redprelauncher.exe", L" --launcher-skip", NULL, NULL},
         {L"\\Tools\\Launcher.exe", L" --in-process-gpu", NULL, NULL},
         {L"cefsubprocess.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, L"--type=crashpad-handler"},
+        {L"t2gp.exe", L" --no-sandbox --in-process-gpu --use-gl=swiftshader", NULL, L"--type=crashpad-handler"},
+        {L"WXWorkWeb.exe", L" --in-process-gpu", NULL, L"--type=crashpad-handler"},
+        {L"Anno1800.exe", L" /devicetype DX12", NULL, NULL},
     };
     unsigned int i;
 
@@ -709,6 +724,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     HANDLE parent = 0, debug = 0;
     const WCHAR *append;
     ULONG nt_flags = 0;
+    USHORT machine = 0;
     NTSTATUS status;
 
     /* Process the AppName and/or CmdLine to get module name and path */
@@ -862,6 +878,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                         TRACE( "PROC_THREAD_ATTRIBUTE_JOB_LIST handle count %Iu.\n",
                                attrs->attrs[i].size / sizeof(HANDLE) );
                         break;
+                    case PROC_THREAD_ATTRIBUTE_MACHINE_TYPE:
+                        machine = *(USHORT *)attrs->attrs[i].value;
+                        TRACE( "PROC_THREAD_ATTRIBUTE_MACHINE %x.\n", machine );
+                        break;
                     default:
                         FIXME("Unsupported attribute %#Ix.\n", attrs->attrs[i].attr);
                         break;
@@ -876,7 +896,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     if (flags & CREATE_SUSPENDED) nt_flags |= PROCESS_CREATE_FLAGS_SUSPENDED;
 
     status = create_nt_process( token, debug, process_attr, thread_attr,
-                                nt_flags, params, &rtl_info, parent, handle_list, job_list );
+                                nt_flags, params, &rtl_info, parent, machine, handle_list, job_list );
     switch (status)
     {
     case STATUS_SUCCESS:
@@ -1053,15 +1073,15 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetExitCodeProcess( HANDLE process, LPDWORD exit_c
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetHandleInformation( HANDLE handle, DWORD *flags )
 {
-    OBJECT_DATA_INFORMATION info;
+    OBJECT_HANDLE_FLAG_INFORMATION info;
 
-    if (!set_ntstatus( NtQueryObject( handle, ObjectDataInformation, &info, sizeof(info), NULL )))
+    if (!set_ntstatus( NtQueryObject( handle, ObjectHandleFlagInformation, &info, sizeof(info), NULL )))
         return FALSE;
 
     if (flags)
     {
         *flags = 0;
-        if (info.InheritHandle) *flags |= HANDLE_FLAG_INHERIT;
+        if (info.Inherit) *flags |= HANDLE_FLAG_INHERIT;
         if (info.ProtectFromClose) *flags |= HANDLE_FLAG_PROTECT_FROM_CLOSE;
     }
     return TRUE;
@@ -1266,8 +1286,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsProcessorFeaturePresent ( DWORD feature )
 BOOL WINAPI DECLSPEC_HOTPATCH IsWow64Process2( HANDLE process, USHORT *machine, USHORT *native_machine )
 {
     /* CX HACK 20810: in Wow64 with a 32-bit-only bottle, pretend we aren't in Wow64 */
-    UNICODE_STRING name_str, val_str;
-    RtlInitUnicodeString( &name_str, L"WINEWOW6432BPREFIXMODE" );
+    UNICODE_STRING val_str, name_str = RTL_CONSTANT_STRING( L"WINEWOW6432BPREFIXMODE" );
     val_str.MaximumLength = 0;
 
     if (RtlQueryEnvironmentVariable_U( NULL, &name_str, &val_str ) != STATUS_VARIABLE_NOT_FOUND)
@@ -1290,9 +1309,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsWow64Process( HANDLE process, PBOOL wow64 )
     NTSTATUS status;
 
     /* CX HACK 20810: in Wow64 with a 32-bit-only bottle, pretend we aren't in Wow64 */
-    UNICODE_STRING name_str, val_str;
-    RtlInitUnicodeString( &name_str, L"WINEWOW6432BPREFIXMODE" );
+    UNICODE_STRING val_str, name_str = RTL_CONSTANT_STRING( L"WINEWOW6432BPREFIXMODE" );
     val_str.MaximumLength = 0;
+
     if (RtlQueryEnvironmentVariable_U( NULL, &name_str, &val_str ) != STATUS_VARIABLE_NOT_FOUND)
     {
         status = STATUS_SUCCESS;
@@ -1304,6 +1323,57 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsWow64Process( HANDLE process, PBOOL wow64 )
         if (!status) *wow64 = !!pbi;
     }
     return set_ntstatus( status );
+}
+
+/*********************************************************************
+ *           GetProcessInformation   (kernelbase.@)
+ */
+BOOL WINAPI GetProcessInformation( HANDLE process, PROCESS_INFORMATION_CLASS info_class, void *data, DWORD size )
+{
+    switch (info_class)
+    {
+        case ProcessMachineTypeInfo:
+        {
+            PROCESS_MACHINE_INFORMATION *mi = data;
+            SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
+            NTSTATUS status;
+            ULONG i;
+
+            if (size != sizeof(*mi))
+            {
+                SetLastError(ERROR_BAD_LENGTH);
+                return FALSE;
+            }
+
+            status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                    machines, sizeof(machines), NULL );
+            if (status) return set_ntstatus( status );
+
+            for (i = 0; machines[i].Machine; i++)
+            {
+                if (machines[i].Process)
+                {
+                    mi->ProcessMachine = machines[i].Machine;
+                    mi->Res0 = 0;
+                    mi->MachineAttributes = 0;
+                    if (machines[i].KernelMode)
+                        mi->MachineAttributes |= KernelEnabled;
+                    if (machines[i].UserMode)
+                        mi->MachineAttributes |= UserEnabled;
+                    if (machines[i].WoW64Container)
+                        mi->MachineAttributes |= Wow64Container;
+
+                    return TRUE;
+                }
+            }
+
+            break;
+        }
+        default:
+            FIXME("Unsupported information class %d.\n", info_class);
+    }
+
+    return FALSE;
 }
 
 
@@ -1358,10 +1428,13 @@ BOOL WINAPI DECLSPEC_HOTPATCH ProcessIdToSessionId( DWORD pid, DWORD *id )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH QueryProcessCycleTime( HANDLE process, ULONG64 *cycle )
 {
-    static int once;
-    if (!once++) FIXME( "(%p,%p): stub!\n", process, cycle );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return FALSE;
+    PROCESS_CYCLE_TIME_INFORMATION time;
+
+    if (!set_ntstatus( NtQueryInformationProcess( process, ProcessCycleTime, &time, sizeof(time), NULL ) ))
+        return FALSE;
+
+    *cycle = time.AccumulatedCycles;
+    return TRUE;
 }
 
 
@@ -1392,21 +1465,21 @@ UINT WINAPI DECLSPEC_HOTPATCH SetHandleCount( UINT count )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH SetHandleInformation( HANDLE handle, DWORD mask, DWORD flags )
 {
-    OBJECT_DATA_INFORMATION info;
+    OBJECT_HANDLE_FLAG_INFORMATION info;
 
     /* if not setting both fields, retrieve current value first */
     if ((mask & (HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE)) !=
         (HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE))
     {
-        if (!set_ntstatus( NtQueryObject( handle, ObjectDataInformation, &info, sizeof(info), NULL )))
+        if (!set_ntstatus( NtQueryObject( handle, ObjectHandleFlagInformation, &info, sizeof(info), NULL )))
             return FALSE;
     }
     if (mask & HANDLE_FLAG_INHERIT)
-        info.InheritHandle = (flags & HANDLE_FLAG_INHERIT) != 0;
+        info.Inherit = (flags & HANDLE_FLAG_INHERIT) != 0;
     if (mask & HANDLE_FLAG_PROTECT_FROM_CLOSE)
         info.ProtectFromClose = (flags & HANDLE_FLAG_PROTECT_FROM_CLOSE) != 0;
 
-    return set_ntstatus( NtSetInformationObject( handle, ObjectDataInformation, &info, sizeof(info) ));
+    return set_ntstatus( NtSetInformationObject( handle, ObjectHandleFlagInformation, &info, sizeof(info) ));
 }
 
 
@@ -1519,7 +1592,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH TerminateProcess( HANDLE handle, DWORD exit_code )
  ***********************************************************************/
 
 
-static STARTUPINFOW startup_infoW;
 static char *command_lineA;
 static WCHAR *command_lineW;
 
@@ -1529,25 +1601,6 @@ static WCHAR *command_lineW;
 void init_startup_info( RTL_USER_PROCESS_PARAMETERS *params )
 {
     ANSI_STRING ansi;
-
-    startup_infoW.cb              = sizeof(startup_infoW);
-    startup_infoW.lpReserved      = NULL;
-    startup_infoW.lpDesktop       = params->Desktop.Buffer;
-    startup_infoW.lpTitle         = params->WindowTitle.Buffer;
-    startup_infoW.dwX             = params->dwX;
-    startup_infoW.dwY             = params->dwY;
-    startup_infoW.dwXSize         = params->dwXSize;
-    startup_infoW.dwYSize         = params->dwYSize;
-    startup_infoW.dwXCountChars   = params->dwXCountChars;
-    startup_infoW.dwYCountChars   = params->dwYCountChars;
-    startup_infoW.dwFillAttribute = params->dwFillAttribute;
-    startup_infoW.dwFlags         = params->dwFlags;
-    startup_infoW.wShowWindow     = params->wShowWindow;
-    startup_infoW.cbReserved2     = params->RuntimeInfo.MaximumLength;
-    startup_infoW.lpReserved2     = params->RuntimeInfo.MaximumLength ? (void *)params->RuntimeInfo.Buffer : NULL;
-    startup_infoW.hStdInput       = params->hStdInput ? params->hStdInput : INVALID_HANDLE_VALUE;
-    startup_infoW.hStdOutput      = params->hStdOutput ? params->hStdOutput : INVALID_HANDLE_VALUE;
-    startup_infoW.hStdError       = params->hStdError ? params->hStdError : INVALID_HANDLE_VALUE;
 
     command_lineW = params->CommandLine.Buffer;
     if (!RtlUnicodeStringToAnsiString( &ansi, &params->CommandLine, TRUE )) command_lineA = ansi.Buffer;
@@ -1588,7 +1641,34 @@ LPWSTR WINAPI GetCommandLineW(void)
  */
 void WINAPI DECLSPEC_HOTPATCH GetStartupInfoW( STARTUPINFOW *info )
 {
-    *info = startup_infoW;
+    RTL_USER_PROCESS_PARAMETERS *params;
+
+    RtlAcquirePebLock();
+
+    params = RtlGetCurrentPeb()->ProcessParameters;
+
+    info->cb              = sizeof(*info);
+    info->lpReserved      = NULL;
+    info->lpDesktop       = params->Desktop.Buffer;
+    info->lpTitle         = params->WindowTitle.Buffer;
+    info->dwX             = params->dwX;
+    info->dwY             = params->dwY;
+    info->dwXSize         = params->dwXSize;
+    info->dwYSize         = params->dwYSize;
+    info->dwXCountChars   = params->dwXCountChars;
+    info->dwYCountChars   = params->dwYCountChars;
+    info->dwFillAttribute = params->dwFillAttribute;
+    info->dwFlags         = params->dwFlags;
+    info->wShowWindow     = params->wShowWindow;
+    info->cbReserved2     = params->RuntimeInfo.MaximumLength;
+    info->lpReserved2     = params->RuntimeInfo.MaximumLength ? (void *)params->RuntimeInfo.Buffer : NULL;
+    if (params->dwFlags & STARTF_USESTDHANDLES)
+    {
+        info->hStdInput   = params->hStdInput;
+        info->hStdOutput  = params->hStdOutput;
+        info->hStdError   = params->hStdError;
+    }
+    RtlReleasePebLock();
 }
 
 
@@ -1977,6 +2057,43 @@ BOOL WINAPI DECLSPEC_HOTPATCH InitializeProcThreadAttributeList( struct _PROC_TH
 }
 
 
+static inline DWORD validate_proc_thread_attribute( DWORD_PTR attr, SIZE_T size )
+{
+    switch (attr)
+    {
+    case PROC_THREAD_ATTRIBUTE_PARENT_PROCESS:
+        if (size != sizeof(HANDLE)) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_HANDLE_LIST:
+        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_IDEAL_PROCESSOR:
+        if (size != sizeof(PROCESSOR_NUMBER)) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY:
+       if (size != sizeof(DWORD) && size != sizeof(DWORD64)) return ERROR_BAD_LENGTH;
+       break;
+    case PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY:
+        if (size != sizeof(DWORD) && size != sizeof(DWORD64) && size != sizeof(DWORD64) * 2)
+            return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE:
+       if (size != sizeof(HPCON)) return ERROR_BAD_LENGTH;
+       break;
+    case PROC_THREAD_ATTRIBUTE_JOB_LIST:
+        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_MACHINE_TYPE:
+        if (size != sizeof(USHORT)) return ERROR_BAD_LENGTH;
+        break;
+    default:
+        FIXME( "Unhandled attribute %Iu\n", attr & PROC_THREAD_ATTRIBUTE_NUMBER );
+        return ERROR_NOT_SUPPORTED;
+    }
+    return 0;
+}
+
+
 /***********************************************************************
  *           UpdateProcThreadAttribute   (kernelbase.@)
  */
@@ -1984,7 +2101,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH UpdateProcThreadAttribute( struct _PROC_THREAD_ATT
                                                          DWORD flags, DWORD_PTR attr, void *value,
                                                          SIZE_T size, void *prev_ret, SIZE_T *size_ret )
 {
-    DWORD mask;
+    DWORD mask, err;
     struct proc_thread_attr *entry;
 
     TRACE( "(%p %lx %08Ix %p %Id %p %p)\n", list, flags, attr, value, size, prev_ret, size_ret );
@@ -1994,68 +2111,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH UpdateProcThreadAttribute( struct _PROC_THREAD_ATT
         SetLastError( ERROR_GEN_FAILURE );
         return FALSE;
     }
-
-    switch (attr)
+    if ((err = validate_proc_thread_attribute( attr, size )))
     {
-    case PROC_THREAD_ATTRIBUTE_PARENT_PROCESS:
-        if (size != sizeof(HANDLE))
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_HANDLE_LIST:
-        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size)
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_IDEAL_PROCESSOR:
-        if (size != sizeof(PROCESSOR_NUMBER))
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY:
-       if (size != sizeof(DWORD) && size != sizeof(DWORD64))
-       {
-           SetLastError( ERROR_BAD_LENGTH );
-           return FALSE;
-       }
-       break;
-
-    case PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY:
-        if (size != sizeof(DWORD) && size != sizeof(DWORD64) && size != sizeof(DWORD64) * 2)
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE:
-       if (size != sizeof(HPCON))
-       {
-           SetLastError( ERROR_BAD_LENGTH );
-           return FALSE;
-       }
-       break;
-
-    case PROC_THREAD_ATTRIBUTE_JOB_LIST:
-        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size)
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    default:
-        SetLastError( ERROR_NOT_SUPPORTED );
-        FIXME( "Unhandled attribute %Iu\n", attr & PROC_THREAD_ATTRIBUTE_NUMBER );
+        SetLastError( err );
         return FALSE;
     }
 

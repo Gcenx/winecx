@@ -48,12 +48,15 @@ static HRESULT navigate_href_new_window(HTMLElement *element, nsAString *href_st
     IUri *uri;
     HRESULT hres;
 
+    if(!element->node.doc->window->base.outer_window)
+        return S_OK;
+
     nsAString_GetData(href_str, &href);
-    hres = create_relative_uri(element->node.doc->outer_window, href, &uri);
+    hres = create_relative_uri(element->node.doc->window->base.outer_window, href, &uri);
     if(FAILED(hres))
         return hres;
 
-    hres = navigate_new_window(element->node.doc->outer_window, uri, target, NULL, NULL);
+    hres = navigate_new_window(element->node.doc->window->base.outer_window, uri, target, NULL, NULL);
     IUri_Release(uri);
     return hres;
 }
@@ -110,7 +113,10 @@ static HRESULT navigate_href(HTMLElement *element, nsAString *href_str, nsAStrin
     const PRUnichar *href;
     HRESULT hres;
 
-    window = get_target_window(element->node.doc->outer_window, target_str, &use_new_window);
+    if(!element->node.doc->window->base.outer_window)
+        return S_OK;
+
+    window = get_target_window(element->node.doc->window->base.outer_window, target_str, &use_new_window);
     if(!window) {
         if(use_new_window) {
             const PRUnichar *target;
@@ -792,39 +798,40 @@ static const IHTMLAnchorElementVtbl HTMLAnchorElementVtbl = {
     HTMLAnchorElement_blur
 };
 
-static inline HTMLAnchorElement *impl_from_HTMLDOMNode(HTMLDOMNode *iface)
+static inline HTMLAnchorElement *impl_from_DispatchEx(DispatchEx *iface)
 {
-    return CONTAINING_RECORD(iface, HTMLAnchorElement, element.node);
+    return CONTAINING_RECORD(iface, HTMLAnchorElement, element.node.event_target.dispex);
 }
 
-static HRESULT HTMLAnchorElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
+static void *HTMLAnchorElement_query_interface(DispatchEx *dispex, REFIID riid)
 {
-    HTMLAnchorElement *This = impl_from_HTMLDOMNode(iface);
+    HTMLAnchorElement *This = impl_from_DispatchEx(dispex);
 
-    *ppv = NULL;
+    if(IsEqualGUID(&IID_IHTMLAnchorElement, riid))
+        return &This->IHTMLAnchorElement_iface;
 
-    if(IsEqualGUID(&IID_IUnknown, riid)) {
-        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
-        *ppv = &This->IHTMLAnchorElement_iface;
-    }else if(IsEqualGUID(&IID_IDispatch, riid)) {
-        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
-        *ppv = &This->IHTMLAnchorElement_iface;
-    }else if(IsEqualGUID(&IID_IHTMLAnchorElement, riid)) {
-        TRACE("(%p)->(IID_IHTMLAnchorElement %p)\n", This, ppv);
-        *ppv = &This->IHTMLAnchorElement_iface;
-    }
-
-    if(*ppv) {
-        IUnknown_AddRef((IUnknown*)*ppv);
-        return S_OK;
-    }
-
-    return HTMLElement_QI(&This->element.node, riid, ppv);
+    return HTMLElement_query_interface(&This->element.node.event_target.dispex, riid);
 }
 
-static HRESULT HTMLAnchorElement_handle_event(HTMLDOMNode *iface, DWORD eid, nsIDOMEvent *event, BOOL *prevent_default)
+static void HTMLAnchorElement_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
 {
-    HTMLAnchorElement *This = impl_from_HTMLDOMNode(iface);
+    HTMLAnchorElement *This = impl_from_DispatchEx(dispex);
+    HTMLElement_traverse(dispex, cb);
+
+    if(This->nsanchor)
+        note_cc_edge((nsISupports*)This->nsanchor, "nsanchor", cb);
+}
+
+static void HTMLAnchorElement_unlink(DispatchEx *dispex)
+{
+    HTMLAnchorElement *This = impl_from_DispatchEx(dispex);
+    HTMLElement_unlink(dispex);
+    unlink_ref(&This->nsanchor);
+}
+
+static HRESULT HTMLAnchorElement_handle_event(DispatchEx *dispex, eventid_t eid, nsIDOMEvent *event, BOOL *prevent_default)
+{
+    HTMLAnchorElement *This = impl_from_DispatchEx(dispex);
     nsAString href_str, target_str;
     nsresult nsres;
 
@@ -850,49 +857,26 @@ fallback:
         nsAString_Finish(&target_str);
     }
 
-    return HTMLElement_handle_event(&This->element.node, eid, event, prevent_default);
-}
-
-static void HTMLAnchorElement_traverse(HTMLDOMNode *iface, nsCycleCollectionTraversalCallback *cb)
-{
-    HTMLAnchorElement *This = impl_from_HTMLDOMNode(iface);
-
-    if(This->nsanchor)
-        note_cc_edge((nsISupports*)This->nsanchor, "This->nsanchor", cb);
-}
-
-static void HTMLAnchorElement_unlink(HTMLDOMNode *iface)
-{
-    HTMLAnchorElement *This = impl_from_HTMLDOMNode(iface);
-
-    if(This->nsanchor) {
-        nsIDOMHTMLAnchorElement *nsanchor = This->nsanchor;
-
-        This->nsanchor = NULL;
-        nsIDOMHTMLAnchorElement_Release(nsanchor);
-    }
+    return HTMLElement_handle_event(&This->element.node.event_target.dispex, eid, event, prevent_default);
 }
 
 static const NodeImplVtbl HTMLAnchorElementImplVtbl = {
-    &CLSID_HTMLAnchorElement,
-    HTMLAnchorElement_QI,
-    HTMLElement_destructor,
-    HTMLElement_cpc,
-    HTMLElement_clone,
-    HTMLElement_dispatch_nsevent_hook,
-    HTMLAnchorElement_handle_event,
-    HTMLElement_get_attr_col,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    HTMLAnchorElement_traverse,
-    HTMLAnchorElement_unlink
+    .clsid                 = &CLSID_HTMLAnchorElement,
+    .cpc_entries           = HTMLElement_cpc,
+    .clone                 = HTMLElement_clone,
+    .get_attr_col          = HTMLElement_get_attr_col,
+};
+
+static const event_target_vtbl_t HTMLAnchorElement_event_target_vtbl = {
+    {
+        HTMLELEMENT_DISPEX_VTBL_ENTRIES,
+        .query_interface= HTMLAnchorElement_query_interface,
+        .destructor     = HTMLElement_destructor,
+        .traverse       = HTMLAnchorElement_traverse,
+        .unlink         = HTMLAnchorElement_unlink
+    },
+    HTMLELEMENT_EVENT_TARGET_VTBL_ENTRIES,
+    .handle_event       = HTMLAnchorElement_handle_event
 };
 
 static const tid_t HTMLAnchorElement_iface_tids[] = {
@@ -902,8 +886,8 @@ static const tid_t HTMLAnchorElement_iface_tids[] = {
 };
 
 static dispex_static_data_t HTMLAnchorElement_dispex = {
-    L"HTMLAnchorElement",
-    NULL,
+    "HTMLAnchorElement",
+    &HTMLAnchorElement_event_target_vtbl.dispex_vtbl,
     DispHTMLAnchorElement_tid,
     HTMLAnchorElement_iface_tids,
     HTMLElement_init_dispex_info

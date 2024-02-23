@@ -44,6 +44,8 @@
 
 #include "../mmdevapi/unixlib.h"
 
+#include "mult.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(pulse);
 
 enum phys_device_bus_type {
@@ -117,8 +119,12 @@ static const REFERENCE_TIME DefaultPeriod = 100000;
 static pthread_mutex_t pulse_mutex;
 static pthread_cond_t pulse_cond = PTHREAD_COND_INITIALIZER;
 
-UINT8 mult_alaw_sample(UINT8, float);
-UINT8 mult_ulaw_sample(UINT8, float);
+static ULONG_PTR zero_bits = 0;
+
+static NTSTATUS pulse_not_implemented(void *args)
+{
+    return STATUS_SUCCESS;
+}
 
 static void pulse_lock(void)
 {
@@ -192,6 +198,14 @@ static int muldiv(int a, int b, int c)
     return ret;
 }
 
+static char *wstr_to_str(const WCHAR *wstr)
+{
+    const int len = wcslen(wstr);
+    char *str = malloc(len * 3 + 1);
+    ntdll_wcstoumbs(wstr, len + 1, str, len * 3 + 1, FALSE);
+    return str;
+}
+
 /* Following pulseaudio design here, mainloop has the lock taken whenever
  * it is handling something for pulse, and the lock is required whenever
  * doing any pa_* call that can affect the state in any way
@@ -224,6 +238,16 @@ static NTSTATUS pulse_process_attach(void *args)
 
     if (pthread_mutex_init(&pulse_mutex, &attr) != 0)
         pthread_mutex_init(&pulse_mutex, NULL);
+
+#ifdef _WIN64
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        SYSTEM_BASIC_INFORMATION info;
+
+        NtQuerySystemInformation(SystemEmulationBasicInformation, &info, sizeof(info), NULL);
+        zero_bits = (ULONG_PTR)info.HighestUserAddress | 0x7fffffff;
+    }
+#endif
 
     return STATUS_SUCCESS;
 }
@@ -761,13 +785,17 @@ static NTSTATUS pulse_test_connect(void *args)
     PhysDevice *dev;
     pa_operation *o;
     int ret;
+    char *name = wstr_to_str(params->name);
 
     pulse_lock();
     pulse_ml = pa_mainloop_new();
 
     pa_mainloop_set_poll_func(pulse_ml, pulse_poll_func, NULL);
 
-    pulse_ctx = pa_context_new(pa_mainloop_get_api(pulse_ml), params->name);
+    pulse_ctx = pa_context_new(pa_mainloop_get_api(pulse_ml), name);
+
+    free(name);
+
     if (!pulse_ctx) {
         ERR("Failed to create context\n");
         pa_mainloop_free(pulse_ml);
@@ -805,8 +833,9 @@ static NTSTATUS pulse_test_connect(void *args)
     list_init(&g_phys_speakers);
     list_init(&g_phys_sources);
 
-    pulse_add_device(&g_phys_speakers, NULL, 0, Speakers, 0, "", "PulseAudio");
-    pulse_add_device(&g_phys_sources, NULL, 0, Microphone, 0, "", "PulseAudio");
+    /* Burnout Paradise Remastered expects device name to have a space. */
+    pulse_add_device(&g_phys_speakers, NULL, 0, Speakers, 0, "", "PulseAudio Output");
+    pulse_add_device(&g_phys_sources, NULL, 0, Microphone, 0, "", "PulseAudio Input");
 
     o = pa_context_get_sink_info_list(pulse_ctx, &pulse_phys_speakers_cb, NULL);
     if (o) {
@@ -1061,15 +1090,6 @@ static HRESULT pulse_stream_connect(struct pulse_stream *stream, const char *pul
     return S_OK;
 }
 
-static ULONG_PTR zero_bits(void)
-{
-#ifdef _WIN64
-    return !NtCurrentTeb()->WowTebOffset ? 0 : 0x7fffffff;
-#else
-    return 0;
-#endif
-}
-
 static HRESULT get_device_period_helper(EDataFlow flow, const char *pulse_name, REFERENCE_TIME *def, REFERENCE_TIME *min)
 {
     struct list *list = (flow == eRender) ? &g_phys_speakers : &g_phys_sources;
@@ -1100,10 +1120,20 @@ static NTSTATUS pulse_create_stream(void *args)
     struct pulse_stream *stream;
     unsigned int i, bufsize_bytes;
     HRESULT hr;
+    char *name;
+
+    if (params->share == AUDCLNT_SHAREMODE_EXCLUSIVE) {
+        params->result = AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED;
+        return STATUS_SUCCESS;
+    }
 
     pulse_lock();
 
-    if (FAILED(params->result = pulse_connect(params->name)))
+    name = wstr_to_str(params->name);
+    params->result = pulse_connect(name);
+    free(name);
+
+    if (FAILED(params->result))
     {
         pulse_unlock();
         return STATUS_SUCCESS;
@@ -1157,7 +1187,7 @@ static NTSTATUS pulse_create_stream(void *args)
             size = stream->real_bufsize_bytes =
                 stream->bufsize_frames * 2 * pa_frame_size(&stream->ss);
             if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer,
-                                        zero_bits(), &size, MEM_COMMIT, PAGE_READWRITE))
+                                        zero_bits, &size, MEM_COMMIT, PAGE_READWRITE))
                 hr = E_OUTOFMEMORY;
         } else {
             UINT32 i, capture_packets;
@@ -1171,7 +1201,7 @@ static NTSTATUS pulse_create_stream(void *args)
 
             size = stream->real_bufsize_bytes + capture_packets * sizeof(ACPacket);
             if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer,
-                                        zero_bits(), &size, MEM_COMMIT, PAGE_READWRITE))
+                                        zero_bits, &size, MEM_COMMIT, PAGE_READWRITE))
                 hr = E_OUTOFMEMORY;
             else {
                 ACPacket *cur_packet = (ACPacket*)((char*)stream->local_buffer + stream->real_bufsize_bytes);
@@ -1815,7 +1845,7 @@ static BOOL alloc_tmp_buffer(struct pulse_stream *stream, SIZE_T bytes)
         stream->tmp_buffer_bytes = 0;
     }
     if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer,
-                                zero_bits(), &bytes, MEM_COMMIT, PAGE_READWRITE))
+                                zero_bits, &bytes, MEM_COMMIT, PAGE_READWRITE))
         return FALSE;
 
     stream->tmp_buffer_bytes = bytes;
@@ -2053,6 +2083,154 @@ static NTSTATUS pulse_release_capture_buffer(void *args)
     stream->locked = 0;
     pulse_unlock();
     params->result = S_OK;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS pulse_is_format_supported(void *args)
+{
+    struct is_format_supported_params *params = args;
+    WAVEFORMATEXTENSIBLE in;
+    WAVEFORMATEXTENSIBLE *out;
+    const WAVEFORMATEX *fmt = &in.Format;
+    const BOOLEAN exclusive = params->share == AUDCLNT_SHAREMODE_EXCLUSIVE;
+
+    params->result = S_OK;
+
+    if (!params->fmt_in || (params->share == AUDCLNT_SHAREMODE_SHARED && !params->fmt_out))
+        params->result = E_POINTER;
+    else if (params->share != AUDCLNT_SHAREMODE_SHARED && params->share != AUDCLNT_SHAREMODE_EXCLUSIVE)
+        params->result = E_INVALIDARG;
+    else {
+        memcpy(&in, params->fmt_in, params->fmt_in->wFormatTag == WAVE_FORMAT_EXTENSIBLE ?
+                                    sizeof(in) : sizeof(in.Format));
+
+        if (fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+            if (fmt->cbSize < sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX))
+                params->result = E_INVALIDARG;
+            else if (fmt->nAvgBytesPerSec == 0 || fmt->nBlockAlign == 0 ||
+                    (in.Samples.wValidBitsPerSample > fmt->wBitsPerSample))
+                params->result = E_INVALIDARG;
+            else if (fmt->nChannels == 0)
+                params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+        }
+    }
+
+    if (FAILED(params->result))
+        return STATUS_SUCCESS;
+
+    if (exclusive)
+        out = &in;
+    else {
+        out = params->fmt_out;
+        memcpy(out, fmt, fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE ?
+                         sizeof(*out) : sizeof((*out).Format));
+    }
+
+    switch (fmt->wFormatTag) {
+    case WAVE_FORMAT_EXTENSIBLE: {
+        if ((fmt->cbSize != sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX) &&
+             fmt->cbSize != sizeof(WAVEFORMATEXTENSIBLE)) ||
+             fmt->nBlockAlign != fmt->wBitsPerSample / 8 * fmt->nChannels ||
+             in.Samples.wValidBitsPerSample > fmt->wBitsPerSample ||
+             fmt->nAvgBytesPerSec != fmt->nBlockAlign * fmt->nSamplesPerSec) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+
+        if (exclusive) {
+            UINT32 mask = 0, i, channels = 0;
+
+            if (!(in.dwChannelMask & (SPEAKER_ALL | SPEAKER_RESERVED))) {
+                for (i = 1; !(i & SPEAKER_RESERVED); i <<= 1) {
+                    if (i & in.dwChannelMask) {
+                        mask |= i;
+                        ++channels;
+                    }
+                }
+
+                if (channels != fmt->nChannels || (in.dwChannelMask & ~mask)) {
+                    params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+                    break;
+                }
+            } else {
+                params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+                break;
+            }
+        }
+
+        if (IsEqualGUID(&in.SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
+            if (fmt->wBitsPerSample != 32) {
+                params->result = E_INVALIDARG;
+                break;
+            }
+
+            if (in.Samples.wValidBitsPerSample != fmt->wBitsPerSample) {
+                params->result = S_FALSE;
+                out->Samples.wValidBitsPerSample = fmt->wBitsPerSample;
+            }
+        } else if (IsEqualGUID(&in.SubFormat, &KSDATAFORMAT_SUBTYPE_PCM)) {
+            if (!fmt->wBitsPerSample || fmt->wBitsPerSample > 32 || fmt->wBitsPerSample % 8) {
+                params->result = E_INVALIDARG;
+                break;
+            }
+
+            if (in.Samples.wValidBitsPerSample != fmt->wBitsPerSample &&
+               !(fmt->wBitsPerSample == 32 &&
+                in.Samples.wValidBitsPerSample == 24)) {
+                params->result = S_FALSE;
+                out->Samples.wValidBitsPerSample = fmt->wBitsPerSample;
+                break;
+            }
+        } else {
+            params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+            break;
+        }
+
+        break;
+    }
+    case WAVE_FORMAT_ALAW:
+    case WAVE_FORMAT_MULAW:
+        if (fmt->wBitsPerSample != 8) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+    /* Fall-through */
+    case WAVE_FORMAT_IEEE_FLOAT:
+        if (fmt->wFormatTag == WAVE_FORMAT_IEEE_FLOAT && fmt->wBitsPerSample != 32) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+    /* Fall-through */
+    case WAVE_FORMAT_PCM: {
+        if (fmt->wFormatTag == WAVE_FORMAT_PCM &&
+           (!fmt->wBitsPerSample || fmt->wBitsPerSample > 32 || fmt->wBitsPerSample % 8)) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+
+        if (fmt->nChannels > 2) {
+            params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+            break;
+        }
+
+        /* fmt->cbSize, fmt->nBlockAlign and fmt->nAvgBytesPerSec seem to be
+         * ignored, invalid values are happily accepted. */
+        break;
+    }
+    default:
+        params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+        break;
+    }
+
+    if (exclusive) { /* This driver does not support exclusive mode. */
+        if (params->result == S_OK)
+            params->result = params->flow == eCapture ?
+                                             AUDCLNT_E_UNSUPPORTED_FORMAT :
+                                             AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED;
+        else if (params->result == S_FALSE)
+            params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -2325,31 +2503,30 @@ static NTSTATUS pulse_get_prop_value(void *args)
     struct list *list = (params->flow == eRender) ? &g_phys_speakers : &g_phys_sources;
     PhysDevice *dev;
 
-    params->result = S_OK;
     LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
         if (strcmp(params->device, dev->pulse_name))
             continue;
         if (IsEqualPropertyKey(*params->prop, devicepath_key)) {
-            if (!get_device_path(dev, params))
-                break;
+            get_device_path(dev, params);
             return STATUS_SUCCESS;
         } else if (IsEqualGUID(&params->prop->fmtid, &PKEY_AudioEndpoint_GUID)) {
             switch (params->prop->pid) {
             case 0:   /* FormFactor */
                 params->value->vt = VT_UI4;
                 params->value->ulVal = dev->form;
+                params->result = S_OK;
                 return STATUS_SUCCESS;
             case 3:   /* PhysicalSpeakers */
                 if (!dev->channel_mask)
                     goto fail;
                 params->value->vt = VT_UI4;
                 params->value->ulVal = dev->channel_mask;
+                params->result = S_OK;
                 return STATUS_SUCCESS;
-            default:
-                params->result = E_NOTIMPL;
             }
         }
 
+        params->result = E_NOTIMPL;
         return STATUS_SUCCESS;
     }
 
@@ -2374,7 +2551,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_release_render_buffer,
     pulse_get_capture_buffer,
     pulse_release_capture_buffer,
-    NULL,
+    pulse_is_format_supported,
     pulse_get_mix_format,
     pulse_get_device_period,
     pulse_get_buffer_size,
@@ -2388,13 +2565,15 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_test_connect,
     pulse_is_started,
     pulse_get_prop_value,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
 };
+
+C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == funcs_count);
 
 #ifdef _WIN64
 
@@ -2539,6 +2718,30 @@ static NTSTATUS pulse_wow64_get_capture_buffer(void *args)
     *(unsigned int *)ULongToPtr(params32->data) = PtrToUlong(data);
     return STATUS_SUCCESS;
 };
+
+static NTSTATUS pulse_wow64_is_format_supported(void *args)
+{
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        AUDCLNT_SHAREMODE share;
+        PTR32 fmt_in;
+        PTR32 fmt_out;
+        HRESULT result;
+    } *params32 = args;
+    struct is_format_supported_params params =
+    {
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .share = params32->share,
+        .fmt_in = ULongToPtr(params32->fmt_in),
+        .fmt_out = ULongToPtr(params32->fmt_out)
+    };
+    pulse_is_format_supported(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
 
 static NTSTATUS pulse_wow64_get_mix_format(void *args)
 {
@@ -2702,7 +2905,6 @@ static NTSTATUS pulse_wow64_set_volumes(void *args)
         float master_volume;
         PTR32 volumes;
         PTR32 session_volumes;
-        int channel;
     } *params32 = args;
     struct set_volumes_params params =
     {
@@ -2710,7 +2912,6 @@ static NTSTATUS pulse_wow64_set_volumes(void *args)
         .master_volume = params32->master_volume,
         .volumes = ULongToPtr(params32->volumes),
         .session_volumes = ULongToPtr(params32->session_volumes),
-        .channel = params32->channel
     };
     return pulse_set_volumes(&params);
 }
@@ -2821,7 +3022,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_release_render_buffer,
     pulse_wow64_get_capture_buffer,
     pulse_release_capture_buffer,
-    NULL,
+    pulse_wow64_is_format_supported,
     pulse_wow64_get_mix_format,
     pulse_wow64_get_device_period,
     pulse_wow64_get_buffer_size,
@@ -2835,12 +3036,14 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_wow64_test_connect,
     pulse_is_started,
     pulse_wow64_get_prop_value,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
+    pulse_not_implemented,
 };
+
+C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == funcs_count);
 
 #endif /* _WIN64 */

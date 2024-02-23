@@ -141,10 +141,23 @@ static int CALLBACK eto_emf_enum_proc(HDC hdc, HANDLETABLE *handle_table,
         ok(emr_ExtTextOutW->rclBounds.bottom != -1, "emr_ExtTextOutW->rclBounds.bottom = %ld\n",
                 emr_ExtTextOutW->rclBounds.bottom);
 
-        for(i = 0; i < emr_ExtTextOutW->emrtext.nChars; i++)
+        if(emr_ExtTextOutW->emrtext.fOptions & ETO_PDY)
         {
-            ok(orig_dx[i] == dx[i], "pass %d: dx[%ld] (%d) didn't match %d\n",
-                                     n_record, i, dx[i], orig_dx[i]);
+            ok(emr_ExtTextOutW->rclBounds.top < 0, "emr_ExtTextOutW->rclBounds.top = %ld\n",
+                    emr_ExtTextOutW->rclBounds.top);
+            for(i = 0; i < emr_ExtTextOutW->emrtext.nChars * 2; i++)
+            {
+                ok(orig_dx[i] == dx[i], "pass %d: dx[%ld] (%d) didn't match %d\n",
+                        n_record, i, dx[i], orig_dx[i]);
+            }
+        }
+        else
+        {
+            for(i = 0; i < emr_ExtTextOutW->emrtext.nChars; i++)
+            {
+                ok(orig_dx[2 * i] == dx[i], "pass %d: dx[%ld] (%d) didn't match %d\n",
+                        n_record, i, dx[i], orig_dx[i]);
+            }
         }
         n_record++;
         emr_processed = TRUE;
@@ -214,8 +227,19 @@ static void test_ExtTextOut(void)
     ret = ExtTextOutA(hdcMetafile, 0, 0, 0, &rc, text, lstrlenA(text), NULL);
     ok( ret, "ExtTextOutA error %ld\n", GetLastError());
 
+    ret = ExtTextOutA(hdcMetafile, 0, 0, ETO_PDY, &rc, text, len, NULL);
+    ok( !ret, "ExtTextOutA succeeded\n");
+
     /* 2. pass custom lpDx */
     ret = ExtTextOutA(hdcMetafile, 0, 20, 0, &rc, text, lstrlenA(text), dx);
+    ok( ret, "ExtTextOutA error %ld\n", GetLastError());
+
+    for (i = len - 1; i >= 0; i--)
+    {
+        dx[2 * i] = dx[i];
+        dx[2 * i + 1] = 1;
+    }
+    ret = ExtTextOutA(hdcMetafile, 0, 20, ETO_PDY, &rc, text, len, dx);
     ok( ret, "ExtTextOutA error %ld\n", GetLastError());
 
     /* 3. pass NULL lprc */
@@ -2239,9 +2263,9 @@ static BOOL match_emf_record(const ENHMETARECORD *emr1, const ENHMETARECORD *emr
     {
         EMREXTTEXTOUTW *eto1, *eto2;
 
-        eto1 = HeapAlloc(GetProcessHeap(), 0, emr1->nSize);
+        eto1 = malloc(emr1->nSize);
         memcpy(eto1, emr1, emr1->nSize);
-        eto2 = HeapAlloc(GetProcessHeap(), 0, emr2->nSize);
+        eto2 = malloc(emr2->nSize);
         memcpy(eto2, emr2, emr2->nSize);
 
         /* different Windows versions setup DC scaling differently */
@@ -2254,8 +2278,8 @@ static BOOL match_emf_record(const ENHMETARECORD *emr1, const ENHMETARECORD *emr
             dump_EMREXTTEXTOUT(eto1);
             dump_EMREXTTEXTOUT(eto2);
         }
-        HeapFree(GetProcessHeap(), 0, eto1);
-        HeapFree(GetProcessHeap(), 0, eto2);
+        free(eto1);
+        free(eto2);
     }
     else if (emr1->iType == EMR_EXTSELECTCLIPRGN && !lstrcmpA(desc, "emf_clipping"))
     {
@@ -4126,7 +4150,7 @@ static void test_mf_PatternBrush(void)
     BOOL ret;
     INT type;
 
-    orig_lb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(LOGBRUSH));
+    orig_lb = calloc(1, sizeof(LOGBRUSH));
 
     orig_lb->lbStyle = BS_PATTERN;
     orig_lb->lbColor = RGB(0, 0, 0);
@@ -4180,7 +4204,39 @@ static void test_mf_PatternBrush(void)
     ret = DeleteObject((HBITMAP)orig_lb->lbHatch);
     ok( ret, "DeleteObject(HBITMAP) error %ld\n",
         GetLastError());
-    HeapFree (GetProcessHeap(), 0, orig_lb);
+    free(orig_lb);
+}
+
+static int CALLBACK pattern_brush_emf_enum_proc(HDC hdc, HANDLETABLE *htable,
+        const ENHMETARECORD *rec, int n, LPARAM arg)
+{
+    LOGBRUSH brush;
+    BOOL ret;
+
+    switch (rec->iType)
+    {
+    case EMR_HEADER:
+    case EMR_SELECTOBJECT:
+    case EMR_EOF:
+    case EMR_CREATEMONOBRUSH:
+        return 1;
+    case EMR_CREATEDIBPATTERNBRUSHPT:
+        ok(!htable->objectHandle[2], "objectHandle[2] already used\n");
+        ret = PlayEnhMetaFileRecord(hdc, htable, rec, n);
+        ok(ret, "PlayEnhMetaFileRecord failed\n");
+        ok(htable->objectHandle[2] != NULL, "objectHandle[2] not created\n");
+
+        ret = GetObjectW(htable->objectHandle[2], sizeof(brush), &brush);
+        ok(ret, "GetObjectW failed\n");
+        ok(brush.lbStyle == BS_DIBPATTERN, "brush.lbStyle = %d\n", brush.lbStyle);
+        ok(brush.lbHatch > (ULONG_PTR)rec && brush.lbHatch < (ULONG_PTR)rec + rec->nSize,
+                "brush.lbHatch = %p, not in %p-%p range\n",
+                (void *)brush.lbHatch, rec, (const BYTE *)rec + rec->nSize);
+        return 1;
+    default:
+        ok(0, "unexpected record %lu\n", rec->iType);
+        return 0;
+    }
 }
 
 static void test_emf_pattern_brush(void)
@@ -4195,7 +4251,7 @@ static void test_emf_pattern_brush(void)
     unsigned int i;
     BOOL ret;
 
-    orig_lb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(LOGBRUSH));
+    orig_lb = calloc(1, sizeof(LOGBRUSH));
 
     orig_lb->lbStyle = BS_PATTERN;
     orig_lb->lbColor = RGB(0, 0, 0);
@@ -4237,15 +4293,18 @@ static void test_emf_pattern_brush(void)
         dump_emf_records(emf, "emf_pattern_brush");
     }
 
-    ret = DeleteEnhMetaFile(emf);
-    ok(ret, "DeleteMetaFile error %ld\n", GetLastError());
     ret = DeleteObject(bitmap_brush);
     ok(ret, "DeleteObject failed\n");
     ret = DeleteObject(dib_brush);
     ok(ret, "DeleteObject failed\n");
     ret = DeleteObject((HBITMAP)orig_lb->lbHatch);
     ok(ret, "DeleteObject failed\n");
-    HeapFree(GetProcessHeap(), 0, orig_lb);
+    free(orig_lb);
+
+    ret = EnumEnhMetaFile(NULL, emf, pattern_brush_emf_enum_proc, NULL, NULL);
+    ok(ret, "EnumEnhMetaFile error %ld\n", GetLastError());
+    ret = DeleteEnhMetaFile(emf);
+    ok(ret, "DeleteMetaFile error %ld\n", GetLastError());
 }
 
 static void test_mf_palette_brush(void)
@@ -5029,6 +5088,65 @@ static void test_emf_blit(void)
 
     ret = DeleteEnhMetaFile(hmf);
     ok(ret, "DeleteMetaFile(%p) error %ld\n", hmf, GetLastError());
+}
+
+struct check_mf_arg
+{
+    int pos;
+    const WORD *records;
+};
+
+static int WINAPI check_mf_records(HDC hdc, HANDLETABLE *htable,
+        METARECORD *rec, int n, LPARAM ctx)
+{
+    struct check_mf_arg *records = (struct check_mf_arg *)ctx;
+
+    ok(rec->rdFunction == records->records[records->pos], "got record %x, expected %x\n",
+            rec->rdFunction, records->records[records->pos]);
+    return rec->rdFunction == records->records[records->pos++];
+}
+
+static void test_PlayMetaFile(void)
+{
+    static WORD line_records[] = { META_LINETO, 0 };
+    struct check_mf_arg records;
+    HMETAFILE hmeta;
+    HDC dc, metadc;
+    BOOL r;
+
+    dc = CreateCompatibleDC(NULL);
+    ok(dc != NULL, "CreateCompatibleDC failed\n");
+
+    metadc = CreateMetaFileW(NULL);
+    ok(metadc != NULL, "CreateMetaFile failed\n");
+    r = LineTo(metadc, 10, 10);
+    ok(r, "LineTo failed\n");
+    hmeta = CloseMetaFile(metadc);
+    ok(hmeta != NULL, "CloseMetaFile failed\n");
+
+    records.pos = 0;
+    records.records = line_records;
+    r = EnumMetaFile(dc, hmeta, check_mf_records, (LPARAM)&records);
+    ok(r, "EnumMetaFile failed\n");
+
+    metadc = CreateMetaFileW(NULL);
+    ok(metadc != NULL, "CreateMetaFile failed\n");
+    r = PlayMetaFile(metadc, hmeta);
+    ok(r, "PlayMetaFile failed\n");
+    r = DeleteMetaFile(hmeta);
+    ok(r, "DeleteMetaFile failed\n");
+    hmeta = CloseMetaFile(metadc);
+    ok(hmeta != NULL, "CloseMetaFile failed\n");
+
+    records.pos = 0;
+    records.records = line_records;
+    r = EnumMetaFile(dc, hmeta, check_mf_records, (LPARAM)&records);
+    ok(r, "EnumMetaFile failed\n");
+
+    r = DeleteMetaFile(hmeta);
+    ok(r, "DeleteMetaFile failed\n");
+    r = DeleteDC(dc);
+    ok(r, "DeleteDC failed\n");
 }
 
 static void test_emf_mask_blit(void)
@@ -8609,11 +8727,11 @@ static HENHMETAFILE create_converted_emf(const METAFILEPICT *mfp)
 
     size = GetMetaFileBitsEx(hmf, 0, NULL);
     ok(size, "GetMetaFileBitsEx failed with error %ld\n", GetLastError());
-    pBits = HeapAlloc(GetProcessHeap(), 0, size);
+    pBits = malloc(size);
     GetMetaFileBitsEx(hmf, size, pBits);
     DeleteMetaFile(hmf);
     hemf = SetWinMetaFileBits(size, pBits, NULL, mfp);
-    HeapFree(GetProcessHeap(), 0, pBits);
+    free(pBits);
     return hemf;
 }
 
@@ -8793,8 +8911,8 @@ static void test_SetWinMetaFileBits(void)
     return;
   }
 
-  buffer = HeapAlloc(GetProcessHeap(), 0, buffer_size);
-  ok(buffer != NULL, "HeapAlloc failed\n");
+  buffer = malloc(buffer_size);
+  ok(buffer != NULL, "malloc failed\n");
   if (!buffer)
   {
     DeleteMetaFile(wmf);
@@ -8806,7 +8924,7 @@ static void test_SetWinMetaFileBits(void)
   DeleteMetaFile(wmf);
   if (res != buffer_size)
   {
-     HeapFree(GetProcessHeap(), 0, buffer);
+     free(buffer);
      return;
   }
 
@@ -8902,7 +9020,7 @@ static void test_SetWinMetaFileBits(void)
        "SetWinMetaFileBits: xExt and yExt must be ignored for mapping modes other than MM_ANISOTROPIC and MM_ISOTROPIC\n");
   }
 
-  HeapFree(GetProcessHeap(), 0, buffer);
+  free(buffer);
 }
 
 static BOOL near_match(int x, int y)
@@ -8955,7 +9073,7 @@ static void getwinmetafilebits(UINT mode, int scale, RECT *rc)
     ok(emf != NULL, "emf is NULL\n");
 
     emf_size = GetEnhMetaFileBits(emf, 0, NULL);
-    enh_header = HeapAlloc(GetProcessHeap(), 0, emf_size);
+    enh_header = malloc(emf_size);
     emf_size = GetEnhMetaFileBits(emf, emf_size, (BYTE*)enh_header);
     DeleteEnhMetaFile(emf);
     /* multiply szlDevice.cx by scale, when scale != 1 the recording and playback dcs
@@ -8970,7 +9088,7 @@ static void getwinmetafilebits(UINT mode, int scale, RECT *rc)
        broken(size == 0), /* some versions of winxp fail for some reason */
        "GetWinMetaFileBits returns 0\n");
     if(!size) goto end;
-    mh = HeapAlloc(GetProcessHeap(), 0, size);
+    mh = malloc(size);
     GetWinMetaFileBits(emf, size, (BYTE*)mh, mode, display_dc);
 
     for(i = 0; i < size / 2; i++) check += ((WORD*)mh)[i];
@@ -9078,16 +9196,16 @@ static void getwinmetafilebits(UINT mode, int scale, RECT *rc)
     emf2 = SetWinMetaFileBits( size, (BYTE*)mh, NULL, &mfp );
     ok( !!emf2, "got NULL\n" );
     emf2_size = GetEnhMetaFileBits( emf2, 0, NULL );
-    enh2_header = HeapAlloc( GetProcessHeap(), 0, emf2_size );
+    enh2_header = malloc( emf2_size );
     emf2_size = GetEnhMetaFileBits( emf2, emf2_size, (BYTE*)enh2_header );
     ok( emf_size == emf2_size, "%d %d\n", emf_size, emf2_size );
     ok( !memcmp( enh_header, enh2_header, emf_size ), "mismatch\n" );
-    HeapFree( GetProcessHeap(), 0, enh2_header );
+    free( enh2_header );
     DeleteEnhMetaFile( emf2 );
 
 end:
-    HeapFree(GetProcessHeap(), 0, mh);
-    HeapFree(GetProcessHeap(), 0, enh_header);
+    free(mh);
+    free(enh_header);
     DeleteEnhMetaFile(emf);
 
     ReleaseDC(NULL, display_dc);
@@ -10734,6 +10852,7 @@ START_TEST(metafile)
     test_mf_select();
     test_mf_palette();
     test_mf_blit();
+    test_PlayMetaFile();
 
     /* For metafile conversions */
     test_mf_conversions();

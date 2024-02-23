@@ -22,9 +22,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include "ws2tcpip.h"
 
 #include <limits.h>
@@ -1270,7 +1267,7 @@ static DWORD urlcache_copy_entry(cache_container *container, const urlcache_head
         entry_info->lpszLocalFileName = NULL;
         entry_info->lpszSourceUrlName = NULL;
         entry_info->CacheEntryType = url_entry->cache_entry_type;
-        entry_info->u.dwExemptDelta = url_entry->exempt_delta;
+        entry_info->dwExemptDelta = url_entry->exempt_delta;
         entry_info->dwHeaderInfoSize = url_entry->header_info_size;
         entry_info->dwHitRate = url_entry->hit_rate;
         entry_info->dwSizeHigh = url_entry->size.u.HighPart;
@@ -1394,7 +1391,7 @@ static DWORD urlcache_set_entry_info(entry_url *url_entry, const INTERNET_CACHE_
     if (field_control & CACHE_ENTRY_ATTRIBUTE_FC)
         url_entry->cache_entry_type = entry_info->CacheEntryType;
     if (field_control & CACHE_ENTRY_EXEMPT_DELTA_FC)
-        url_entry->exempt_delta = entry_info->u.dwExemptDelta;
+        url_entry->exempt_delta = entry_info->dwExemptDelta;
     if (field_control & CACHE_ENTRY_EXPTIME_FC)
         file_time_to_dos_date_time(&entry_info->ExpireTime, &url_entry->expire_date, &url_entry->expire_time);
     if (field_control & CACHE_ENTRY_HEADERINFO_FC)
@@ -1926,7 +1923,7 @@ static BOOL urlcache_encode_url_alloc(const WCHAR *url, char **encoded_url)
     if(!encoded_len)
         return FALSE;
 
-    ret = malloc(encoded_len * sizeof(WCHAR));
+    ret = malloc(encoded_len);
     if(!ret)
         return FALSE;
 
@@ -2553,8 +2550,8 @@ BOOL WINAPI UnlockUrlCacheEntryFileA(LPCSTR lpszUrlName, DWORD dwReserved)
     pEntry = (entry_header*)((LPBYTE)pHeader + pHashEntry->offset);
     if (pEntry->signature != URL_SIGNATURE)
     {
-        cache_container_unlock_index(pContainer, pHeader);
         FIXME("Trying to retrieve entry of unknown format %s\n", debugstr_an((LPSTR)&pEntry->signature, sizeof(DWORD)));
+        cache_container_unlock_index(pContainer, pHeader);
         SetLastError(ERROR_FILE_NOT_FOUND);
         return FALSE;
     }
@@ -3633,7 +3630,8 @@ BOOL WINAPI FindCloseUrlCache(HANDLE hEnumHandle)
         return FALSE;
     }
 
-    pEntryHandle->magic = 0;
+    /* Ensure compiler doesn't optimize out the assignment with 0. */
+    SecureZeroMemory(&pEntryHandle->magic, sizeof(pEntryHandle->magic));
     free(pEntryHandle->url_search_pattern);
     free(pEntryHandle);
     return TRUE;

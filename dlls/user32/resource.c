@@ -161,12 +161,13 @@ INT WINAPI DECLSPEC_HOTPATCH LoadStringW( HINSTANCE instance, UINT resource_id,
     if(buffer == NULL)
         return 0;
 
-    /* Use loword (incremented by 1) as resourceid */
-    hrsrc = FindResourceW( instance, MAKEINTRESOURCEW((LOWORD(resource_id) >> 4) + 1),
-                           (LPWSTR)RT_STRING );
-    if (!hrsrc) return 0;
-    hmem = LoadResource( instance, hrsrc );
-    if (!hmem) return 0;
+    if (!(hrsrc = FindResourceW( instance, MAKEINTRESOURCEW((LOWORD(resource_id) >> 4) + 1), (LPWSTR)RT_STRING )) ||
+        !(hmem = LoadResource( instance, hrsrc )))
+    {
+        TRACE( "Failed to load string.\n" );
+        if (buflen > 0) buffer[0] = 0;
+        return 0;
+    }
 
     p = LockResource(hmem);
     string_num = resource_id & 0x000f;
@@ -184,17 +185,10 @@ INT WINAPI DECLSPEC_HOTPATCH LoadStringW( HINSTANCE instance, UINT resource_id,
     }
 
     i = min(buflen - 1, *p);
-    if (i > 0) {
-	memcpy(buffer, p + 1, i * sizeof (WCHAR));
-        buffer[i] = 0;
-    } else {
-	if (buflen > 1) {
-            buffer[0] = 0;
-	    return 0;
-	}
-    }
+    memcpy(buffer, p + 1, i * sizeof(WCHAR));
+    buffer[i] = 0;
 
-    TRACE("%s loaded !\n", debugstr_w(buffer));
+    TRACE("returning %s\n", debugstr_w(buffer));
     return i;
 }
 

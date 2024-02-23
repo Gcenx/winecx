@@ -231,6 +231,7 @@ static const char *vt2a(VARIANT *v)
  */
 static void detect_locale(void)
 {
+    UINT cp;
     CPINFOEXA cpinfo;
     HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
     LANGID (WINAPI *pGetThreadUILanguage)(void) = (void*)GetProcAddress(kernel32, "GetThreadUILanguage");
@@ -239,8 +240,17 @@ static void detect_locale(void)
                   PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_ENGLISH &&
                   PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH);
 
-    GetCPInfoExA( CP_ACP, 0, &cpinfo );
-    MaxCharSize = cpinfo.MaxCharSize;
+    GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER, (WCHAR*)&cp, sizeof(cp));
+    if (cp)
+    {
+        GetCPInfoExA( cp, 0, &cpinfo );
+        MaxCharSize = cpinfo.MaxCharSize;
+    }
+    else
+    {
+        /* No ANSI code page for that locale -> the fallback is UTF-8 */
+        MaxCharSize = 4;
+    }
 
     GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK | LOCALE_RETURN_NUMBER,
                    (void*)&first_day_of_week, sizeof(first_day_of_week));
@@ -293,35 +303,35 @@ static void test_disp(IDispatch *disp)
     hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
     ok(hres == S_OK, "Could not get IDispatchEx iface: %08lx\n", hres);
 
-    str = a2bstr("publicProp");
+    str = SysAllocString(L"publicProp");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &public_prop_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicProp) failed: %08lx\n", hres);
 
-    str = a2bstr("PUBLICPROP");
+    str = SysAllocString(L"PUBLICPROP");
     hres = IDispatchEx_GetDispID(dispex, str, 0, &id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(PUBLICPROP) failed: %08lx\n", hres);
     ok(public_prop_id == id, "id = %ld\n", public_prop_id);
 
-    str = a2bstr("publicPROP2");
+    str = SysAllocString(L"publicPROP2");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &public_prop2_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicProp2) failed: %08lx\n", hres);
 
-    str = a2bstr("defValGet");
+    str = SysAllocString(L"defValGet");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &defvalget_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(defValGet) failed: %08lx\n", hres);
     ok(defvalget_id == DISPID_VALUE, "id = %ld\n", defvalget_id);
 
-    str = a2bstr("privateProp");
+    str = SysAllocString(L"privateProp");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &id);
     SysFreeString(str);
     ok(hres == DISP_E_UNKNOWNNAME, "GetDispID(privateProp) failed: %08lx, expected DISP_E_UNKNOWNNAME\n", hres);
     ok(id == -1, "id = %ld\n", id);
 
-    str = a2bstr("class_initialize");
+    str = SysAllocString(L"class_initialize");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicProp2) failed: %08lx\n", hres);
@@ -419,13 +429,13 @@ static void test_disp(IDispatch *disp)
     hres = IDispatchEx_InvokeEx(dispex, public_prop_id, 0, DISPATCH_PROPERTYPUT, &dp, NULL, &ei, NULL);
     ok(hres == DISP_E_PARAMNOTOPTIONAL, "InvokeEx failed: %08lx, expected DISP_E_PARAMNOTOPTIONAL\n", hres);
 
-    str = a2bstr("publicFunction");
+    str = SysAllocString(L"publicFunction");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &public_func_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicFunction) failed: %08lx\n", hres);
     ok(public_func_id != -1, "public_func_id = -1\n");
 
-    str = a2bstr("publicSub");
+    str = SysAllocString(L"publicSub");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &public_sub_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicSub) failed: %08lx\n", hres);
@@ -497,13 +507,13 @@ static void test_disp(IDispatch *disp)
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
     ok(V_VT(&v) == VT_EMPTY, "V_VT(v) = %d\n", V_VT(&v));
 
-    str = a2bstr("privateSub");
+    str = SysAllocString(L"privateSub");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &id);
     SysFreeString(str);
     ok(hres == DISP_E_UNKNOWNNAME, "GetDispID(privateSub) failed: %08lx, expected DISP_E_UNKNOWNNAME\n", hres);
     ok(id == -1, "id = %ld\n", id);
 
-    str = a2bstr("dynprop");
+    str = SysAllocString(L"dynprop");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive|fdexNameEnsure, &id);
     ok(hres == DISP_E_UNKNOWNNAME, "GetDispID(privateProp) failed: %08lx, expected DISP_E_UNKNOWNNAME\n", hres);
     ok(id == -1, "id = %ld\n", id);
@@ -512,26 +522,26 @@ static void test_disp(IDispatch *disp)
     ok(id == -1, "id = %ld\n", id);
     SysFreeString(str);
 
-    str = a2bstr("publicProp");
+    str = SysAllocString(L"publicProp");
     hres = IDispatchEx_GetDispID(dispex, str, 0x80000000|fdexNameCaseInsensitive, &public_prop_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicProp) failed: %08lx\n", hres);
 
     id = 0xdeadbeef;
-    str = a2bstr("publicProp");
+    str = SysAllocString(L"publicProp");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseSensitive, &id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicProp) failed: %08lx\n", hres);
     ok(id == public_prop_id, "id = %ld, expected %ld\n", id, public_prop_id);
 
     id = 0xdeadbeef;
-    str = a2bstr("publicprop");
+    str = SysAllocString(L"publicprop");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseSensitive, &id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicProp) failed: %08lx\n", hres);
     ok(id == public_prop_id, "id = %ld, expected %ld\n", id, public_prop_id);
 
-    str = a2bstr("gsGetProp");
+    str = SysAllocString(L"gsGetProp");
     hres = IDispatchEx_GetDispID(dispex, str, fdexNameCaseInsensitive, &gs_getter_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID(publicFunction) failed: %08lx\n", hres);
@@ -2108,23 +2118,23 @@ static HRESULT parse_script(DWORD flags, BSTR script_str, const WCHAR *delim)
     return hres;
 }
 
-static void parse_script_af(DWORD flags, const char *src)
+static void parse_script_wf(DWORD flags, const WCHAR *src)
 {
     BSTR tmp;
     HRESULT hres;
 
-    tmp = a2bstr(src);
+    tmp = SysAllocString(src);
     hres = parse_script(flags, tmp, NULL);
     SysFreeString(tmp);
     ok(hres == S_OK, "parse_script failed: %08lx\n", hres);
 }
 
-static HRESULT parse_script_ar(const char *src)
+static HRESULT parse_script_wr(const WCHAR *src)
 {
     BSTR tmp;
     HRESULT hres;
 
-    tmp = a2bstr(src);
+    tmp = SysAllocString(src);
     hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, tmp, NULL);
     SysFreeString(tmp);
     return hres;
@@ -2150,31 +2160,31 @@ static void test_parse_context(void)
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
 
     /* unknown identifier context is not a valid argument */
-    str = a2bstr("Call reportSuccess()\n");
+    str = SysAllocString(L"Call reportSuccess()\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, L"y", NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == E_INVALIDARG, "ParseScriptText failed: %08lx\n", hres);
     SysFreeString(str);
 
-    str = a2bstr("class Cl\n"
-                 "    Public Sub ClMethod\n"
-                 "        Call reportSuccess()\n"
-                 "    End Sub\n"
-                 "End Class\n"
-                 "Dim x\n"
-                 "set x = new Cl\n");
+    str = SysAllocString(L"class Cl\n"
+                         "    Public Sub ClMethod\n"
+                         "        Call reportSuccess()\n"
+                         "    End Sub\n"
+                         "End Class\n"
+                         "Dim x\n"
+                         "set x = new Cl\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     SysFreeString(str);
 
     /* known global variable is not a valid context */
-    str = a2bstr("Call reportSuccess()\n");
+    str = SysAllocString(L"Call reportSuccess()\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, L"x", NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == E_INVALIDARG, "ParseScriptText failed: %08lx\n", hres);
     SysFreeString(str);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    str = a2bstr("Call reportSuccess()\n");
+    str = SysAllocString(L"Call reportSuccess()\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, L"test", NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     SysFreeString(str);
@@ -2186,31 +2196,31 @@ static void test_parse_context(void)
     ok(global_ref == 1, "global_ref = %lu\n", global_ref);
 }
 
-static void parse_script_a(const char *src)
+static void parse_script_w(const WCHAR *src)
 {
-    parse_script_af(SCRIPTITEM_GLOBALMEMBERS, src);
+    parse_script_wf(SCRIPTITEM_GLOBALMEMBERS, src);
 }
 
-#define parse_htmlscript_a(a) _parse_htmlscript_a(__LINE__,a)
-static void _parse_htmlscript_a(unsigned line, const char *src)
+#define parse_htmlscript(a) _parse_htmlscript(__LINE__,a)
+static void _parse_htmlscript(unsigned line, const WCHAR *src)
 {
     BSTR tmp;
     HRESULT hres;
 
-    tmp = a2bstr(src);
+    tmp = SysAllocString(src);
     hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, tmp, L"</SCRIPT>");
     SysFreeString(tmp);
     ok_(__FILE__,line)(hres == S_OK, "parse_script failed: %08lx\n", hres);
 }
 
-static IDispatchEx *parse_procedure(IActiveScriptParseProcedure2 *parse_proc, const char *src, DWORD flags)
+static IDispatchEx *parse_procedure(IActiveScriptParseProcedure2 *parse_proc, const WCHAR *src, DWORD flags)
 {
     IDispatchEx *dispex;
     IDispatch *disp;
     BSTR str;
     HRESULT hres;
 
-    str = a2bstr(src);
+    str = SysAllocString(src);
     hres = IActiveScriptParseProcedure2_ParseProcedureText(parse_proc, str, NULL, L"", NULL, NULL, L"\"", 0, 0,
             SCRIPTPROC_HOSTMANAGESSOURCE|SCRIPTPROC_IMPLICIT_THIS|SCRIPTPROC_IMPLICIT_PARENTS|flags, &disp);
     SysFreeString(str);
@@ -2246,7 +2256,7 @@ static void test_procedures(void)
     ok(hres == S_OK, "ParseProcedureText failed: %08lx\n", hres);
     IDispatch_Release(disp);
 
-    proc = parse_procedure(parse_proc, "dim x\nif true then x=false", 0);
+    proc = parse_procedure(parse_proc, L"dim x\nif true then x=false", 0);
 
     SET_EXPECT(OnEnterScript);
     SET_EXPECT(OnLeaveScript);
@@ -2258,7 +2268,7 @@ static void test_procedures(void)
     VariantClear(&v);
     IDispatchEx_Release(proc);
 
-    proc = parse_procedure(parse_proc, "\"foobar\"", SCRIPTPROC_ISEXPRESSION);
+    proc = parse_procedure(parse_proc, L"\"foobar\"", SCRIPTPROC_ISEXPRESSION);
 
     SET_EXPECT(OnEnterScript);
     SET_EXPECT(OnLeaveScript);
@@ -2448,7 +2458,7 @@ static void test_callbacks(void)
 
     store_script_error = &error1;
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwException &h80004002&");
+    hres = parse_script_wr(L"throwException &h80004002&");
     ok(hres == MAKE_VBSERROR(430), "got error: %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
@@ -2474,7 +2484,7 @@ static void test_callbacks(void)
 
     store_script_error = &error1;
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwException &h80004002&, \"test src\"");
+    hres = parse_script_wr(L"throwException &h80004002&, \"test src\"");
     ok(hres == MAKE_VBSERROR(430), "got error: %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
@@ -2499,7 +2509,7 @@ static void test_callbacks(void)
 
     store_script_error = &error1;
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwException &h80004002&, , \"test desc\"");
+    hres = parse_script_wr(L"throwException &h80004002&, , \"test desc\"");
     ok(hres == E_NOINTERFACE, "got error: %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
@@ -2524,7 +2534,7 @@ static void test_callbacks(void)
 
     store_script_error = &error1;
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwException &h80004002&, \"test src\", \"test desc\"");
+    hres = parse_script_wr(L"throwException &h80004002&, \"test src\", \"test desc\"");
     ok(hres == E_NOINTERFACE, "got error: %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
@@ -2549,7 +2559,7 @@ static void test_callbacks(void)
 
     store_script_error = &error1;
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwException &h8000FFFF&");
+    hres = parse_script_wr(L"throwException &h8000FFFF&");
     ok(hres == E_UNEXPECTED, "got error: %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
@@ -2603,8 +2613,8 @@ static void test_gc(void)
     hres = IActiveScript_SetScriptState(engine, SCRIPTSTATE_STARTED);
     ok(hres == S_OK, "SetScriptState(SCRIPTSTATE_STARTED) failed: %08lx\n", hres);
 
-    src = a2bstr(
-            "class C\n"
+    src = SysAllocString(
+            L"class C\n"
             "    Public ref\n"
             "    Public Sub Class_Terminate\n"
             "        Call reportSuccess()\n"
@@ -2634,7 +2644,7 @@ static void test_parse_errors(void)
 {
     static const struct
     {
-        const char *src;
+        const WCHAR *src;
         unsigned error_line;
         int error_char;
     }
@@ -2642,49 +2652,49 @@ static void test_parse_errors(void)
     {
         {
             /* If...End If */
-            "If 0 > 1 Then\n"
+            L"If 0 > 1 Then\n"
             "    x = 0 End If\n",
             1, 10
         },
         {
             /* While...End While */
-            "While False\n"
+            L"While False\n"
             "    x = 0 End While\n",
             1, 10
         },
         {
             /* While...Wend */
-            "While False\n"
+            L"While False\n"
             "    x = 0 Wend\n",
             1, 10
         },
         {
             /* Do While...Loop */
-            "Do While False\n"
+            L"Do While False\n"
             "    x = 0 Loop\n",
             1, 10
         },
         {
             /* Do Until...Loop */
-            "Do Until True\n"
+            L"Do Until True\n"
             "    x = 0 Loop\n",
             1, 10
         },
         {
             /* Do...Loop While */
-            "Do\n"
+            L"Do\n"
             "    x = 0 Loop While False\n",
             1, 10
         },
         {
             /* Do...Loop Until */
-            "Do\n"
+            L"Do\n"
             "    x = 0 Loop Until True\n",
             1, 10
         },
         {
             /* Select...End Select */
-            "x = False\n"
+            L"x = False\n"
             "Select Case 42\n"
             "    Case 0\n"
             "        Call ok(False, \"unexpected case\")\n"
@@ -2695,35 +2705,35 @@ static void test_parse_errors(void)
         },
         {
             /* Class...End Class  (empty) */
-            "Class C End Class",
+            L"Class C End Class",
             0, 8
         },
         {
             /* Class...End Class  (empty) */
-            "Class C _\nEnd Class",
+            L"Class C _\nEnd Class",
             1, 0
         },
         {
             /* invalid use of parentheses for call statement */
-            "strcomp(\"x\", \"y\")",
+            L"strcomp(\"x\", \"y\")",
             0, -17
         },
         {
-            "\n\n\n  cint _\n   throwInt(&h80001234&)",
+            L"\n\n\n  cint _\n   throwInt(&h80001234&)",
             3, 2
         },
         {
-            "dim x\n"
+            L"dim x\n"
             "if true then throwInt(&h80001234&)",
             1, 13
         },
         {
-            "dim x\n"
+            L"dim x\n"
             "if x = throwInt(&h80001234&) then x = 1",
             1, 0
         },
         {
-            "sub test\n"
+            L"sub test\n"
             "    dim x\n"
             "    if x = throwInt(&h80001234&) then x = 1\n"
             "end sub\n"
@@ -2731,14 +2741,14 @@ static void test_parse_errors(void)
             2, 4
         },
         {
-            "dim x\n"
+            L"dim x\n"
             "do\n"
             "    x = 1\n"
             "loop until throwInt(&h80001234&)\n",
             3, 0
         },
         {
-            "\n  select case 3\n"
+            L"\n  select case 3\n"
             "    case 2\n"
             "        ok false, \"unexpected case\"\n"
             "    case throwInt(&h80001234&)\n"
@@ -2747,7 +2757,7 @@ static void test_parse_errors(void)
             1, 2
         },
         {
-            "if false then\n"
+            L"if false then\n"
             "    ok false, \"unexpected case\"\n"
             " elseif throwInt(&h80001234&) then\n"
             "    throwInt &h87001234&\n"
@@ -2767,7 +2777,7 @@ static void test_parse_errors(void)
         onerror_hres = S_OK;
 
         SET_EXPECT(OnScriptError);
-        hres = parse_script_ar(invalid_scripts[i].src);
+        hres = parse_script_wr(invalid_scripts[i].src);
         ok(hres == SCRIPT_E_REPORTED, "[%u] script returned: %08lx\n", i, hres);
         CHECK_CALLED(OnScriptError);
 
@@ -2788,7 +2798,7 @@ static void test_msgbox(void)
     SET_EXPECT(GetUIBehavior);
     SET_EXPECT(GetWindow);
     SET_EXPECT(EnableModeless);
-    hres = parse_script_ar("MsgBox \"testing...\"");
+    hres = parse_script_wr(L"MsgBox \"testing...\"");
     CLEAR_CALLED(GetUIBehavior);
     CLEAR_CALLED(GetWindow);
     CLEAR_CALLED(EnableModeless);
@@ -2798,11 +2808,11 @@ static void test_msgbox(void)
     }
 
     SET_EXPECT(GetUIBehavior);
-    parse_script_a("dim r\n r=MsgBox(\"testing...\")\n Call ok(r=0, \"r=\"&r)");
+    parse_script_w(L"dim r\n r=MsgBox(\"testing...\")\n Call ok(r=0, \"r=\"&r)");
     CHECK_CALLED(GetUIBehavior);
 
     SET_EXPECT(GetUIBehavior);
-    parse_script_a("MsgBox 10");
+    parse_script_w(L"MsgBox 10");
     CHECK_CALLED(GetUIBehavior);
 
     uic_handling = SCRIPTUICHANDLING_ALLOW;
@@ -2811,7 +2821,7 @@ static void test_msgbox(void)
     SET_EXPECT(GetWindow);
     SET_EXPECT(EnableModeless);
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("MsgBox \"testing...\"");
+    hres = parse_script_wr(L"MsgBox \"testing...\"");
     ok(FAILED(hres), "script not failed\n");
     CHECK_CALLED(GetUIBehavior);
     CHECK_CALLED(GetWindow);
@@ -2822,7 +2832,7 @@ static void test_msgbox(void)
 
     SET_EXPECT(GetUIBehavior);
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("MsgBox \"testing...\"");
+    hres = parse_script_wr(L"MsgBox \"testing...\"");
     ok(FAILED(hres), "script not failed\n");
     CHECK_CALLED(GetUIBehavior);
     CHECK_CALLED(OnScriptError);
@@ -2862,7 +2872,7 @@ static HRESULT test_global_vars_ref(BOOL use_close)
 
     refobj_ref = 0;
 
-    script_str = a2bstr("Dim x\nset x = RefObj\n");
+    script_str = SysAllocString(L"Dim x\nset x = RefObj\n");
     hres = IActiveScriptParse_ParseScriptText(parser, script_str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     SysFreeString(script_str);
 
@@ -2911,7 +2921,7 @@ static void test_isexpression(void)
     ok(hres == S_OK, "GetScriptState failed: %08lx\n", hres);
     ok(ss == SCRIPTSTATE_INITIALIZED, "Wrong script state %u\n", ss);
 
-    str = a2bstr("13");
+    str = SysAllocString(L"13");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_I2, "Expected VT_I2, got %s\n", vt2a(&var));
@@ -2924,7 +2934,7 @@ static void test_isexpression(void)
 
     /* Empty expressions */
     V_VT(&var) = VT_I2;
-    str = a2bstr("");
+    str = SysAllocString(L"");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_EMPTY, "Expected VT_EMPTY, got %s\n", vt2a(&var));
@@ -2932,7 +2942,7 @@ static void test_isexpression(void)
     SysFreeString(str);
 
     /* Two expressions fail */
-    str = a2bstr("1\n3");
+    str = SysAllocString(L"1\n3");
     SET_EXPECT(OnScriptError);
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(FAILED(hres), "ParseScriptText did not fail: %08lx\n", hres);
@@ -2941,7 +2951,7 @@ static void test_isexpression(void)
     SysFreeString(str);
 
     /* Simple numerical expression */
-    str = a2bstr("(1 + 7) * 2 - 3");
+    str = SysAllocString(L"(1 + 7) * 2 - 3");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
 
@@ -2955,7 +2965,7 @@ static void test_isexpression(void)
     /* Without a global host or named item context, "me" returns the script dispatch */
     hres = IActiveScript_GetScriptDispatch(engine, NULL, &disp);
     ok(hres == S_OK, "GetScriptDispatch failed: %08lx\n", hres);
-    str = a2bstr("me");
+    str = SysAllocString(L"me");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_DISPATCH, "Expected VT_DISPATCH, got %s\n", vt2a(&var));
@@ -2966,14 +2976,14 @@ static void test_isexpression(void)
 
     /* An expression can also refer to a variable, function, class, etc previously set */
     V_VT(&var) = VT_I2;
-    str = a2bstr("If True Then foo = 42 Else foo = 0\n");
+    str = SysAllocString(L"If True Then foo = 42 Else foo = 0\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, 0, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_EMPTY, "Expected VT_EMPTY, got %s\n", vt2a(&var));
     VariantClear(&var);
     SysFreeString(str);
 
-    str = a2bstr("foo\n\n");
+    str = SysAllocString(L"foo\n\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_I2, "Expected VT_I2, got %s\n", vt2a(&var));
@@ -2981,7 +2991,7 @@ static void test_isexpression(void)
     VariantClear(&var);
     SysFreeString(str);
 
-    str = a2bstr("foo : ");
+    str = SysAllocString(L"foo : ");
     SET_EXPECT(OnScriptError);
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(FAILED(hres), "ParseScriptText did not fail: %08lx\n", hres);
@@ -2989,7 +2999,7 @@ static void test_isexpression(void)
     VariantClear(&var);
     SysFreeString(str);
 
-    str = a2bstr("\"foo is \" & CStr(foo)  \n  \n\n ");
+    str = SysAllocString(L"\"foo is \" & CStr(foo)  \n  \n\n ");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_BSTR, "Expected VT_BSTR, got %s\n", vt2a(&var));
@@ -2997,14 +3007,14 @@ static void test_isexpression(void)
     VariantClear(&var);
     SysFreeString(str);
 
-    str = a2bstr("Function test(x)\n"
-                 "    test = x + 0.5\n"
-                 "End Function\n");
+    str = SysAllocString(L"Function test(x)\n"
+                         "    test = x + 0.5\n"
+                         "End Function\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     SysFreeString(str);
 
-    str = a2bstr("test(4) * 3\n");
+    str = SysAllocString(L"test(4) * 3\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_R8, "Expected VT_R8, got %s\n", vt2a(&var));
@@ -3012,16 +3022,16 @@ static void test_isexpression(void)
     VariantClear(&var);
     SysFreeString(str);
 
-    str = a2bstr("Class C\n"
-                 "    Public x\n"
-                 "End Class\n"
-                 "Set obj = New C\n"
-                 "obj.x = True\n");
+    str = SysAllocString(L"Class C\n"
+                         "    Public x\n"
+                         "End Class\n"
+                         "Set obj = New C\n"
+                         "obj.x = True\n");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     SysFreeString(str);
 
-    str = a2bstr("obj.x");
+    str = SysAllocString(L"obj.x");
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_BOOL, "Expected VT_BOOL, got %s\n", vt2a(&var));
@@ -3165,210 +3175,210 @@ static void run_tests(void)
 
     strict_dispid_check = TRUE;
 
-    parse_script_a("");
-    parse_script_a("' empty ;");
+    parse_script_w(L"");
+    parse_script_w(L"' empty ;");
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    parse_script_a("reportSuccess");
+    parse_script_w(L"reportSuccess");
     CHECK_CALLED(global_success_d);
     CHECK_CALLED(global_success_i);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    parse_script_a("reportSuccess()");
+    parse_script_w(L"reportSuccess()");
     CHECK_CALLED(global_success_d);
     CHECK_CALLED(global_success_i);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    parse_script_a("Call reportSuccess");
+    parse_script_w(L"Call reportSuccess");
     CHECK_CALLED(global_success_d);
     CHECK_CALLED(global_success_i);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    parse_script_a("test.reportSuccess()");
+    parse_script_w(L"test.reportSuccess()");
     CHECK_CALLED(global_success_d);
     CHECK_CALLED(global_success_i);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    parse_script_af(0, "TEST.reportSuccess()");
+    parse_script_wf(0, L"TEST.reportSuccess()");
     CHECK_CALLED(global_success_d);
     CHECK_CALLED(global_success_i);
 
     SET_EXPECT(global_vbvar_d);
     SET_EXPECT(global_vbvar_i);
-    parse_script_a("Option Explicit\nvbvar = 3");
+    parse_script_w(L"Option Explicit\nvbvar = 3");
     CHECK_CALLED(global_vbvar_d);
     CHECK_CALLED(global_vbvar_i);
 
     SET_EXPECT(global_vbvar_d);
     SET_EXPECT(global_vbvar_i);
-    parse_script_a("Option Explicit\nvbvar() = 3");
+    parse_script_w(L"Option Explicit\nvbvar() = 3");
     CHECK_CALLED(global_vbvar_d);
     CHECK_CALLED(global_vbvar_i);
 
     SET_EXPECT(global_letobj_i);
-    parse_script_a("Option Explicit\nletobj = testObj");
+    parse_script_w(L"Option Explicit\nletobj = testObj");
     CHECK_CALLED(global_letobj_i);
 
     SET_EXPECT(global_letobj_i);
-    parse_script_a("Option Explicit\ntest.letobj = testObj");
+    parse_script_w(L"Option Explicit\ntest.letobj = testObj");
     CHECK_CALLED(global_letobj_i);
 
     SET_EXPECT(global_setobj_i);
-    parse_script_a("Option Explicit\nset setobj = testObj");
+    parse_script_w(L"Option Explicit\nset setobj = testObj");
     CHECK_CALLED(global_setobj_i);
 
     SET_EXPECT(global_setobj_i);
-    parse_script_a("Option Explicit\nset test.setobj = testObj");
+    parse_script_w(L"Option Explicit\nset test.setobj = testObj");
     CHECK_CALLED(global_setobj_i);
 
-    hres = parse_script_ar("dim x\nx = testObj.rem");
+    hres = parse_script_wr(L"dim x\nx = testObj.rem");
     ok(hres == S_OK, "use of 'rem' as dot identifier failed: %lx08\n", hres);
 
     SET_EXPECT(testobj_propget_d);
     SET_EXPECT(testobj_propget_i);
-    parse_script_a("dim x\nx = testObj.propget");
+    parse_script_w(L"dim x\nx = testObj.propget");
     CHECK_CALLED(testobj_propget_d);
     CHECK_CALLED(testobj_propget_i);
 
     SET_EXPECT(testobj_propput_d);
     SET_EXPECT(testobj_propput_i);
-    parse_script_a("testObj.propput = 1");
+    parse_script_w(L"testObj.propput = 1");
     CHECK_CALLED(testobj_propput_d);
     CHECK_CALLED(testobj_propput_i);
 
     SET_EXPECT(global_propargput_d);
     SET_EXPECT(global_propargput_i);
-    parse_script_a("propargput(counter(), counter()) = counter()");
+    parse_script_w(L"propargput(counter(), counter()) = counter()");
     CHECK_CALLED(global_propargput_d);
     CHECK_CALLED(global_propargput_i);
 
     SET_EXPECT(global_propargput_d);
     SET_EXPECT(global_propargput_i);
-    parse_script_a("test.propargput(counter(), counter()) = counter()");
+    parse_script_w(L"test.propargput(counter(), counter()) = counter()");
     CHECK_CALLED(global_propargput_d);
     CHECK_CALLED(global_propargput_i);
 
     SET_EXPECT(global_propargput1_d);
     SET_EXPECT(global_propargput1_i);
-    parse_script_a("propargput1 (counter()) = counter()");
+    parse_script_w(L"propargput1 (counter()) = counter()");
     CHECK_CALLED(global_propargput1_d);
     CHECK_CALLED(global_propargput1_i);
 
     SET_EXPECT(global_propargput1_d);
     SET_EXPECT(global_propargput1_i);
-    parse_script_a("test.propargput1(counter()) = counter()");
+    parse_script_w(L"test.propargput1(counter()) = counter()");
     CHECK_CALLED(global_propargput1_d);
     CHECK_CALLED(global_propargput1_i);
 
     SET_EXPECT(global_propargset_d);
     SET_EXPECT(global_propargset_i);
-    parse_script_a("set propargset (counter()) = testObj");
+    parse_script_w(L"set propargset (counter()) = testObj");
     CHECK_CALLED(global_propargset_d);
     CHECK_CALLED(global_propargset_i);
 
     SET_EXPECT(testobj_propget_d);
     SET_EXPECT(testobj_propget_i);
-    parse_script_a("dim x\nwith testObj\nx=1+.propget\nend with");
+    parse_script_w(L"dim x\nwith testObj\nx=1+.propget\nend with");
     CHECK_CALLED(testobj_propget_d);
     CHECK_CALLED(testobj_propget_i);
 
     SET_EXPECT(testobj_propput_d);
     SET_EXPECT(testobj_propput_i);
-    parse_script_a("with testObj\n.propput = 1\nend with");
+    parse_script_w(L"with testObj\n.propput = 1\nend with");
     CHECK_CALLED(testobj_propput_d);
     CHECK_CALLED(testobj_propput_i);
 
     SET_EXPECT(testobj_valueput_i);
-    parse_script_a("dim x\n"
+    parse_script_w(L"dim x\n"
                    "set x = testObj\n"
                    "x(counter(), counter()) = counter\n");
     CHECK_CALLED(testobj_valueput_i);
 
-    parse_script_a("dim x\nx = testObj.property(1)");
+    parse_script_w(L"dim x\nx = testObj.property(1)");
 
-    parse_htmlscript_a("<!--");
-    parse_htmlscript_a(" -->");
-    parse_htmlscript_a("<!--\ndim x\nx=1\n-->\n");
-    parse_htmlscript_a("<!--\ndim x\n-->\n<!--\nx=1\n-->\n");
+    parse_htmlscript(L"<!--");
+    parse_htmlscript(L" -->");
+    parse_htmlscript(L"<!--\ndim x\nx=1\n-->\n");
+    parse_htmlscript(L"<!--\ndim x\n-->\n<!--\nx=1\n-->\n");
 
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("<!--");
+    hres = parse_script_wr(L"<!--");
     ok(FAILED(hres), "script didn't fail\n");
     CHECK_CALLED(OnScriptError);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    parse_htmlscript_a("<!--\n<!-- ignore this <> <>\n--> <>\nCall reportSuccess()\n-->\n");
+    parse_htmlscript(L"<!--\n<!-- ignore this <> <>\n--> <>\nCall reportSuccess()\n-->\n");
     CHECK_CALLED(global_success_d);
     CHECK_CALLED(global_success_i);
 
     next_cnt = 0;
     SET_EXPECT(collectionobj_newenum_i);
     SET_EXPECT(Next);
-    parse_script_a("for each x in collectionObj\nnext");
+    parse_script_w(L"for each x in collectionObj\nnext");
     CHECK_CALLED(collectionobj_newenum_i);
     CHECK_CALLED(Next);
     ok(next_cnt == 4, "next_cnt = %d\n", next_cnt);
 
-    parse_script_a("x = 1\n Call ok(x = 1, \"x = \" & x)");
+    parse_script_w(L"x = 1\n Call ok(x = 1, \"x = \" & x)");
 
-    parse_script_a("x = _    \n3");
+    parse_script_w(L"x = _    \n3");
 
     test_global_vars_ref(TRUE);
     test_global_vars_ref(FALSE);
 
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwInt(&h80080008&)");
+    hres = parse_script_wr(L"throwInt(&h80080008&)");
     ok(hres == 0x80080008, "hres = %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
     /* DISP_E_BADINDEX */
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwInt(&h8002000b&)");
+    hres = parse_script_wr(L"throwInt(&h8002000b&)");
     ok(hres == MAKE_VBSERROR(9), "hres = %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwInt(&h800a0009&)");
+    hres = parse_script_wr(L"throwInt(&h800a0009&)");
     ok(hres == MAKE_VBSERROR(9), "hres = %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
     onerror_hres = S_OK;
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwInt(&h800a0009&)");
+    hres = parse_script_wr(L"throwInt(&h800a0009&)");
     ok(hres == SCRIPT_E_REPORTED, "hres = %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
     /* E_NOTIMPL */
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwInt(&h80004001&)");
+    hres = parse_script_wr(L"throwInt(&h80004001&)");
     ok(hres == MAKE_VBSERROR(445), "hres = %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
     onerror_hres = S_OK;
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("throwInt(&h80004001&)");
+    hres = parse_script_wr(L"throwInt(&h80004001&)");
     ok(hres == SCRIPT_E_REPORTED, "hres = %08lx\n", hres);
     CHECK_CALLED(OnScriptError);
 
     SET_EXPECT(global_testoptionalarg_i);
-    parse_script_a("call testOptionalArg(1,,2)");
+    parse_script_w(L"call testOptionalArg(1,,2)");
     CHECK_CALLED(global_testoptionalarg_i);
 
     SET_EXPECT(global_testoptionalarg_i);
-    parse_script_a("call testOptionalArg(,1,1)");
+    parse_script_w(L"call testOptionalArg(,1,1)");
     CHECK_CALLED(global_testoptionalarg_i);
 
     SET_EXPECT(global_testoptionalarg_i);
-    parse_script_a("testOptionalArg 1,,2");
+    parse_script_w(L"testOptionalArg 1,,2");
     CHECK_CALLED(global_testoptionalarg_i);
 
-    parse_script_a("sub x()\n"
+    parse_script_w(L"sub x()\n"
                    "    dim y\n"
                    "    y = cint(3)\n"
                    "end sub\n"
@@ -3377,32 +3387,32 @@ static void run_tests(void)
     strict_dispid_check = FALSE;
 
     SET_EXPECT(testobj_value_i);
-    parse_script_a("dim n,o\n set o = testObj\n n = o(1,2)\n call ok(n=2, \"n = \" & n)\n");
+    parse_script_w(L"dim n,o\n set o = testObj\n n = o(1,2)\n call ok(n=2, \"n = \" & n)\n");
     CHECK_CALLED(testobj_value_i);
 
     SET_EXPECT(testobj_value_i);
-    parse_script_a("dim n,o\n set o = testObj\n n = o\n call ok(n=0, \"n = \" & n)\n");
+    parse_script_w(L"dim n,o\n set o = testObj\n n = o\n call ok(n=0, \"n = \" & n)\n");
     CHECK_CALLED(testobj_value_i);
 
-    parse_script_a("Sub testsub\n"
+    parse_script_w(L"Sub testsub\n"
                    "x = 1\n"
                    "Call ok(x = 1, \"x = \" & x)\n"
                    "End Sub\n"
                    "Call testsub()");
 
-    parse_script_a("Call ok(getVT(x) = \"VT_EMPTY*\", \"getVT(x) = \" & getVT(x))\n");
-    parse_script_a("Call ok(x = \"\", \"x = \" & x)\n");
-    parse_script_a("x = y\n"
+    parse_script_w(L"Call ok(getVT(x) = \"VT_EMPTY*\", \"getVT(x) = \" & getVT(x))\n");
+    parse_script_w(L"Call ok(x = \"\", \"x = \" & x)\n");
+    parse_script_w(L"x = y\n"
                    "Call ok(getVT(x) = \"VT_EMPTY*\", \"getVT(x) = \" & getVT(x))\n"
                    "Call ok(getVT(y) = \"VT_EMPTY*\", \"getVT(y) = \" & getVT(y))");
     SET_EXPECT(OnScriptError);
-    hres = parse_script_ar("x = y(\"a\")");
+    hres = parse_script_wr(L"x = y(\"a\")");
     ok(FAILED(hres), "script didn't fail\n");
     CHECK_CALLED(OnScriptError);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
-    parse_script_a("' comment\r"
+    parse_script_w(L"' comment\r"
                    "x = _\r3\r"
                    "x = _\n3\r"
                    "x = _\r\n3\r"

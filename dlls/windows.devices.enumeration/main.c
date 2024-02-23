@@ -25,21 +25,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(enumeration);
 
-const char *debugstr_hstring( HSTRING hstr )
-{
-    const WCHAR *str;
-    UINT32 len;
-    if (hstr && !((ULONG_PTR)hstr >> 16)) return "(invalid)";
-    str = WindowsGetStringRawBuffer( hstr, &len );
-    return wine_dbgstr_wn( str, len );
-}
-
 struct device_watcher
 {
     IDeviceWatcher IDeviceWatcher_iface;
     LONG ref;
 
     struct list stopped_handlers;
+    HSTRING filter;
 };
 
 static inline struct device_watcher *impl_from_IDeviceWatcher( IDeviceWatcher *iface )
@@ -84,6 +76,7 @@ static ULONG WINAPI device_watcher_Release( IDeviceWatcher *iface )
     if (!ref)
     {
         typed_event_handlers_clear( &impl->stopped_handlers );
+        WindowsDeleteString( impl->filter );
         free( impl );
     }
 
@@ -229,6 +222,7 @@ static const struct IDeviceWatcherVtbl device_watcher_vtbl =
 struct device_information_statics
 {
     IActivationFactory IActivationFactory_iface;
+    IDeviceInformationStatics IDeviceInformationStatics_iface;
     IDeviceInformationStatics2 IDeviceInformationStatics2_iface;
     LONG ref;
 };
@@ -249,6 +243,12 @@ static HRESULT WINAPI activation_factory_QueryInterface( IActivationFactory *ifa
         IsEqualGUID( iid, &IID_IActivationFactory ))
     {
         IInspectable_AddRef( (*out = &impl->IActivationFactory_iface) );
+        return S_OK;
+    }
+
+    if (IsEqualGUID( iid, &IID_IDeviceInformationStatics ))
+    {
+        IInspectable_AddRef( (*out = &impl->IDeviceInformationStatics_iface) );
         return S_OK;
     }
 
@@ -316,6 +316,111 @@ static const struct IActivationFactoryVtbl activation_factory_vtbl =
     activation_factory_ActivateInstance,
 };
 
+DEFINE_IINSPECTABLE( device_statics, IDeviceInformationStatics, struct device_information_statics, IActivationFactory_iface );
+
+static HRESULT WINAPI device_statics_CreateFromIdAsync( IDeviceInformationStatics *iface, HSTRING id,
+                                                        IAsyncOperation_DeviceInformation **op )
+{
+    FIXME( "iface %p, id %s, op %p stub!\n", iface, debugstr_hstring(id), op );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_CreateFromIdAsyncAdditionalProperties( IDeviceInformationStatics *iface, HSTRING id,
+                                                                            IIterable_HSTRING *additional_properties,
+                                                                            IAsyncOperation_DeviceInformation **op )
+{
+    FIXME( "iface %p, id %s, additional_properties %p, op %p stub!\n", iface, debugstr_hstring(id), additional_properties, op );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_FindAllAsync( IDeviceInformationStatics *iface,
+                                                   IAsyncOperation_DeviceInformationCollection **op )
+{
+    FIXME( "iface %p, op %p stub!\n", iface, op );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_FindAllAsyncDeviceClass( IDeviceInformationStatics *iface, DeviceClass class,
+                                                              IAsyncOperation_DeviceInformationCollection **op )
+{
+    FIXME( "iface %p, class %d, op %p stub!\n", iface, class, op );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_FindAllAsyncAqsFilter( IDeviceInformationStatics *iface, HSTRING filter,
+                                                            IAsyncOperation_DeviceInformationCollection **op )
+{
+    FIXME( "iface %p, aqs %p, op %p stub!\n", iface, debugstr_hstring(filter), op );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_FindAllAsyncAqsFilterAndAdditionalProperties( IDeviceInformationStatics *iface, HSTRING filter,
+                                                                                   IIterable_HSTRING *additional_properties,
+                                                                                   IAsyncOperation_DeviceInformationCollection **op )
+{
+    FIXME( "iface %p, aqs %p, additional_properties %p, op %p stub!\n", iface, debugstr_hstring(filter), additional_properties, op );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_CreateWatcher( IDeviceInformationStatics *iface, IDeviceWatcher **watcher )
+{
+    FIXME( "iface %p, watcher %p stub!\n", iface, watcher );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_CreateWatcherDeviceClass( IDeviceInformationStatics *iface, DeviceClass class, IDeviceWatcher **watcher )
+{
+    FIXME( "iface %p, class %d, watcher %p stub!\n", iface, class, watcher );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI device_statics_CreateWatcherAqsFilter( IDeviceInformationStatics *iface, HSTRING filter, IDeviceWatcher **watcher )
+{
+    struct device_watcher *this;
+
+    TRACE( "iface %p, filter %s, watcher %p\n", iface, debugstr_hstring(filter), watcher );
+
+    if (!(this = calloc( 1, sizeof(*this) ))) return E_OUTOFMEMORY;
+
+    this->IDeviceWatcher_iface.lpVtbl = &device_watcher_vtbl;
+    this->ref = 1;
+    WindowsDuplicateString( filter, &this->filter );
+
+    list_init( &this->stopped_handlers );
+
+    *watcher = &this->IDeviceWatcher_iface;
+    return S_OK;
+}
+
+static HRESULT WINAPI device_statics_CreateWatcherAqsFilterAndAdditionalProperties( IDeviceInformationStatics *iface, HSTRING filter,
+                                                                                    IIterable_HSTRING *additional_properties, IDeviceWatcher **watcher )
+{
+    FIXME( "iface %p, aqs %p, additional_properties %p, watcher %p stub!\n", iface, debugstr_hstring(filter), additional_properties, watcher );
+    return E_NOTIMPL;
+}
+
+static const struct IDeviceInformationStaticsVtbl device_statics_vtbl =
+{
+    device_statics_QueryInterface,
+    device_statics_AddRef,
+    device_statics_Release,
+    /* IInspectable methods */
+    device_statics_GetIids,
+    device_statics_GetRuntimeClassName,
+    device_statics_GetTrustLevel,
+    /* IDeviceInformationStatics methods */
+    device_statics_CreateFromIdAsync,
+    device_statics_CreateFromIdAsyncAdditionalProperties,
+    device_statics_FindAllAsync,
+    device_statics_FindAllAsyncDeviceClass,
+    device_statics_FindAllAsyncAqsFilter,
+    device_statics_FindAllAsyncAqsFilterAndAdditionalProperties,
+    device_statics_CreateWatcher,
+    device_statics_CreateWatcherDeviceClass,
+    device_statics_CreateWatcherAqsFilter,
+    device_statics_CreateWatcherAqsFilterAndAdditionalProperties,
+};
+
 DEFINE_IINSPECTABLE( device_statics2, IDeviceInformationStatics2, struct device_information_statics, IActivationFactory_iface );
 
 static HRESULT WINAPI device_statics2_GetAqsFilterFromDeviceClass( IDeviceInformationStatics2 *iface, DeviceClass device_class,
@@ -357,6 +462,7 @@ static HRESULT WINAPI device_statics2_CreateWatcher( IDeviceInformationStatics2 
 
     this->IDeviceWatcher_iface.lpVtbl = &device_watcher_vtbl;
     this->ref = 1;
+    WindowsDuplicateString( filter, &this->filter );
 
     list_init( &this->stopped_handlers );
 
@@ -383,6 +489,7 @@ static const struct IDeviceInformationStatics2Vtbl device_statics2_vtbl =
 static struct device_information_statics device_information_statics =
 {
     {&activation_factory_vtbl},
+    {&device_statics_vtbl},
     {&device_statics2_vtbl},
     1
 };

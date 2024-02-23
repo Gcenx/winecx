@@ -74,7 +74,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(bidi);
 
 #define odd(x) ((x) & 1)
 
-extern const unsigned short bidi_direction_table[] DECLSPEC_HIDDEN;
+extern const unsigned short bidi_direction_table[];
 
 /*------------------------------------------------------------------------
     Bidirectional Character Types
@@ -2015,7 +2015,7 @@ BOOL WINAPI EnableEUDC( BOOL enable )
  *             GetFontFileData   (GDI32.@)
  */
 BOOL WINAPI GetFontFileData( DWORD instance_id, DWORD file_index, UINT64 offset,
-                             void *buff, DWORD buff_size )
+                             void *buff, SIZE_T buff_size )
 {
     return NtGdiGetFontFileData( instance_id, file_index, &offset, buff, buff_size );
 }

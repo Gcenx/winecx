@@ -60,7 +60,7 @@ struct d2d_settings
 {
     unsigned int max_version_factory;
 };
-extern struct d2d_settings d2d_settings DECLSPEC_HIDDEN;
+extern struct d2d_settings d2d_settings;
 
 struct d2d_clip_stack
 {
@@ -171,7 +171,8 @@ struct d2d_device_context
     const struct d2d_device_context_ops *ops;
 
     ID2D1Factory *factory;
-    ID2D1Device *device;
+    CRITICAL_SECTION *cs;
+    struct d2d_device *device;
     ID3D11Device1 *d3d_device;
     ID3DDeviceContextState *d3d_state;
     struct
@@ -183,6 +184,7 @@ struct d2d_device_context
             struct d2d_bitmap *bitmap;
             struct d2d_command_list *command_list;
         };
+        HDC hdc;
     } target;
     struct d2d_shape_resources shape_resources[D2D_SHAPE_TYPE_COUNT];
     ID3D11Buffer *vs_cb;
@@ -208,9 +210,9 @@ struct d2d_device_context
     struct d2d_clip_stack clip_stack;
 };
 
-HRESULT d2d_d3d_create_render_target(ID2D1Device *device, IDXGISurface *surface, IUnknown *outer_unknown,
+HRESULT d2d_d3d_create_render_target(struct d2d_device *device, IDXGISurface *surface, IUnknown *outer_unknown,
         const struct d2d_device_context_ops *ops, const D2D1_RENDER_TARGET_PROPERTIES *desc,
-        void **render_target) DECLSPEC_HIDDEN;
+        void **render_target);
 
 static inline BOOL d2d_device_context_is_dxgi_target(const struct d2d_device_context *context)
 {
@@ -234,7 +236,7 @@ struct d2d_wic_render_target
 };
 
 HRESULT d2d_wic_render_target_init(struct d2d_wic_render_target *render_target, ID2D1Factory1 *factory,
-        ID3D10Device1 *d3d_device, IWICBitmap *bitmap, const D2D1_RENDER_TARGET_PROPERTIES *desc) DECLSPEC_HIDDEN;
+        ID3D10Device1 *d3d_device, IWICBitmap *bitmap, const D2D1_RENDER_TARGET_PROPERTIES *desc);
 
 struct d2d_dc_render_target
 {
@@ -242,17 +244,18 @@ struct d2d_dc_render_target
     LONG refcount;
 
     IDXGISurface1 *dxgi_surface;
-    D2D1_PIXEL_FORMAT pixel_format;
     ID3D10Device1 *d3d_device;
     ID2D1RenderTarget *dxgi_target;
     IUnknown *dxgi_inner;
 
     RECT dst_rect;
     HDC hdc;
+
+    D2D1_RENDER_TARGET_PROPERTIES desc;
 };
 
 HRESULT d2d_dc_render_target_init(struct d2d_dc_render_target *render_target, ID2D1Factory1 *factory,
-        ID3D10Device1 *d3d_device, const D2D1_RENDER_TARGET_PROPERTIES *desc) DECLSPEC_HIDDEN;
+        ID3D10Device1 *d3d_device, const D2D1_RENDER_TARGET_PROPERTIES *desc);
 
 struct d2d_hwnd_render_target
 {
@@ -264,11 +267,13 @@ struct d2d_hwnd_render_target
     IDXGISwapChain *swapchain;
     UINT sync_interval;
     HWND hwnd;
+
+    D2D1_RENDER_TARGET_PROPERTIES desc;
 };
 
 HRESULT d2d_hwnd_render_target_init(struct d2d_hwnd_render_target *render_target, ID2D1Factory1 *factory,
         ID3D10Device1 *d3d_device, const D2D1_RENDER_TARGET_PROPERTIES *desc,
-        const D2D1_HWND_RENDER_TARGET_PROPERTIES *hwnd_desc) DECLSPEC_HIDDEN;
+        const D2D1_HWND_RENDER_TARGET_PROPERTIES *hwnd_desc);
 
 struct d2d_bitmap_render_target
 {
@@ -283,7 +288,7 @@ struct d2d_bitmap_render_target
 HRESULT d2d_bitmap_render_target_init(struct d2d_bitmap_render_target *render_target,
         const struct d2d_device_context *parent_target, const D2D1_SIZE_F *size,
         const D2D1_SIZE_U *pixel_size, const D2D1_PIXEL_FORMAT *format,
-        D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS options) DECLSPEC_HIDDEN;
+        D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS options);
 
 struct d2d_gradient
 {
@@ -298,7 +303,7 @@ struct d2d_gradient
 
 HRESULT d2d_gradient_create(ID2D1Factory *factory, ID3D11Device1 *device, const D2D1_GRADIENT_STOP *stops,
         UINT32 stop_count, D2D1_GAMMA gamma, D2D1_EXTEND_MODE extend_mode,
-        struct d2d_gradient **gradient) DECLSPEC_HIDDEN;
+        struct d2d_gradient **gradient);
 
 struct d2d_brush
 {
@@ -348,23 +353,23 @@ struct d2d_brush
 };
 
 HRESULT d2d_solid_color_brush_create(ID2D1Factory *factory, const D2D1_COLOR_F *color,
-        const D2D1_BRUSH_PROPERTIES *desc, struct d2d_brush **brush) DECLSPEC_HIDDEN;
+        const D2D1_BRUSH_PROPERTIES *desc, struct d2d_brush **brush);
 HRESULT d2d_linear_gradient_brush_create(ID2D1Factory *factory,
         const D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES *gradient_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
-        ID2D1GradientStopCollection *gradient, struct d2d_brush **brush) DECLSPEC_HIDDEN;
+        ID2D1GradientStopCollection *gradient, struct d2d_brush **brush);
 HRESULT d2d_radial_gradient_brush_create(ID2D1Factory *factory,
         const D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES *gradient_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
-        ID2D1GradientStopCollection *gradient, struct d2d_brush **brush) DECLSPEC_HIDDEN;
+        ID2D1GradientStopCollection *gradient, struct d2d_brush **brush);
 HRESULT d2d_bitmap_brush_create(ID2D1Factory *factory, ID2D1Bitmap *bitmap,
         const D2D1_BITMAP_BRUSH_PROPERTIES1 *bitmap_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
-        struct d2d_brush **brush) DECLSPEC_HIDDEN;
+        struct d2d_brush **brush);
 HRESULT d2d_image_brush_create(ID2D1Factory *factory, ID2D1Image *image,
         const D2D1_IMAGE_BRUSH_PROPERTIES *image_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
-        struct d2d_brush **brush) DECLSPEC_HIDDEN;
+        struct d2d_brush **brush);
 void d2d_brush_bind_resources(struct d2d_brush *brush, struct d2d_device_context *context,
-        unsigned int brush_idx) DECLSPEC_HIDDEN;
-BOOL d2d_brush_fill_cb(const struct d2d_brush *brush, struct d2d_brush_cb *cb) DECLSPEC_HIDDEN;
-struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface) DECLSPEC_HIDDEN;
+        unsigned int brush_idx);
+BOOL d2d_brush_fill_cb(const struct d2d_brush *brush, struct d2d_brush_cb *cb);
+struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface);
 
 struct d2d_stroke_style
 {
@@ -378,7 +383,8 @@ struct d2d_stroke_style
 };
 
 HRESULT d2d_stroke_style_init(struct d2d_stroke_style *style, ID2D1Factory *factory,
-        const D2D1_STROKE_STYLE_PROPERTIES1 *desc, const float *dashes, UINT32 dash_count) DECLSPEC_HIDDEN;
+        const D2D1_STROKE_STYLE_PROPERTIES1 *desc, const float *dashes, UINT32 dash_count);
+struct d2d_stroke_style *unsafe_impl_from_ID2D1StrokeStyle(ID2D1StrokeStyle *iface);
 
 struct d2d_layer
 {
@@ -389,7 +395,7 @@ struct d2d_layer
     D2D1_SIZE_F size;
 };
 
-HRESULT d2d_layer_create(ID2D1Factory *factory, const D2D1_SIZE_F *size, struct d2d_layer **layer) DECLSPEC_HIDDEN;
+HRESULT d2d_layer_create(ID2D1Factory *factory, const D2D1_SIZE_F *size, struct d2d_layer **layer);
 
 struct d2d_mesh
 {
@@ -399,7 +405,7 @@ struct d2d_mesh
     ID2D1Factory *factory;
 };
 
-HRESULT d2d_mesh_create(ID2D1Factory *factory, struct d2d_mesh **mesh) DECLSPEC_HIDDEN;
+HRESULT d2d_mesh_create(ID2D1Factory *factory, struct d2d_mesh **mesh);
 
 struct d2d_bitmap
 {
@@ -420,13 +426,13 @@ struct d2d_bitmap
 };
 
 HRESULT d2d_bitmap_create(struct d2d_device_context *context, D2D1_SIZE_U size, const void *src_data,
-        UINT32 pitch, const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap) DECLSPEC_HIDDEN;
+        UINT32 pitch, const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
 HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid, void *data,
-        const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap) DECLSPEC_HIDDEN;
+        const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
 HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IWICBitmapSource *bitmap_source,
-        const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap) DECLSPEC_HIDDEN;
-unsigned int d2d_get_bitmap_options_for_surface(IDXGISurface *surface) DECLSPEC_HIDDEN;
-struct d2d_bitmap *unsafe_impl_from_ID2D1Bitmap(ID2D1Bitmap *iface) DECLSPEC_HIDDEN;
+        const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
+unsigned int d2d_get_bitmap_options_for_surface(IDXGISurface *surface);
+struct d2d_bitmap *unsafe_impl_from_ID2D1Bitmap(ID2D1Bitmap *iface);
 
 struct d2d_state_block
 {
@@ -439,8 +445,8 @@ struct d2d_state_block
 };
 
 void d2d_state_block_init(struct d2d_state_block *state_block, ID2D1Factory *factory,
-        const D2D1_DRAWING_STATE_DESCRIPTION1 *desc, IDWriteRenderingParams *text_rendering_params) DECLSPEC_HIDDEN;
-struct d2d_state_block *unsafe_impl_from_ID2D1DrawingStateBlock(ID2D1DrawingStateBlock *iface) DECLSPEC_HIDDEN;
+        const D2D1_DRAWING_STATE_DESCRIPTION1 *desc, IDWriteRenderingParams *text_rendering_params);
+struct d2d_state_block *unsafe_impl_from_ID2D1DrawingStateBlock(ID2D1DrawingStateBlock *iface);
 
 enum d2d_geometry_state
 {
@@ -576,27 +582,17 @@ struct d2d_geometry
 };
 
 HRESULT d2d_ellipse_geometry_init(struct d2d_geometry *geometry,
-        ID2D1Factory *factory, const D2D1_ELLIPSE *ellipse) DECLSPEC_HIDDEN;
-void d2d_path_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory) DECLSPEC_HIDDEN;
+        ID2D1Factory *factory, const D2D1_ELLIPSE *ellipse);
+void d2d_path_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory);
 HRESULT d2d_rectangle_geometry_init(struct d2d_geometry *geometry,
-        ID2D1Factory *factory, const D2D1_RECT_F *rect) DECLSPEC_HIDDEN;
+        ID2D1Factory *factory, const D2D1_RECT_F *rect);
 HRESULT d2d_rounded_rectangle_geometry_init(struct d2d_geometry *geometry,
-        ID2D1Factory *factory, const D2D1_ROUNDED_RECT *rounded_rect) DECLSPEC_HIDDEN;
+        ID2D1Factory *factory, const D2D1_ROUNDED_RECT *rounded_rect);
 void d2d_transformed_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory,
-        ID2D1Geometry *src_geometry, const D2D_MATRIX_3X2_F *transform) DECLSPEC_HIDDEN;
+        ID2D1Geometry *src_geometry, const D2D_MATRIX_3X2_F *transform);
 HRESULT d2d_geometry_group_init(struct d2d_geometry *geometry, ID2D1Factory *factory,
-        D2D1_FILL_MODE fill_mode, ID2D1Geometry **src_geometries, unsigned int geometry_count) DECLSPEC_HIDDEN;
-struct d2d_geometry *unsafe_impl_from_ID2D1Geometry(ID2D1Geometry *iface) DECLSPEC_HIDDEN;
-
-struct d2d_device
-{
-    ID2D1Device1 ID2D1Device1_iface;
-    LONG refcount;
-    ID2D1Factory1 *factory;
-    IDXGIDevice *dxgi_device;
-};
-
-void d2d_device_init(struct d2d_device *device, ID2D1Factory1 *factory, IDXGIDevice *dxgi_device) DECLSPEC_HIDDEN;
+        D2D1_FILL_MODE fill_mode, ID2D1Geometry **src_geometries, unsigned int geometry_count);
+struct d2d_geometry *unsafe_impl_from_ID2D1Geometry(ID2D1Geometry *iface);
 
 struct d2d_shader
 {
@@ -604,20 +600,36 @@ struct d2d_shader
     IUnknown *shader;
 };
 
+struct d2d_device
+{
+    ID2D1Device1 ID2D1Device1_iface;
+    LONG refcount;
+    ID2D1Factory1 *factory;
+    IDXGIDevice *dxgi_device;
+
+    struct
+    {
+        struct d2d_shader *objects;
+        size_t size;
+        size_t count;
+    } shaders;
+};
+
+void d2d_device_init(struct d2d_device *device, ID2D1Factory1 *factory, IDXGIDevice *dxgi_device);
+struct d2d_device *unsafe_impl_from_ID2D1Device(ID2D1Device1 *iface);
+HRESULT d2d_device_add_shader(struct d2d_device *device, REFGUID shader_id, IUnknown *shader);
+BOOL d2d_device_is_shader_loaded(struct d2d_device *device, REFGUID shader_id);
+
 struct d2d_effect_context
 {
     ID2D1EffectContext ID2D1EffectContext_iface;
     LONG refcount;
 
     struct d2d_device_context *device_context;
-
-    struct d2d_shader *shaders;
-    size_t shaders_size;
-    size_t shader_count;
 };
 
 void d2d_effect_context_init(struct d2d_effect_context *effect_context,
-        struct d2d_device_context *device_context) DECLSPEC_HIDDEN;
+        struct d2d_device_context *device_context);
 
 struct d2d_effect_property
 {
@@ -667,12 +679,34 @@ struct d2d_effect_registration
     struct d2d_effect_properties properties;
 };
 
-struct d2d_factory;
-void d2d_effects_init_builtins(struct d2d_factory *factory) DECLSPEC_HIDDEN;
+struct d2d_factory
+{
+    ID2D1Factory3 ID2D1Factory3_iface;
+    ID2D1Multithread ID2D1Multithread_iface;
+    LONG refcount;
+
+    ID3D10Device1 *device;
+
+    float dpi_x;
+    float dpi_y;
+
+    struct list effects;
+    INIT_ONCE init_builtins;
+
+    CRITICAL_SECTION cs;
+    D2D1_FACTORY_TYPE factory_type;
+};
+
+static inline struct d2d_factory *unsafe_impl_from_ID2D1Factory(ID2D1Factory *iface)
+{
+    return CONTAINING_RECORD(iface, struct d2d_factory, ID2D1Factory3_iface);
+}
+
+void d2d_effects_init_builtins(struct d2d_factory *factory);
 struct d2d_effect_registration * d2d_factory_get_registered_effect(ID2D1Factory *factory,
-        const GUID *effect_id) DECLSPEC_HIDDEN;
+        const GUID *effect_id);
 void d2d_factory_register_effect(struct d2d_factory *factory,
-        struct d2d_effect_registration *effect) DECLSPEC_HIDDEN;
+        struct d2d_effect_registration *effect);
 
 struct d2d_transform_graph
 {
@@ -696,14 +730,14 @@ struct d2d_effect
 };
 
 HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
-        ID2D1Effect **effect) DECLSPEC_HIDDEN;
+        ID2D1Effect **effect);
 HRESULT d2d_effect_properties_add(struct d2d_effect_properties *props, const WCHAR *name,
-        UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value) DECLSPEC_HIDDEN;
+        UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value);
 HRESULT d2d_effect_subproperties_add(struct d2d_effect_properties *props, const WCHAR *name,
-        UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value) DECLSPEC_HIDDEN;
+        UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value);
 struct d2d_effect_property * d2d_effect_properties_get_property_by_name(
-        const struct d2d_effect_properties *properties, const WCHAR *name) DECLSPEC_HIDDEN;
-void d2d_effect_properties_cleanup(struct d2d_effect_properties *props) DECLSPEC_HIDDEN;
+        const struct d2d_effect_properties *properties, const WCHAR *name);
+void d2d_effect_properties_cleanup(struct d2d_effect_properties *props);
 
 enum d2d_command_list_state
 {
@@ -731,54 +765,54 @@ struct d2d_command_list
     IUnknown **objects;
 };
 
-HRESULT d2d_command_list_create(ID2D1Factory *factory, struct d2d_command_list **command_list) DECLSPEC_HIDDEN;
-struct d2d_command_list *unsafe_impl_from_ID2D1CommandList(ID2D1CommandList *iface) DECLSPEC_HIDDEN;
-void d2d_command_list_begin_draw(struct d2d_command_list *command_list, const struct d2d_device_context *context) DECLSPEC_HIDDEN;
-void d2d_command_list_set_antialias_mode(struct d2d_command_list *command_list, D2D1_ANTIALIAS_MODE mode) DECLSPEC_HIDDEN;
+HRESULT d2d_command_list_create(ID2D1Factory *factory, struct d2d_command_list **command_list);
+struct d2d_command_list *unsafe_impl_from_ID2D1CommandList(ID2D1CommandList *iface);
+void d2d_command_list_begin_draw(struct d2d_command_list *command_list, const struct d2d_device_context *context);
+void d2d_command_list_set_antialias_mode(struct d2d_command_list *command_list, D2D1_ANTIALIAS_MODE mode);
 void d2d_command_list_set_primitive_blend(struct d2d_command_list *command_list,
-        D2D1_PRIMITIVE_BLEND primitive_blend) DECLSPEC_HIDDEN;
-void d2d_command_list_set_unit_mode(struct d2d_command_list *command_list, D2D1_UNIT_MODE mode) DECLSPEC_HIDDEN;
+        D2D1_PRIMITIVE_BLEND primitive_blend);
+void d2d_command_list_set_unit_mode(struct d2d_command_list *command_list, D2D1_UNIT_MODE mode);
 void d2d_command_list_set_text_antialias_mode(struct d2d_command_list *command_list,
-        D2D1_TEXT_ANTIALIAS_MODE mode) DECLSPEC_HIDDEN;
-void d2d_command_list_set_tags(struct d2d_command_list *command_list, D2D1_TAG tag1, D2D1_TAG tag2) DECLSPEC_HIDDEN;
+        D2D1_TEXT_ANTIALIAS_MODE mode);
+void d2d_command_list_set_tags(struct d2d_command_list *command_list, D2D1_TAG tag1, D2D1_TAG tag2);
 void d2d_command_list_set_transform(struct d2d_command_list *command_list,
-        const D2D1_MATRIX_3X2_F *transform) DECLSPEC_HIDDEN;
+        const D2D1_MATRIX_3X2_F *transform);
 void d2d_command_list_push_clip(struct d2d_command_list *command_list, const D2D1_RECT_F *rect,
-        D2D1_ANTIALIAS_MODE antialias_mode) DECLSPEC_HIDDEN;
-void d2d_command_list_pop_clip(struct d2d_command_list *command_list) DECLSPEC_HIDDEN;
-void d2d_command_list_clear(struct d2d_command_list *command_list, const D2D1_COLOR_F *color) DECLSPEC_HIDDEN;
+        D2D1_ANTIALIAS_MODE antialias_mode);
+void d2d_command_list_pop_clip(struct d2d_command_list *command_list);
+void d2d_command_list_clear(struct d2d_command_list *command_list, const D2D1_COLOR_F *color);
 void d2d_command_list_draw_line(struct d2d_command_list *command_list, const struct d2d_device_context *context,
         D2D1_POINT_2F p0, D2D1_POINT_2F p1, ID2D1Brush *orig_brush, float stroke_width,
-        ID2D1StrokeStyle *stroke_style) DECLSPEC_HIDDEN;
+        ID2D1StrokeStyle *stroke_style);
 void d2d_command_list_draw_geometry(struct d2d_command_list *command_list,
         const struct d2d_device_context *context, ID2D1Geometry *geometry, ID2D1Brush *orig_brush,
-        float stroke_width, ID2D1StrokeStyle *stroke_style) DECLSPEC_HIDDEN;
+        float stroke_width, ID2D1StrokeStyle *stroke_style);
 void d2d_command_list_draw_rectangle(struct d2d_command_list *command_list, const struct d2d_device_context *context,
-        const D2D1_RECT_F *rect, ID2D1Brush *orig_brush, float stroke_width, ID2D1StrokeStyle *stroke_style) DECLSPEC_HIDDEN;
+        const D2D1_RECT_F *rect, ID2D1Brush *orig_brush, float stroke_width, ID2D1StrokeStyle *stroke_style);
 void d2d_command_list_fill_geometry(struct d2d_command_list *command_list,
         const struct d2d_device_context *context, ID2D1Geometry *geometry, ID2D1Brush *orig_brush,
-        ID2D1Brush *orig_opacity_brush) DECLSPEC_HIDDEN;
+        ID2D1Brush *orig_opacity_brush);
 void d2d_command_list_fill_rectangle(struct d2d_command_list *command_list,
-        const struct d2d_device_context *context, const D2D1_RECT_F *rect, ID2D1Brush *orig_brush) DECLSPEC_HIDDEN;
+        const struct d2d_device_context *context, const D2D1_RECT_F *rect, ID2D1Brush *orig_brush);
 void d2d_command_list_set_text_rendering_params(struct d2d_command_list *command_list,
-        IDWriteRenderingParams *params) DECLSPEC_HIDDEN;
+        IDWriteRenderingParams *params);
 void d2d_command_list_draw_glyph_run(struct d2d_command_list *command_list,
         const struct d2d_device_context *context, D2D1_POINT_2F origin, const DWRITE_GLYPH_RUN *run,
         const DWRITE_GLYPH_RUN_DESCRIPTION *run_desc, ID2D1Brush *orig_brush,
-        DWRITE_MEASURING_MODE measuring_mode) DECLSPEC_HIDDEN;
+        DWRITE_MEASURING_MODE measuring_mode);
 void d2d_command_list_draw_bitmap(struct d2d_command_list *command_list, ID2D1Bitmap *bitmap,
         const D2D1_RECT_F *dst_rect, float opacity, D2D1_INTERPOLATION_MODE interpolation_mode,
-        const D2D1_RECT_F *src_rect, const D2D1_MATRIX_4X4_F *perspective_transform) DECLSPEC_HIDDEN;
+        const D2D1_RECT_F *src_rect, const D2D1_MATRIX_4X4_F *perspective_transform);
 void d2d_command_list_draw_image(struct d2d_command_list *command_list, ID2D1Image *image,
         const D2D1_POINT_2F *target_offset, const D2D1_RECT_F *image_rect, D2D1_INTERPOLATION_MODE interpolation_mode,
-        D2D1_COMPOSITE_MODE composite_mode) DECLSPEC_HIDDEN;
+        D2D1_COMPOSITE_MODE composite_mode);
 void d2d_command_list_fill_mesh(struct d2d_command_list *command_list, const struct d2d_device_context *context,
-        ID2D1Mesh *mesh, ID2D1Brush *orig_brush) DECLSPEC_HIDDEN;
+        ID2D1Mesh *mesh, ID2D1Brush *orig_brush);
 void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, const struct d2d_device_context *context,
-        ID2D1Bitmap *bitmap, ID2D1Brush *orig_brush, const D2D1_RECT_F *dst_rect, const D2D1_RECT_F *src_rect) DECLSPEC_HIDDEN;
+        ID2D1Bitmap *bitmap, ID2D1Brush *orig_brush, const D2D1_RECT_F *dst_rect, const D2D1_RECT_F *src_rect);
 void d2d_command_list_push_layer(struct d2d_command_list *command_list, const struct d2d_device_context *context,
-        const D2D1_LAYER_PARAMETERS1 *params, ID2D1Layer *layer) DECLSPEC_HIDDEN;
-void d2d_command_list_pop_layer(struct d2d_command_list *command_list) DECLSPEC_HIDDEN;
+        const D2D1_LAYER_PARAMETERS1 *params, ID2D1Layer *layer);
+void d2d_command_list_pop_layer(struct d2d_command_list *command_list);
 
 static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
 {

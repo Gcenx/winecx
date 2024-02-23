@@ -1,8 +1,6 @@
-/* IDirectMusicLoaderFileStream
- * IDirectMusicLoaderResourceStream
- * IDirectMusicLoaderGenericStream
- *
+/*
  * Copyright (C) 2003-2004 Rok Mandeljc
+ * Copyright 2023 Rémi Bernon for CodeWeavers
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,291 +17,444 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-
-/* SIDE NOTES:
- * After extensive testing and structure dumping I came to a conclusion that
- * DirectMusic as in present state implements three types of streams:
- *  1. IDirectMusicLoaderFileStream: stream that was most obvious, since 
- *     it's used for loading from files; it is sort of wrapper around 
- *     CreateFile, ReadFile, WriteFile and SetFilePointer and it supports 
- *     both read and write
- *  2. IDirectMusicLoaderResourceStream: a stream that had to exist, since 
- *     according to MSDN, IDirectMusicLoader supports loading from resource 
- *     as well; in this case, data is represented as a big chunk of bytes, 
- *     from which we "read" (copy) data and keep the trace of our position; 
- *      it supports read only
- *  3. IDirectMusicLoaderGenericStream: this one was the most problematic, 
- *     since I thought it was URL-related; besides, there's no obvious need 
- *     for it, since input streams can simply be cloned, lest loading from 
- *     stream is requested; but if one really thinks about it, input stream 
- *     could be none of 1. or 2.; in this case, a wrapper that offers
- *     IDirectMusicGetLoader interface would be nice, and this is what this 
- *     stream is; as such, all functions are supported, as long as underlying 
- *     ("low-level") stream supports them
- *
- * - Rok Mandeljc; 24. April, 2004
-*/
-
-#define NONAMELESSUNION
-
 #include "dmloader_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmloader);
 WINE_DECLARE_DEBUG_CHANNEL(dmfileraw);
 
-static ULONG WINAPI IDirectMusicLoaderFileStream_IStream_AddRef (LPSTREAM iface);
-static ULONG WINAPI IDirectMusicLoaderFileStream_IDirectMusicGetLoader_AddRef (LPDIRECTMUSICGETLOADER iface);
-static ULONG WINAPI IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_AddRef (LPDIRECTMUSICGETLOADER iface);
-static ULONG WINAPI IDirectMusicLoaderResourceStream_IStream_AddRef (LPSTREAM iface);
-static ULONG WINAPI IDirectMusicLoaderGenericStream_IStream_AddRef (LPSTREAM iface);
-static ULONG WINAPI IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_AddRef (LPDIRECTMUSICGETLOADER iface);
+struct loader_stream
+{
+    IStream IStream_iface;
+    IDirectMusicGetLoader IDirectMusicGetLoader_iface;
+    LONG ref;
 
+    IStream *stream;
+    IDirectMusicLoader *loader;
+};
 
-/*****************************************************************************
- * IDirectMusicLoaderFileStream implementation
- */
-/* Custom : */
-
-static void IDirectMusicLoaderFileStream_Detach (LPSTREAM iface) {
-    ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-    TRACE("(%p)\n", This);
-    if (This->hFile != INVALID_HANDLE_VALUE) CloseHandle(This->hFile);
-    This->wzFileName[0] = '\0';
+static struct loader_stream *impl_from_IStream(IStream *iface)
+{
+    return CONTAINING_RECORD(iface, struct loader_stream, IStream_iface);
 }
 
-HRESULT WINAPI IDirectMusicLoaderFileStream_Attach (LPSTREAM iface, LPCWSTR wzFile, LPDIRECTMUSICLOADER8 pLoader) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-    TRACE("(%p, %s, %p)\n", This, debugstr_w(wzFile), pLoader);
-    IDirectMusicLoaderFileStream_Detach (iface);
-    This->hFile = CreateFileW (wzFile, (GENERIC_READ | GENERIC_WRITE), (FILE_SHARE_READ | FILE_SHARE_WRITE), NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (This->hFile == INVALID_HANDLE_VALUE) {
-        WARN(": failed\n");
+static HRESULT WINAPI loader_stream_QueryInterface(IStream *iface, REFIID riid, void **ret_iface)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+
+    TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ret_iface);
+
+    if (IsEqualGUID(riid, &IID_IUnknown)
+            || IsEqualGUID(riid, &IID_IStream))
+    {
+        IStream_AddRef(&This->IStream_iface);
+        *ret_iface = &This->IStream_iface;
+        return S_OK;
+    }
+
+    if (IsEqualGUID(riid, &IID_IDirectMusicGetLoader))
+    {
+        IDirectMusicGetLoader_AddRef(&This->IDirectMusicGetLoader_iface);
+        *ret_iface = &This->IDirectMusicGetLoader_iface;
+        return S_OK;
+    }
+
+    WARN("(%p, %s, %p): not found\n", iface, debugstr_dmguid(riid), ret_iface);
+    *ret_iface = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI loader_stream_AddRef(IStream *iface)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p): new ref = %lu\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI loader_stream_Release(IStream *iface)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p): new ref = %lu\n", This, ref);
+
+    if (!ref)
+    {
+        IDirectMusicLoader_Release(This->loader);
+        IStream_Release(This->stream);
+        free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI loader_stream_Read(IStream *iface, void *data, ULONG size, ULONG *ret_size)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    TRACE("(%p, %p, %#lx, %p)\n", This, data, size, ret_size);
+    return IStream_Read(This->stream, data, size, ret_size);
+}
+
+static HRESULT WINAPI loader_stream_Write(IStream *iface, const void *data, ULONG size, ULONG *ret_size)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_Seek(IStream *iface, LARGE_INTEGER offset, DWORD method, ULARGE_INTEGER *ret_offset)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    TRACE("(%p, %I64d, %#lx, %p)\n", This, offset.QuadPart, method, ret_offset);
+    return IStream_Seek(This->stream, offset, method, ret_offset);
+}
+
+static HRESULT WINAPI loader_stream_SetSize(IStream *iface, ULARGE_INTEGER size)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_CopyTo(IStream *iface, IStream *dest, ULARGE_INTEGER size,
+        ULARGE_INTEGER *read_size, ULARGE_INTEGER *write_size)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_Commit(IStream *iface, DWORD flags)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_Revert(IStream *iface)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_LockRegion(IStream *iface, ULARGE_INTEGER offset, ULARGE_INTEGER size, DWORD type)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_UnlockRegion(IStream *iface, ULARGE_INTEGER offset,
+        ULARGE_INTEGER size, DWORD type)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_Stat(IStream *iface, STATSTG *stat, DWORD flags)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI loader_stream_Clone(IStream *iface, IStream **ret_iface)
+{
+    struct loader_stream *This = impl_from_IStream(iface);
+    IStream *stream;
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", This, ret_iface);
+
+    if (SUCCEEDED(hr = IStream_Clone(This->stream, &stream)))
+    {
+        hr = loader_stream_create(This->loader, stream, ret_iface);
+        IStream_Release(stream);
+    }
+
+    return hr;
+}
+
+static const IStreamVtbl loader_stream_vtbl =
+{
+    loader_stream_QueryInterface,
+    loader_stream_AddRef,
+    loader_stream_Release,
+    loader_stream_Read,
+    loader_stream_Write,
+    loader_stream_Seek,
+    loader_stream_SetSize,
+    loader_stream_CopyTo,
+    loader_stream_Commit,
+    loader_stream_Revert,
+    loader_stream_LockRegion,
+    loader_stream_UnlockRegion,
+    loader_stream_Stat,
+    loader_stream_Clone,
+};
+
+static struct loader_stream *impl_from_IDirectMusicGetLoader(IDirectMusicGetLoader *iface)
+{
+    return CONTAINING_RECORD(iface, struct loader_stream, IDirectMusicGetLoader_iface);
+}
+
+static HRESULT WINAPI loader_stream_getter_QueryInterface(IDirectMusicGetLoader *iface, REFIID iid, void **out)
+{
+    struct loader_stream *This = impl_from_IDirectMusicGetLoader(iface);
+    return IStream_QueryInterface(&This->IStream_iface, iid, out);
+}
+
+static ULONG WINAPI loader_stream_getter_AddRef(IDirectMusicGetLoader *iface)
+{
+    struct loader_stream *This = impl_from_IDirectMusicGetLoader(iface);
+    return IStream_AddRef(&This->IStream_iface);
+}
+
+static ULONG WINAPI loader_stream_getter_Release(IDirectMusicGetLoader *iface)
+{
+    struct loader_stream *This = impl_from_IDirectMusicGetLoader(iface);
+    return IStream_Release(&This->IStream_iface);
+}
+
+static HRESULT WINAPI loader_stream_getter_GetLoader(IDirectMusicGetLoader *iface, IDirectMusicLoader **ret_loader)
+{
+    struct loader_stream *This = impl_from_IDirectMusicGetLoader(iface);
+
+    TRACE("(%p, %p)\n", This, ret_loader);
+
+    *ret_loader = This->loader;
+    IDirectMusicLoader_AddRef(This->loader);
+    return S_OK;
+}
+
+static const IDirectMusicGetLoaderVtbl loader_stream_getter_vtbl =
+{
+    loader_stream_getter_QueryInterface,
+    loader_stream_getter_AddRef,
+    loader_stream_getter_Release,
+    loader_stream_getter_GetLoader,
+};
+
+HRESULT loader_stream_create(IDirectMusicLoader *loader, IStream *stream,
+        IStream **ret_iface)
+{
+    struct loader_stream *obj;
+
+    *ret_iface = NULL;
+    if (!(obj = calloc(1, sizeof(*obj)))) return E_OUTOFMEMORY;
+    obj->IStream_iface.lpVtbl = &loader_stream_vtbl;
+    obj->IDirectMusicGetLoader_iface.lpVtbl = &loader_stream_getter_vtbl;
+    obj->ref = 1;
+
+    obj->stream = stream;
+    IStream_AddRef(stream);
+    obj->loader = loader;
+    IDirectMusicLoader_AddRef(loader);
+
+    *ret_iface = &obj->IStream_iface;
+    return S_OK;
+}
+
+struct file_stream
+{
+    IStream IStream_iface;
+    LONG ref;
+
+    WCHAR path[MAX_PATH];
+    HANDLE file;
+};
+
+static struct file_stream *file_stream_from_IStream(IStream *iface)
+{
+    return CONTAINING_RECORD(iface, struct file_stream, IStream_iface);
+}
+
+static HRESULT WINAPI file_stream_QueryInterface(IStream *iface, REFIID riid, void **ret_iface)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+
+    TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ret_iface);
+
+    if (IsEqualGUID(riid, &IID_IUnknown)
+            || IsEqualGUID(riid, &IID_IStream))
+    {
+        IStream_AddRef(&This->IStream_iface);
+        *ret_iface = &This->IStream_iface;
+        return S_OK;
+    }
+
+    WARN("(%p, %s, %p): not found\n", iface, debugstr_dmguid(riid), ret_iface);
+    *ret_iface = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI file_stream_AddRef(IStream *iface)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p): new ref = %lu\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI file_stream_Release(IStream *iface)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p): new ref = %lu\n", This, ref);
+
+    if (!ref)
+    {
+        CloseHandle(This->file);
+        free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI file_stream_Read(IStream *iface, void *data, ULONG size, ULONG *ret_size)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    DWORD dummy;
+
+    TRACE("(%p, %p, %#lx, %p)\n", This, data, size, ret_size);
+
+    if (!ret_size) ret_size = &dummy;
+    if (!ReadFile(This->file, data, size, ret_size, NULL)) return HRESULT_FROM_WIN32(GetLastError());
+    return *ret_size == size ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI file_stream_Write(IStream *iface, const void *data, ULONG size, ULONG *ret_size)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_Seek(IStream *iface, LARGE_INTEGER offset, DWORD method, ULARGE_INTEGER *ret_offset)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    DWORD position;
+
+    TRACE("(%p, %I64d, %#lx, %p)\n", This, offset.QuadPart, method, ret_offset);
+
+    position = SetFilePointer(This->file, offset.u.LowPart, NULL, method);
+    if (position == INVALID_SET_FILE_POINTER) return HRESULT_FROM_WIN32(GetLastError());
+    if (ret_offset) ret_offset->QuadPart = position;
+    return S_OK;
+}
+
+static HRESULT WINAPI file_stream_SetSize(IStream *iface, ULARGE_INTEGER size)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_CopyTo(IStream *iface, IStream *dest, ULARGE_INTEGER size,
+        ULARGE_INTEGER *read_size, ULARGE_INTEGER *write_size)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_Commit(IStream *iface, DWORD flags)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_Revert(IStream *iface)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_LockRegion(IStream *iface, ULARGE_INTEGER offset, ULARGE_INTEGER size, DWORD type)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_UnlockRegion(IStream *iface, ULARGE_INTEGER offset,
+        ULARGE_INTEGER size, DWORD type)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_Stat(IStream *iface, STATSTG *stat, DWORD flags)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI file_stream_Clone(IStream *iface, IStream **ret_iface)
+{
+    struct file_stream *This = file_stream_from_IStream(iface);
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", This, ret_iface);
+
+    if (SUCCEEDED(hr = file_stream_create(This->path, ret_iface)))
+    {
+        LARGE_INTEGER position = {0};
+        position.LowPart = SetFilePointer(This->file, 0, NULL, SEEK_CUR);
+        hr = IStream_Seek(*ret_iface, position, SEEK_SET, NULL);
+    }
+
+    return hr;
+}
+
+static const IStreamVtbl file_stream_vtbl =
+{
+    file_stream_QueryInterface,
+    file_stream_AddRef,
+    file_stream_Release,
+    file_stream_Read,
+    file_stream_Write,
+    file_stream_Seek,
+    file_stream_SetSize,
+    file_stream_CopyTo,
+    file_stream_Commit,
+    file_stream_Revert,
+    file_stream_LockRegion,
+    file_stream_UnlockRegion,
+    file_stream_Stat,
+    file_stream_Clone,
+};
+
+HRESULT file_stream_create(const WCHAR *path, IStream **ret_iface)
+{
+    struct file_stream *stream;
+
+    *ret_iface = NULL;
+    if (!(stream = calloc(1, sizeof(*stream)))) return E_OUTOFMEMORY;
+    stream->IStream_iface.lpVtbl = &file_stream_vtbl;
+    stream->ref = 1;
+
+    wcscpy(stream->path, path);
+    stream->file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (stream->file == INVALID_HANDLE_VALUE)
+    {
+        free(stream);
         return DMUS_E_LOADER_FAILEDOPEN;
     }
-    /* create IDirectMusicGetLoader */
-    This->pLoader = pLoader;
-    lstrcpynW (This->wzFileName, wzFile, MAX_PATH);
-    TRACE(": succeeded\n");
+
+    *ret_iface = &stream->IStream_iface;
     return S_OK;
 }
 
-
-/* IUnknown/IStream part: */
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_QueryInterface (LPSTREAM iface, REFIID riid, void** ppobj) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-	
-	TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
-	if (IsEqualIID (riid, &IID_IUnknown) ||
-		IsEqualIID (riid, &IID_IStream)) {
-		*ppobj = &This->StreamVtbl;
-		IDirectMusicLoaderFileStream_IStream_AddRef ((LPSTREAM)&This->StreamVtbl);
-		return S_OK;
-	} else if (IsEqualIID (riid, &IID_IDirectMusicGetLoader)) {
-		*ppobj = &This->GetLoaderVtbl;
-		IDirectMusicLoaderFileStream_IDirectMusicGetLoader_AddRef ((LPDIRECTMUSICGETLOADER)&This->GetLoaderVtbl);		
-		return S_OK;
-	}
-
-	WARN(": not found\n");
-	return E_NOINTERFACE;
-}
-
-static ULONG WINAPI IDirectMusicLoaderFileStream_IStream_AddRef (LPSTREAM iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-	TRACE("(%p): AddRef from %ld\n", This, This->dwRef);
-	return InterlockedIncrement (&This->dwRef);
-}
-
-static ULONG WINAPI IDirectMusicLoaderFileStream_IStream_Release (LPSTREAM iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-	
-	DWORD dwRef = InterlockedDecrement (&This->dwRef);
-	TRACE("(%p): ReleaseRef to %ld\n", This, dwRef);
-	if (dwRef == 0) {
-		if (This->hFile)
-			IDirectMusicLoaderFileStream_Detach (iface);
-		HeapFree (GetProcessHeap(), 0, This);
-	}
-	
-	return dwRef;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_Read (LPSTREAM iface, void* pv, ULONG cb, ULONG* pcbRead) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-    ULONG cbRead;
-	
-	TRACE_(dmfileraw)("(%p, %p, %#lx, %p)\n", This, pv, cb, pcbRead);
-    if (This->hFile == INVALID_HANDLE_VALUE) return E_FAIL;
-    if (pcbRead == NULL) pcbRead = &cbRead;
-    if (!ReadFile (This->hFile, pv, cb, pcbRead, NULL) || *pcbRead != cb) return E_FAIL;
-	
-	TRACE_(dmfileraw)(": data (size = %#lx): %s\n", *pcbRead, debugstr_an(pv, *pcbRead));
-    return S_OK;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_Seek (LPSTREAM iface, LARGE_INTEGER dlibMove, DWORD dwOrigin, ULARGE_INTEGER* plibNewPosition) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-    LARGE_INTEGER liNewPos;
-	
-    TRACE_(dmfileraw)("(%p, %s, %s, %p)\n", This, wine_dbgstr_longlong(dlibMove.QuadPart), resolve_STREAM_SEEK(dwOrigin), plibNewPosition);
-
-    if (This->hFile == INVALID_HANDLE_VALUE) return E_FAIL;
-
-    liNewPos.u.HighPart = dlibMove.u.HighPart;
-    liNewPos.u.LowPart = SetFilePointer (This->hFile, dlibMove.u.LowPart, &liNewPos.u.HighPart, dwOrigin);
-
-    if (liNewPos.u.LowPart == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) return E_FAIL;
-    if (plibNewPosition) plibNewPosition->QuadPart = liNewPos.QuadPart;
-    
-    return S_OK;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_Clone (LPSTREAM iface, IStream** ppstm) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-	LPSTREAM pOther = NULL;
-	HRESULT result;
-
-	TRACE("(%p, %p)\n", iface, ppstm);
-	result = DMUSIC_CreateDirectMusicLoaderFileStream ((LPVOID*)&pOther);
-	if (FAILED(result)) return result;
-	if (This->hFile != INVALID_HANDLE_VALUE) {
-		ULARGE_INTEGER ullCurrentPosition;
-		result = IDirectMusicLoaderFileStream_Attach (pOther, This->wzFileName, This->pLoader);
-		if (SUCCEEDED(result)) {
-			LARGE_INTEGER liZero;
-			liZero.QuadPart = 0;
-			result = IDirectMusicLoaderFileStream_IStream_Seek (iface, liZero, STREAM_SEEK_CUR, &ullCurrentPosition); /* get current position in current stream */
-        }
-		if (SUCCEEDED(result)) {
-			LARGE_INTEGER liNewPosition;
-			liNewPosition.QuadPart = ullCurrentPosition.QuadPart;
-			result = IDirectMusicLoaderFileStream_IStream_Seek (pOther, liNewPosition, STREAM_SEEK_SET, &ullCurrentPosition);
-		}
-		if (FAILED(result)) {
-			TRACE(": failed\n");
-			IDirectMusicLoaderFileStream_IStream_Release (pOther);
-			return result;
-		}
-	}
-	TRACE(": succeeded\n");
-	*ppstm = pOther;
-	return S_OK;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_Write (LPSTREAM iface, const void* pv, ULONG cb, ULONG* pcbWritten) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, StreamVtbl, iface);
-    ULONG cbWrite;
-	
-	TRACE_(dmfileraw)("(%p, %p, %#lx, %p)\n", This, pv, cb, pcbWritten);
-    if (This->hFile == INVALID_HANDLE_VALUE) return E_FAIL;
-    if (pcbWritten == NULL) pcbWritten = &cbWrite;
-    if (!WriteFile (This->hFile, pv, cb, pcbWritten, NULL) || *pcbWritten != cb) return E_FAIL;
-	
-	TRACE_(dmfileraw)(": data (size = %#lx): %s\n", *pcbWritten, debugstr_an(pv, *pcbWritten));
-    return S_OK;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_SetSize (LPSTREAM iface, ULARGE_INTEGER libNewSize) {
-	ERR(": should not be needed\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_CopyTo (LPSTREAM iface, IStream* pstm, ULARGE_INTEGER cb, ULARGE_INTEGER* pcbRead, ULARGE_INTEGER* pcbWritten) {
-	ERR(": should not be needed\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_Commit (LPSTREAM iface, DWORD grfCommitFlags) {
-	ERR(": should not be needed\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_Revert (LPSTREAM iface) {
-	ERR(": should not be needed\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_LockRegion (LPSTREAM iface, ULARGE_INTEGER libOffset, ULARGE_INTEGER cb, DWORD dwLockType) {
-	ERR(": should not be needed\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_UnlockRegion (LPSTREAM iface, ULARGE_INTEGER libOffset, ULARGE_INTEGER cb, DWORD dwLockType) {
-	ERR(": should not be needed\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IStream_Stat (LPSTREAM iface, STATSTG* pstatstg, DWORD grfStatFlag) {
-	ERR(": should not be needed\n");
-    return E_NOTIMPL;
-}
-
-static const IStreamVtbl DirectMusicLoaderFileStream_Stream_Vtbl = {
-	IDirectMusicLoaderFileStream_IStream_QueryInterface,
-	IDirectMusicLoaderFileStream_IStream_AddRef,
-	IDirectMusicLoaderFileStream_IStream_Release,
-	IDirectMusicLoaderFileStream_IStream_Read,
-	IDirectMusicLoaderFileStream_IStream_Write,
-	IDirectMusicLoaderFileStream_IStream_Seek,
-	IDirectMusicLoaderFileStream_IStream_SetSize,
-	IDirectMusicLoaderFileStream_IStream_CopyTo,
-	IDirectMusicLoaderFileStream_IStream_Commit,
-	IDirectMusicLoaderFileStream_IStream_Revert,
-	IDirectMusicLoaderFileStream_IStream_LockRegion,
-	IDirectMusicLoaderFileStream_IStream_UnlockRegion,
-	IDirectMusicLoaderFileStream_IStream_Stat,
-	IDirectMusicLoaderFileStream_IStream_Clone
-};
-
-/* IDirectMusicGetLoader part: */
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IDirectMusicGetLoader_QueryInterface (LPDIRECTMUSICGETLOADER iface, REFIID riid, void** ppobj) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderFileStream_IStream_QueryInterface ((LPSTREAM)&This->StreamVtbl, riid, ppobj);
-}
-
-static ULONG WINAPI IDirectMusicLoaderFileStream_IDirectMusicGetLoader_AddRef (LPDIRECTMUSICGETLOADER iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderFileStream_IStream_AddRef ((LPSTREAM)&This->StreamVtbl);
-}
-
-static ULONG WINAPI IDirectMusicLoaderFileStream_IDirectMusicGetLoader_Release (LPDIRECTMUSICGETLOADER iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderFileStream_IStream_Release ((LPSTREAM)&This->StreamVtbl);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderFileStream_IDirectMusicGetLoader_GetLoader (LPDIRECTMUSICGETLOADER iface, IDirectMusicLoader **ppLoader) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderFileStream, GetLoaderVtbl, iface);
-
-	TRACE("(%p, %p)\n", This, ppLoader);
-	*ppLoader = (LPDIRECTMUSICLOADER)This->pLoader;
-	IDirectMusicLoader8_AddRef ((LPDIRECTMUSICLOADER8)*ppLoader);
-	
-	return S_OK;
-}
-
-static const IDirectMusicGetLoaderVtbl DirectMusicLoaderFileStream_GetLoader_Vtbl = {
-	IDirectMusicLoaderFileStream_IDirectMusicGetLoader_QueryInterface,
-	IDirectMusicLoaderFileStream_IDirectMusicGetLoader_AddRef,
-	IDirectMusicLoaderFileStream_IDirectMusicGetLoader_Release,
-	IDirectMusicLoaderFileStream_IDirectMusicGetLoader_GetLoader
-};
-
-HRESULT DMUSIC_CreateDirectMusicLoaderFileStream (void** ppobj) {
-	IDirectMusicLoaderFileStream *obj;
-
-	TRACE("(%p)\n", ppobj);
-	obj = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(IDirectMusicLoaderFileStream));
-	if (NULL == obj) {
-		*ppobj = NULL;
-		return E_OUTOFMEMORY;
-	}
-	obj->StreamVtbl = &DirectMusicLoaderFileStream_Stream_Vtbl;
-	obj->GetLoaderVtbl = &DirectMusicLoaderFileStream_GetLoader_Vtbl;
-	obj->dwRef = 0; /* will be inited with QueryInterface */
-
-	return IDirectMusicLoaderFileStream_IStream_QueryInterface ((LPSTREAM)&obj->StreamVtbl, &IID_IStream, ppobj);
-}
-
+static ULONG WINAPI IDirectMusicLoaderResourceStream_IStream_AddRef (LPSTREAM iface);
 
 /*****************************************************************************
  * IDirectMusicLoaderResourceStream implementation
@@ -318,10 +469,10 @@ static void IDirectMusicLoaderResourceStream_Detach (LPSTREAM iface) {
 	This->llMemLength = 0;
 }
 
-HRESULT WINAPI IDirectMusicLoaderResourceStream_Attach (LPSTREAM iface, LPBYTE pbMemData, LONGLONG llMemLength, LONGLONG llPos, LPDIRECTMUSICLOADER8 pLoader) {
+HRESULT WINAPI IDirectMusicLoaderResourceStream_Attach (LPSTREAM iface, LPBYTE pbMemData, LONGLONG llMemLength, LONGLONG llPos) {
 	ICOM_THIS_MULTI(IDirectMusicLoaderResourceStream, StreamVtbl, iface);
     
-	TRACE("(%p, %p, %s, %s, %p)\n", This, pbMemData, wine_dbgstr_longlong(llMemLength), wine_dbgstr_longlong(llPos), pLoader);
+	TRACE("(%p, %p, %s, %s)\n", This, pbMemData, wine_dbgstr_longlong(llMemLength), wine_dbgstr_longlong(llPos));
 	if (!pbMemData || !llMemLength) {
 		WARN(": invalid pbMemData or llMemLength\n");
 		return E_FAIL;
@@ -330,7 +481,6 @@ HRESULT WINAPI IDirectMusicLoaderResourceStream_Attach (LPSTREAM iface, LPBYTE p
 	This->pbMemData = pbMemData;
 	This->llMemLength = llMemLength;
 	This->llPos = llPos;
-	This->pLoader = pLoader;
 	
     return S_OK;
 }
@@ -345,10 +495,6 @@ static HRESULT WINAPI IDirectMusicLoaderResourceStream_IStream_QueryInterface (L
 		IsEqualIID (riid, &IID_IStream)) {
 		*ppobj = &This->StreamVtbl;
 		IDirectMusicLoaderResourceStream_IStream_AddRef ((LPSTREAM)&This->StreamVtbl);
-		return S_OK;
-	} else if (IsEqualIID (riid, &IID_IDirectMusicGetLoader)) {
-		*ppobj = &This->GetLoaderVtbl;
-		IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_AddRef ((LPDIRECTMUSICGETLOADER)&This->GetLoaderVtbl);		
 		return S_OK;
 	}
 
@@ -369,7 +515,7 @@ static ULONG WINAPI IDirectMusicLoaderResourceStream_IStream_Release (LPSTREAM i
 	TRACE("(%p): ReleaseRef to %ld\n", This, dwRef);
 	if (dwRef == 0) {
 		IDirectMusicLoaderResourceStream_Detach (iface);
-		HeapFree (GetProcessHeap(), 0, This);
+		free(This);
 	}
 	
 	return dwRef;
@@ -448,7 +594,7 @@ static HRESULT WINAPI IDirectMusicLoaderResourceStream_IStream_Clone (LPSTREAM i
 	result = DMUSIC_CreateDirectMusicLoaderResourceStream ((LPVOID*)&pOther);
 	if (FAILED(result)) return result;
 	
-	IDirectMusicLoaderResourceStream_Attach (pOther, This->pbMemData, This->llMemLength, This->llPos, This->pLoader);
+	IDirectMusicLoaderResourceStream_Attach (pOther, This->pbMemData, This->llMemLength, This->llPos);
 
 	TRACE(": succeeded\n");
 	*ppstm = pOther;
@@ -512,303 +658,15 @@ static const IStreamVtbl DirectMusicLoaderResourceStream_Stream_Vtbl = {
 	IDirectMusicLoaderResourceStream_IStream_Clone
 };
 
-/* IDirectMusicGetLoader part: */
-static HRESULT WINAPI IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_QueryInterface (LPDIRECTMUSICGETLOADER iface, REFIID riid, void** ppobj) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderResourceStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderResourceStream_IStream_QueryInterface ((LPSTREAM)&This->StreamVtbl, riid, ppobj);
-}
-
-static ULONG WINAPI IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_AddRef (LPDIRECTMUSICGETLOADER iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderResourceStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderResourceStream_IStream_AddRef ((LPSTREAM)&This->StreamVtbl);
-}
-
-static ULONG WINAPI IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_Release (LPDIRECTMUSICGETLOADER iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderResourceStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderResourceStream_IStream_Release ((LPSTREAM)&This->StreamVtbl);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_GetLoader (LPDIRECTMUSICGETLOADER iface, IDirectMusicLoader **ppLoader) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderResourceStream, GetLoaderVtbl, iface);
-
-	TRACE("(%p, %p)\n", This, ppLoader);
-	*ppLoader = (LPDIRECTMUSICLOADER)This->pLoader;
-	IDirectMusicLoader8_AddRef ((LPDIRECTMUSICLOADER8)*ppLoader);
-	
-	return S_OK;
-}
-
-static const IDirectMusicGetLoaderVtbl DirectMusicLoaderResourceStream_GetLoader_Vtbl = {
-	IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_QueryInterface,
-	IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_AddRef,
-	IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_Release,
-	IDirectMusicLoaderResourceStream_IDirectMusicGetLoader_GetLoader
-};
-
 HRESULT DMUSIC_CreateDirectMusicLoaderResourceStream (void** ppobj) {
 	IDirectMusicLoaderResourceStream *obj;
 
 	TRACE("(%p)\n", ppobj);
-	obj = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(IDirectMusicLoaderResourceStream));
-	if (NULL == obj) {
-		*ppobj = NULL;
-		return E_OUTOFMEMORY;
-	}
+
+	*ppobj = NULL;
+	if (!(obj = calloc(1, sizeof(*obj)))) return E_OUTOFMEMORY;
 	obj->StreamVtbl = &DirectMusicLoaderResourceStream_Stream_Vtbl;
-	obj->GetLoaderVtbl = &DirectMusicLoaderResourceStream_GetLoader_Vtbl;
 	obj->dwRef = 0; /* will be inited with QueryInterface */
 
 	return IDirectMusicLoaderResourceStream_IStream_QueryInterface ((LPSTREAM)&obj->StreamVtbl, &IID_IStream, ppobj);
-}
-
-
-/*****************************************************************************
- * IDirectMusicLoaderGenericStream implementation
- */
-/* Custom : */
-
-static void IDirectMusicLoaderGenericStream_Detach (LPSTREAM iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);
-
-	if (This->pStream)
-		IStream_Release (This->pStream);
-	This->pStream = NULL;
-}
-
-HRESULT WINAPI IDirectMusicLoaderGenericStream_Attach (LPSTREAM iface, LPSTREAM pStream, LPDIRECTMUSICLOADER8 pLoader) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);
-    
-	TRACE("(%p, %p, %p)\n", This, pStream, pLoader);
-	if (!pStream) {
-		WARN(": invalid pStream\n");
-		return E_FAIL;
-	}
-	if (!pLoader) {
-		WARN(": invalid pLoader\n");
-		return E_FAIL;
-	}	
-	
-	IDirectMusicLoaderGenericStream_Detach (iface);
-	IStream_Clone (pStream, &This->pStream);
-	This->pLoader = pLoader;
-	
-    return S_OK;
-}
-
-
-/* IUnknown/IStream part: */
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_QueryInterface (LPSTREAM iface, REFIID riid, void** ppobj) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);
-	
-	TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
-	if (IsEqualIID (riid, &IID_IUnknown) ||
-		IsEqualIID (riid, &IID_IStream)) {
-		*ppobj = &This->StreamVtbl;
-		IDirectMusicLoaderGenericStream_IStream_AddRef ((LPSTREAM)&This->StreamVtbl);
-		return S_OK;
-	} else if (IsEqualIID (riid, &IID_IDirectMusicGetLoader)) {
-		*ppobj = &This->GetLoaderVtbl;
-		IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_AddRef ((LPDIRECTMUSICGETLOADER)&This->GetLoaderVtbl);		
-		return S_OK;
-	}
-
-	WARN(": not found\n");
-	return E_NOINTERFACE;
-}
-
-static ULONG WINAPI IDirectMusicLoaderGenericStream_IStream_AddRef (LPSTREAM iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);
-	TRACE("(%p): AddRef from %ld\n", This, This->dwRef);
-	return InterlockedIncrement (&This->dwRef);
-}
-
-static ULONG WINAPI IDirectMusicLoaderGenericStream_IStream_Release (LPSTREAM iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);
-	
-	DWORD dwRef = InterlockedDecrement (&This->dwRef);
-	TRACE("(%p): ReleaseRef to %ld\n", This, dwRef);
-	if (dwRef == 0) {
-		IDirectMusicLoaderGenericStream_Detach (iface);
-		HeapFree (GetProcessHeap(), 0, This);
-	}
-	
-	return dwRef;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_Read (LPSTREAM iface, void* pv, ULONG cb, ULONG* pcbRead) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);
-
-	TRACE_(dmfileraw)("(%p, %p, %#lx, %p): redirecting to low-level stream\n", This, pv, cb, pcbRead);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_Read (This->pStream, pv, cb, pcbRead);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_Seek (LPSTREAM iface, LARGE_INTEGER dlibMove, DWORD dwOrigin, ULARGE_INTEGER* plibNewPosition) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE_(dmfileraw)("(%p, %s, %s, %p): redirecting to low-level stream\n", This, wine_dbgstr_longlong(dlibMove.QuadPart), resolve_STREAM_SEEK(dwOrigin), plibNewPosition);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_Seek (This->pStream, dlibMove, dwOrigin, plibNewPosition);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_Clone (LPSTREAM iface, IStream** ppstm) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);
-	LPSTREAM pOther = NULL;
-	LPSTREAM pLowLevel = NULL;
-	HRESULT result;
-
-	TRACE("(%p, %p)\n", iface, ppstm);
-	result = DMUSIC_CreateDirectMusicLoaderGenericStream ((LPVOID*)&pOther);
-	if (FAILED(result)) return result;
-
-	if (FAILED(IStream_Clone (This->pStream, &pLowLevel))) {
-		IStream_Release(pOther);
-		return E_FAIL;
-	}
-	IDirectMusicLoaderGenericStream_Attach (pOther, pLowLevel, This->pLoader);
-
-	TRACE(": succeeded\n");
-	*ppstm = pOther;
-	return S_OK;
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_Write (LPSTREAM iface, const void* pv, ULONG cb, ULONG* pcbWritten) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE_(dmfileraw)("(%p, %p, %#lx, %p): redirecting to low-level stream\n", This, pv, cb, pcbWritten);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_Write (This->pStream, pv, cb, pcbWritten);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_SetSize (LPSTREAM iface, ULARGE_INTEGER libNewSize) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE("(%p, %s): redirecting to low-level stream\n", This, wine_dbgstr_longlong(libNewSize.QuadPart));
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_SetSize (This->pStream, libNewSize);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_CopyTo (LPSTREAM iface, IStream* pstm, ULARGE_INTEGER cb, ULARGE_INTEGER* pcbRead, ULARGE_INTEGER* pcbWritten) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE("(%p, %p, %s, %p, %p): redirecting to low-level stream\n", This, pstm, wine_dbgstr_longlong(cb.QuadPart), pcbRead, pcbWritten);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_CopyTo (This->pStream, pstm, cb, pcbRead, pcbWritten);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_Commit (LPSTREAM iface, DWORD grfCommitFlags) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE("(%p, %#lx): redirecting to low-level stream\n", This, grfCommitFlags);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_Commit (This->pStream, grfCommitFlags);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_Revert (LPSTREAM iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE("(%p): redirecting to low-level stream\n", This);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_Revert (This->pStream);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_LockRegion (LPSTREAM iface, ULARGE_INTEGER libOffset, ULARGE_INTEGER cb, DWORD dwLockType) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE("(%p, %s, %s, %#lx): redirecting to low-level stream\n", This, wine_dbgstr_longlong(libOffset.QuadPart), wine_dbgstr_longlong(cb.QuadPart), dwLockType);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_LockRegion (This->pStream, libOffset, cb, dwLockType);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_UnlockRegion (LPSTREAM iface, ULARGE_INTEGER libOffset, ULARGE_INTEGER cb, DWORD dwLockType) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE("(%p, %s, %s, %#lx): redirecting to low-level stream\n", This, wine_dbgstr_longlong(libOffset.QuadPart), wine_dbgstr_longlong(cb.QuadPart), dwLockType);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_UnlockRegion (This->pStream, libOffset, cb, dwLockType);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IStream_Stat (LPSTREAM iface, STATSTG* pstatstg, DWORD grfStatFlag) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, StreamVtbl, iface);	
-	TRACE("(%p, %p, %#lx): redirecting to low-level stream\n", This, pstatstg, grfStatFlag);
-	if (!This->pStream)
-		return E_FAIL;
-
-	return IStream_Stat (This->pStream, pstatstg, grfStatFlag);
-}
-
-static const IStreamVtbl DirectMusicLoaderGenericStream_Stream_Vtbl = {
-	IDirectMusicLoaderGenericStream_IStream_QueryInterface,
-	IDirectMusicLoaderGenericStream_IStream_AddRef,
-	IDirectMusicLoaderGenericStream_IStream_Release,
-	IDirectMusicLoaderGenericStream_IStream_Read,
-	IDirectMusicLoaderGenericStream_IStream_Write,
-	IDirectMusicLoaderGenericStream_IStream_Seek,
-	IDirectMusicLoaderGenericStream_IStream_SetSize,
-	IDirectMusicLoaderGenericStream_IStream_CopyTo,
-	IDirectMusicLoaderGenericStream_IStream_Commit,
-	IDirectMusicLoaderGenericStream_IStream_Revert,
-	IDirectMusicLoaderGenericStream_IStream_LockRegion,
-	IDirectMusicLoaderGenericStream_IStream_UnlockRegion,
-	IDirectMusicLoaderGenericStream_IStream_Stat,
-	IDirectMusicLoaderGenericStream_IStream_Clone
-};
-
-/* IDirectMusicGetLoader part: */
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_QueryInterface (LPDIRECTMUSICGETLOADER iface, REFIID riid, void** ppobj) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderGenericStream_IStream_QueryInterface ((LPSTREAM)&This->StreamVtbl, riid, ppobj);
-}
-
-static ULONG WINAPI IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_AddRef (LPDIRECTMUSICGETLOADER iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderGenericStream_IStream_AddRef ((LPSTREAM)&This->StreamVtbl);
-}
-
-static ULONG WINAPI IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_Release (LPDIRECTMUSICGETLOADER iface) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, GetLoaderVtbl, iface);
-	return IDirectMusicLoaderGenericStream_IStream_Release ((LPSTREAM)&This->StreamVtbl);
-}
-
-static HRESULT WINAPI IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_GetLoader (LPDIRECTMUSICGETLOADER iface, IDirectMusicLoader **ppLoader) {
-	ICOM_THIS_MULTI(IDirectMusicLoaderGenericStream, GetLoaderVtbl, iface);
-
-	TRACE("(%p, %p)\n", This, ppLoader);
-	*ppLoader = (LPDIRECTMUSICLOADER)This->pLoader;
-	IDirectMusicLoader8_AddRef ((LPDIRECTMUSICLOADER8)*ppLoader);
-	
-	return S_OK;
-}
-
-static const IDirectMusicGetLoaderVtbl DirectMusicLoaderGenericStream_GetLoader_Vtbl = {
-	IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_QueryInterface,
-	IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_AddRef,
-	IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_Release,
-	IDirectMusicLoaderGenericStream_IDirectMusicGetLoader_GetLoader
-};
-
-HRESULT DMUSIC_CreateDirectMusicLoaderGenericStream (void** ppobj) {
-	IDirectMusicLoaderGenericStream *obj;
-
-	TRACE("(%p)\n", ppobj);
-	obj = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(IDirectMusicLoaderGenericStream));
-	if (NULL == obj) {
-		*ppobj = NULL;
-		return E_OUTOFMEMORY;
-	}
-	obj->StreamVtbl = &DirectMusicLoaderGenericStream_Stream_Vtbl;
-	obj->GetLoaderVtbl = &DirectMusicLoaderGenericStream_GetLoader_Vtbl;
-	obj->dwRef = 0; /* will be inited with QueryInterface */
-
-	return IDirectMusicLoaderGenericStream_IStream_QueryInterface ((LPSTREAM)&obj->StreamVtbl, &IID_IStream, ppobj);
 }

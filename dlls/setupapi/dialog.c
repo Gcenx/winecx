@@ -73,7 +73,7 @@ static void promptdisk_init(HWND hwnd, struct promptdisk_params *params)
             args[1] = (DWORD_PTR)unknown;
         }
         FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY,
-                       format, 0, 0, message, ARRAY_SIZE(message), (__ms_va_list*)args);
+                       format, 0, 0, message, ARRAY_SIZE(message), (va_list *)args);
         SetDlgItemTextW(hwnd, IDC_FILENEEDED, message);
 
         LoadStringW(SETUPAPI_hInstance, IDS_INFO, message, ARRAY_SIZE(message));
@@ -130,7 +130,7 @@ static void promptdisk_browse(HWND hwnd, struct promptdisk_params *params)
     ofn.Flags = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
     ofn.hwndOwner = hwnd;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFile = HeapAlloc(GetProcessHeap(), 0, MAX_PATH*sizeof(WCHAR));
+    ofn.lpstrFile = malloc(MAX_PATH * sizeof(WCHAR));
     lstrcpyW(ofn.lpstrFile, params->FileSought);
 
     if(GetOpenFileNameW(&ofn))
@@ -139,7 +139,7 @@ static void promptdisk_browse(HWND hwnd, struct promptdisk_params *params)
         if (last_slash) *last_slash = 0;
         SetDlgItemTextW(hwnd, IDC_PATH, ofn.lpstrFile);
     }
-    HeapFree(GetProcessHeap(), 0, ofn.lpstrFile);
+    free(ofn.lpstrFile);
 }
 
 /* Handles the messages sent to the SetupPromptForDisk dialog
@@ -201,11 +201,11 @@ UINT WINAPI SetupPromptForDiskA(HWND hwndParent, PCSTR DialogTitle, PCSTR DiskNa
     ret = SetupPromptForDiskW(hwndParent, DialogTitleW, DiskNameW, PathToSourceW,
             FileSoughtW, TagFileW, DiskPromptStyle, PathBufferW, MAX_PATH, PathRequiredSize);
 
-    HeapFree(GetProcessHeap(), 0, DialogTitleW);
-    HeapFree(GetProcessHeap(), 0, DiskNameW);
-    HeapFree(GetProcessHeap(), 0, PathToSourceW);
-    HeapFree(GetProcessHeap(), 0, FileSoughtW);
-    HeapFree(GetProcessHeap(), 0, TagFileW);
+    free(DialogTitleW);
+    free(DiskNameW);
+    free(PathToSourceW);
+    free(FileSoughtW);
+    free(TagFileW);
 
     if(ret == DPROMPT_SUCCESS)
     {

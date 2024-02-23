@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
@@ -1447,7 +1445,7 @@ NTSTATUS WINAPI RtlIdnToUnicode( DWORD flags, const WCHAR *src, INT srclen, WCHA
     int i, buflen, start, end, out_label, out = 0;
     NTSTATUS status;
     UINT buffer[64];
-    WCHAR ch;
+    WCHAR ch = 0;
 
     if (!src || srclen < -1) return STATUS_INVALID_PARAMETER;
     if (srclen == -1) srclen = wcslen( src ) + 1;

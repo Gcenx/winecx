@@ -100,8 +100,6 @@ typedef struct
 	RECT format_rect;
 	INT text_width;			/* width of the widest line in pixels for multi line controls
 					   and just line width for single line controls	*/
-	INT region_posx;		/* Position of cursor relative to region: */
-	INT region_posy;		/* -1: to left, 0: within, 1: to right */
 	void *word_break_proc;		/* 32-bit word break proc: ANSI or Unicode */
 	INT line_count;			/* number of lines */
 	INT y_offset;			/* scroll offset in number of lines */
@@ -128,9 +126,8 @@ typedef struct
 	/*
 	 * IME Data
 	 */
-	UINT composition_len;   /* length of composition, 0 == no composition */
-	int composition_start;  /* the character position for the composition */
-        UINT ime_status;        /* IME status flag */
+	UINT ime_status;        /* IME status flag */
+
 	/*
 	 * Uniscribe Data
 	 */
@@ -1779,6 +1776,20 @@ static LRESULT EDIT_EM_Scroll(EDITSTATE *es, INT action)
 }
 
 
+static void EDIT_UpdateImmCompositionWindow(EDITSTATE *es, UINT x, UINT y)
+{
+    COMPOSITIONFORM form =
+    {
+        .dwStyle = CFS_RECT,
+        .ptCurrentPos = {.x = x, .y = y},
+        .rcArea = es->format_rect,
+    };
+    HIMC himc = ImmGetContext(es->hwndSelf);
+    ImmSetCompositionWindow(himc, &form);
+    ImmReleaseContext(es->hwndSelf, himc);
+}
+
+
 /*********************************************************************
  *
  *	EDIT_SetCaretPos
@@ -1794,6 +1805,7 @@ static void EDIT_SetCaretPos(EDITSTATE *es, INT pos,
 		res = EDIT_EM_PosFromChar(es, pos, after_wrap);
 		TRACE("%d - %dx%d\n", pos, (short)LOWORD(res), (short)HIWORD(res));
 		SetCaretPos((short)LOWORD(res), (short)HIWORD(res));
+		EDIT_UpdateImmCompositionWindow(es, (short)LOWORD(res), (short)HIWORD(res));
 	}
 }
 
@@ -2134,9 +2146,6 @@ static INT EDIT_PaintText(EDITSTATE *es, HDC dc, INT x, INT y, INT line, INT col
 {
 	COLORREF BkColor;
 	COLORREF TextColor;
-	LOGFONTW underline_font;
-	HFONT hUnderline = 0;
-	HFONT old_font = 0;
 	INT ret;
 	INT li;
 	INT BkMode;
@@ -2148,20 +2157,9 @@ static INT EDIT_PaintText(EDITSTATE *es, HDC dc, INT x, INT y, INT line, INT col
 	BkColor = GetBkColor(dc);
 	TextColor = GetTextColor(dc);
 	if (rev) {
-	        if (es->composition_len == 0)
-	        {
-			SetBkColor(dc, GetSysColor(COLOR_HIGHLIGHT));
-			SetTextColor(dc, GetSysColor(COLOR_HIGHLIGHTTEXT));
-			SetBkMode( dc, OPAQUE);
-	        }
-		else
-		{
-			HFONT current = GetCurrentObject(dc,OBJ_FONT);
-			GetObjectW(current,sizeof(LOGFONTW),&underline_font);
-			underline_font.lfUnderline = TRUE;
-	            	hUnderline = CreateFontIndirectW(&underline_font);
-			old_font = SelectObject(dc,hUnderline);
-	        }
+		SetBkColor(dc, GetSysColor(COLOR_HIGHLIGHT));
+		SetTextColor(dc, GetSysColor(COLOR_HIGHLIGHTTEXT));
+		SetBkMode(dc, OPAQUE);
 	}
 	li = EDIT_EM_LineIndex(es, line);
 	if (es->style & ES_MULTILINE) {
@@ -2173,19 +2171,9 @@ static INT EDIT_PaintText(EDITSTATE *es, HDC dc, INT x, INT y, INT line, INT col
 		ret = size.cx;
 	}
 	if (rev) {
-		if (es->composition_len == 0)
-		{
-			SetBkColor(dc, BkColor);
-			SetTextColor(dc, TextColor);
-			SetBkMode( dc, BkMode);
-		}
-		else
-		{
-			if (old_font)
-				SelectObject(dc,old_font);
-			if (hUnderline)
-				DeleteObject(hUnderline);
-	        }
+		SetBkColor(dc, BkColor);
+		SetTextColor(dc, TextColor);
+		SetBkMode(dc, BkMode);
 	}
 	return ret;
 }
@@ -3597,8 +3585,6 @@ static LRESULT EDIT_WM_LButtonDblClk(EDITSTATE *es)
 	e = li + EDIT_CallWordBreakProc(es, li, e - li, ll, WB_RIGHT);
 	EDIT_EM_SetSel(es, s, e, FALSE);
 	EDIT_EM_ScrollCaret(es);
-	es->region_posx = es->region_posy = 0;
-	SetTimer(es->hwndSelf, 0, 100, NULL);
 	return 0;
 }
 
@@ -3619,8 +3605,6 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 	e = EDIT_CharFromPos(es, x, y, &after_wrap);
 	EDIT_EM_SetSel(es, (keys & MK_SHIFT) ? es->selection_start : e, e, after_wrap);
 	EDIT_EM_ScrollCaret(es);
-	es->region_posx = es->region_posy = 0;
-	SetTimer(es->hwndSelf, 0, 100, NULL);
 
 	if (!(es->flags & EF_FOCUSED))
             NtUserSetFocus(es->hwndSelf);
@@ -3637,7 +3621,6 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 static LRESULT EDIT_WM_LButtonUp(EDITSTATE *es)
 {
 	if (es->bCaptureState) {
-		NtUserKillTimer(es->hwndSelf, 0);
 		if (GetCapture() == es->hwndSelf) ReleaseCapture();
 	}
 	es->bCaptureState = FALSE;
@@ -3666,7 +3649,6 @@ static LRESULT EDIT_WM_MouseMove(EDITSTATE *es, INT x, INT y)
 {
 	INT e;
 	BOOL after_wrap;
-	INT prex, prey;
 
         /* If the mouse has been captured by process other than the edit control itself,
          * the windows edit controls will not select the strings with mouse move.
@@ -3674,17 +3656,10 @@ static LRESULT EDIT_WM_MouseMove(EDITSTATE *es, INT x, INT y)
         if (!es->bCaptureState || GetCapture() != es->hwndSelf)
 		return 0;
 
-	/*
-	 *	FIXME: gotta do some scrolling if outside client
-	 *		area.  Maybe reset the timer ?
-	 */
-	prex = x; prey = y;
-	EDIT_ConfinePoint(es, &x, &y);
-	es->region_posx = (prex < x) ? -1 : ((prex > x) ? 1 : 0);
-	es->region_posy = (prey < y) ? -1 : ((prey > y) ? 1 : 0);
 	e = EDIT_CharFromPos(es, x, y, &after_wrap);
 	EDIT_EM_SetSel(es, es->selection_start, e, after_wrap);
 	EDIT_SetCaretPos(es,es->selection_end,es->flags & EF_AFTER_WRAP);
+	EDIT_EM_ScrollCaret(es);
 	return 0;
 }
 
@@ -3841,6 +3816,15 @@ static DWORD get_font_margins(HDC hdc, const TEXTMETRICW *tm, BOOL unicode)
 	return MAKELONG(left, right);
 }
 
+static void EDIT_UpdateImmCompositionFont(EDITSTATE *es)
+{
+    LOGFONTW composition_font;
+    HIMC himc = ImmGetContext(es->hwndSelf);
+    GetObjectW(es->font, sizeof(LOGFONTW), &composition_font);
+    ImmSetCompositionFontW(himc, &composition_font);
+    ImmReleaseContext(es->hwndSelf, himc);
+}
+
 /*********************************************************************
  *
  *	WM_SETFONT
@@ -3892,6 +3876,8 @@ static void EDIT_WM_SetFont(EDITSTATE *es, HFONT font, BOOL redraw)
 				 es->flags & EF_AFTER_WRAP);
 		NtUserShowCaret( es->hwndSelf );
 	}
+
+	EDIT_UpdateImmCompositionFont(es);
 }
 
 
@@ -4046,25 +4032,6 @@ static LRESULT EDIT_WM_SysKeyDown(EDITSTATE *es, INT key, DWORD key_data)
 			return 0;
 	}
 	return DefWindowProcW(es->hwndSelf, WM_SYSKEYDOWN, key, key_data);
-}
-
-
-/*********************************************************************
- *
- *	WM_TIMER
- *
- */
-static void EDIT_WM_Timer(EDITSTATE *es)
-{
-	if (es->region_posx < 0) {
-		EDIT_MoveBackward(es, TRUE);
-	} else if (es->region_posx > 0) {
-		EDIT_MoveForward(es, TRUE);
-	}
-/*
- *	FIXME: gotta do some vertical scrolling here, like
- *		EDIT_EM_LineScroll(hwnd, 0, 1);
- */
 }
 
 /*********************************************************************
@@ -4336,75 +4303,6 @@ static LRESULT EDIT_EM_GetThumb(EDITSTATE *es)
  * The Following code is to handle inline editing from IMEs
  */
 
-static void EDIT_GetCompositionStr(HIMC hIMC, LPARAM CompFlag, EDITSTATE *es)
-{
-    LONG buflen;
-    LPWSTR lpCompStr;
-    LPSTR lpCompStrAttr = NULL;
-    DWORD dwBufLenAttr;
-
-    buflen = ImmGetCompositionStringW(hIMC, GCS_COMPSTR, NULL, 0);
-
-    if (buflen < 0)
-    {
-        return;
-    }
-
-    lpCompStr = HeapAlloc(GetProcessHeap(),0,buflen);
-    if (!lpCompStr)
-    {
-        ERR("Unable to allocate IME CompositionString\n");
-        return;
-    }
-
-    if (buflen)
-        ImmGetCompositionStringW(hIMC, GCS_COMPSTR, lpCompStr, buflen);
-
-    if (CompFlag & GCS_COMPATTR)
-    {
-        /* 
-         * We do not use the attributes yet. it would tell us what characters
-         * are in transition and which are converted or decided upon
-         */
-        dwBufLenAttr = ImmGetCompositionStringW(hIMC, GCS_COMPATTR, NULL, 0);
-        if (dwBufLenAttr)
-        {
-            dwBufLenAttr ++;
-            lpCompStrAttr = HeapAlloc(GetProcessHeap(),0,dwBufLenAttr+1);
-            if (!lpCompStrAttr)
-            {
-                ERR("Unable to allocate IME Attribute String\n");
-                HeapFree(GetProcessHeap(),0,lpCompStr);
-                return;
-            }
-            ImmGetCompositionStringW(hIMC,GCS_COMPATTR, lpCompStrAttr, 
-                    dwBufLenAttr);
-            lpCompStrAttr[dwBufLenAttr] = 0;
-        }
-    }
-
-    /* check for change in composition start */
-    if (es->selection_end < es->composition_start)
-        es->composition_start = es->selection_end;
-    
-    /* replace existing selection string */
-    es->selection_start = es->composition_start;
-
-    if (es->composition_len > 0)
-        es->selection_end = es->composition_start + es->composition_len;
-    else
-        es->selection_end = es->selection_start;
-
-    EDIT_EM_ReplaceSel(es, FALSE, lpCompStr, buflen / sizeof(WCHAR), TRUE, TRUE);
-    es->composition_len = abs(es->composition_start - es->selection_end);
-
-    es->selection_start = es->composition_start;
-    es->selection_end = es->selection_start + es->composition_len;
-
-    HeapFree(GetProcessHeap(),0,lpCompStrAttr);
-    HeapFree(GetProcessHeap(),0,lpCompStr);
-}
-
 static void EDIT_GetResultStr(HIMC hIMC, EDITSTATE *es)
 {
     LONG buflen;
@@ -4424,48 +4322,22 @@ static void EDIT_GetResultStr(HIMC hIMC, EDITSTATE *es)
     }
 
     ImmGetCompositionStringW(hIMC, GCS_RESULTSTR, lpResultStr, buflen);
-
-    /* check for change in composition start */
-    if (es->selection_end < es->composition_start)
-        es->composition_start = es->selection_end;
-
-    es->selection_start = es->composition_start;
-    es->selection_end = es->composition_start + es->composition_len;
     EDIT_EM_ReplaceSel(es, TRUE, lpResultStr, buflen / sizeof(WCHAR), TRUE, TRUE);
-    es->composition_start = es->selection_end;
-    es->composition_len = 0;
-
     HeapFree(GetProcessHeap(),0,lpResultStr);
 }
 
 static void EDIT_ImeComposition(HWND hwnd, LPARAM CompFlag, EDITSTATE *es)
 {
     HIMC hIMC;
-    int cursor;
-
-    if (es->composition_len == 0 && es->selection_start != es->selection_end)
-    {
-        EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
-        es->composition_start = es->selection_end;
-    }
 
     hIMC = ImmGetContext(hwnd);
     if (!hIMC)
         return;
 
     if (CompFlag & GCS_RESULTSTR)
-    {
         EDIT_GetResultStr(hIMC, es);
-        cursor = 0;
-    }
-    else
-    {
-        if (CompFlag & GCS_COMPSTR)
-            EDIT_GetCompositionStr(hIMC, CompFlag, es);
-        cursor = ImmGetCompositionStringW(hIMC, GCS_CURSORPOS, 0, 0);
-    }
+
     ImmReleaseContext(hwnd, hIMC);
-    EDIT_SetCaretPos(es, es->selection_start + cursor, es->flags & EF_AFTER_WRAP);
 }
 
 
@@ -4687,6 +4559,7 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 {
 	EDITSTATE *es = (EDITSTATE *)GetWindowLongPtrW( hwnd, 0 );
 	LRESULT result = 0;
+	POINT pt;
 
         TRACE("hwnd=%p msg=%x (%s) wparam=%Ix lparam=%Ix\n", hwnd, msg, SPY_GetMsgName(msg, hwnd), wParam, lParam);
 
@@ -5159,10 +5032,6 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 		result = EDIT_WM_SysKeyDown(es, (INT)wParam, (DWORD)lParam);
 		break;
 
-	case WM_TIMER:
-		EDIT_WM_Timer(es);
-		break;
-
 	case WM_VSCROLL:
 		result = EDIT_WM_VScroll(es, LOWORD(wParam), (short)HIWORD(wParam));
 		break;
@@ -5198,34 +5067,16 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 
 	/* IME messages to make the edit control IME aware */
 	case WM_IME_SETCONTEXT:
-		break;
-
-	case WM_IME_STARTCOMPOSITION:
-		es->composition_start = es->selection_end;
-		es->composition_len = 0;
+		NtUserGetCaretPos(&pt);
+		EDIT_UpdateImmCompositionWindow(es, pt.x, pt.y);
+		EDIT_UpdateImmCompositionFont(es);
 		break;
 
 	case WM_IME_COMPOSITION:
-                if (lParam & GCS_RESULTSTR && !(es->ime_status & EIMES_GETCOMPSTRATONCE))
-                {
-                    DefWindowProcT(hwnd, msg, wParam, lParam, unicode);
-                    break;
-                }
-
-                EDIT_ImeComposition(hwnd, lParam, es);
-		break;
-
-	case WM_IME_ENDCOMPOSITION:
-                if (es->composition_len > 0)
-                {
-                        EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
-                        es->selection_end = es->selection_start;
-                        es->composition_len= 0;
-                }
-		break;
-
-	case WM_IME_COMPOSITIONFULL:
-		break;
+		EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
+		if ((lParam & GCS_RESULTSTR) && (es->ime_status & EIMES_GETCOMPSTRATONCE))
+			EDIT_ImeComposition(hwnd, lParam, es);
+		return DefWindowProcW(hwnd, msg, wParam, lParam);
 
 	case WM_IME_SELECT:
 		break;

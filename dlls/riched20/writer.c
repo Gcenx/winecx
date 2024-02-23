@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-
 #include "editor.h"
 #include "rtf.h"
 
@@ -54,7 +52,7 @@ ME_StreamOutRTFText(ME_OutStream *pStream, const WCHAR *text, LONG nChars);
 static ME_OutStream*
 ME_StreamOutInit(ME_TextEditor *editor, EDITSTREAM *stream)
 {
-  ME_OutStream *pStream = heap_alloc_zero(sizeof(*pStream));
+  ME_OutStream *pStream = calloc(1, sizeof(*pStream));
 
   pStream->stream = stream;
   pStream->stream->dwError = 0;
@@ -94,7 +92,7 @@ ME_StreamOutFree(ME_OutStream *pStream)
   LONG written = pStream->written;
   TRACE("total length = %lu\n", written);
 
-  heap_free(pStream);
+  free(pStream);
   return written;
 }
 
@@ -953,13 +951,13 @@ static BOOL stream_out_graphics( ME_TextEditor *editor, ME_OutStream *stream,
     if (FAILED(hr)) goto done;
     if (med.tymed != TYMED_ENHMF) goto done;
 
-    size = GetEnhMetaFileBits( med.u.hEnhMetaFile, 0, NULL );
+    size = GetEnhMetaFileBits( med.hEnhMetaFile, 0, NULL );
     if (size < FIELD_OFFSET(ENHMETAHEADER, cbPixelFormat)) goto done;
 
-    emf_bits = HeapAlloc( GetProcessHeap(), 0, size );
+    emf_bits = malloc( size );
     if (!emf_bits) goto done;
 
-    size = GetEnhMetaFileBits( med.u.hEnhMetaFile, size, (BYTE *)emf_bits );
+    size = GetEnhMetaFileBits( med.hEnhMetaFile, size, (BYTE *)emf_bits );
     if (size < FIELD_OFFSET(ENHMETAHEADER, cbPixelFormat)) goto done;
 
     /* size_in_pixels = (frame_size / 100) * szlDevice / szlMillimeters
@@ -988,7 +986,7 @@ static BOOL stream_out_graphics( ME_TextEditor *editor, ME_OutStream *stream,
 done:
     ME_DestroyContext( &c );
     ITextHost_TxReleaseDC( editor->texthost, hdc );
-    HeapFree( GetProcessHeap(), 0, emf_bits );
+    free( emf_bits );
     ReleaseStgMedium( &med );
     IDataObject_Release( data );
     return ret;
@@ -1157,7 +1155,7 @@ static BOOL ME_StreamOutText(ME_TextEditor *editor, ME_OutStream *pStream,
         nSize = WideCharToMultiByte(nCodePage, 0, get_text( cursor.run, cursor.nOffset ),
                                     nLen, NULL, 0, NULL, NULL);
         if (nSize > nBufLen) {
-          buffer = heap_realloc(buffer, nSize);
+          buffer = realloc(buffer, nSize);
           nBufLen = nSize;
         }
         WideCharToMultiByte(nCodePage, 0, get_text( cursor.run, cursor.nOffset ),
@@ -1171,7 +1169,7 @@ static BOOL ME_StreamOutText(ME_TextEditor *editor, ME_OutStream *pStream,
     cursor.run = run_next_all_paras( cursor.run );
   }
 
-  heap_free(buffer);
+  free(buffer);
   return success;
 }
 

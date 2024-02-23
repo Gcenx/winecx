@@ -1249,6 +1249,246 @@ return DSERR_GENERIC;
     return rc;
 }
 
+static void check_doppler(IDirectSound *dsound, IDirectSound3DListener *listener,
+        BOOL play, DWORD mode, float listener_pos, float listener_velocity,
+        float buffer_pos, float buffer_velocity, DWORD set_freq, DWORD expected_freq)
+{
+    IDirectSound3DBuffer *buffer_3d;
+    IDirectSoundBuffer *ref_buffer;
+    IDirectSoundBuffer *buffer;
+    WAVEFORMATEX format;
+    DSBUFFERDESC desc;
+    DWORD locked_size;
+    void *locked_data;
+    HRESULT hr;
+    DWORD freq;
+    DWORD size;
+    char *data;
+    LONG ref;
+
+    if (play)
+    {
+        const char *mode_str = "";
+        if (mode == DS3DMODE_HEADRELATIVE)
+            mode_str = "in head-relative mode ";
+        else if (mode == DS3DMODE_DISABLE)
+            mode_str = "with 3D processing disabled ";
+        trace("  Testing Doppler shift %swith listener at %g, velocity %g"
+                " with sound at %g, velocity %g, frequency %luHz\n",
+                mode_str, listener_pos, listener_velocity, buffer_pos, buffer_velocity, set_freq);
+    }
+
+    memset(&format, 0, sizeof(format));
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = 1;
+    format.nSamplesPerSec = 22050;
+    format.wBitsPerSample = 16;
+    format.nAvgBytesPerSec = 2 * 22050;
+    format.nBlockAlign = 2;
+
+    data = wave_generate_la(&format, 0.6, &size, FALSE);
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = 0;
+    desc.lpwfxFormat = &format;
+    desc.dwBufferBytes = size;
+
+    hr = IDirectSound_CreateSoundBuffer(dsound, &desc, &ref_buffer, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSoundBuffer_Lock(ref_buffer, 0, 0, &locked_data, &locked_size, NULL, NULL, DSBLOCK_ENTIREBUFFER);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    memcpy(locked_data, data, size);
+    hr = IDirectSoundBuffer_Unlock(ref_buffer, locked_data, locked_size, NULL, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    HeapFree(GetProcessHeap(), 0, data);
+
+    memset(&format, 0, sizeof(format));
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = 1;
+    /* Set the sampling frequency of the generated waveform to the frequency
+     * that the buffer is expected to be played at. This way a successful
+     * test will produce a 440Hz tone. */
+    format.nSamplesPerSec = expected_freq;
+    format.wBitsPerSample = 16;
+    format.nAvgBytesPerSec = 2 * expected_freq;
+    format.nBlockAlign = 2;
+
+    data = wave_generate_la(&format, 0.6, &size, FALSE);
+
+    memset(&format, 0, sizeof(format));
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = 1;
+    format.nSamplesPerSec = 22050;
+    format.wBitsPerSample = 16;
+    format.nAvgBytesPerSec = 2 * 22050;
+    format.nBlockAlign = 2;
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DSBCAPS_CTRLFREQUENCY | DSBCAPS_CTRL3D;
+    desc.lpwfxFormat = &format;
+    desc.dwBufferBytes = size;
+
+    hr = IDirectSound_CreateSoundBuffer(dsound, &desc, &buffer, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSoundBuffer_QueryInterface(buffer, &IID_IDirectSound3DBuffer, (void *)&buffer_3d);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSoundBuffer_Lock(buffer, 0, 0, &locked_data, &locked_size, NULL, NULL, DSBLOCK_ENTIREBUFFER);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    memcpy(locked_data, data, size);
+    hr = IDirectSoundBuffer_Unlock(buffer, locked_data, locked_size, NULL, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    HeapFree(GetProcessHeap(), 0, data);
+
+    /* Set to different values first to test that the frequency is updated. */
+    hr = IDirectSound3DListener_SetPosition(listener, 0, 0, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSound3DListener_SetVelocity(listener, 0, 0, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSound3DBuffer_SetPosition(buffer_3d, 0, 1, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSound3DBuffer_SetVelocity(buffer_3d, 0, -60, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSound3DListener_CommitDeferredSettings(listener);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSound3DListener_SetPosition(listener, 0, listener_pos, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSound3DListener_SetVelocity(listener, 0, listener_velocity, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSoundBuffer_SetFrequency(buffer, set_freq);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSound3DBuffer_SetMode(buffer_3d, mode, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSound3DBuffer_SetPosition(buffer_3d, 0, buffer_pos, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSound3DBuffer_SetVelocity(buffer_3d, 0, buffer_velocity, 0, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSound3DListener_CommitDeferredSettings(listener);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    freq = 0xdeadbeef;
+    hr = IDirectSoundBuffer_GetFrequency(buffer, &freq);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(freq == set_freq, "Got frequency %lu\n", freq);
+
+    if (play)
+    {
+        trace("    Playing a reference 440Hz tone\n");
+        hr = IDirectSoundBuffer_Play(ref_buffer, 0, 0, DSBPLAY_LOOPING);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        Sleep(500);
+        hr = IDirectSoundBuffer_Stop(ref_buffer);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+        trace("    Playing a test tone (should be 440Hz)\n");
+        hr = IDirectSoundBuffer_Play(buffer, 0, 0, DSBPLAY_LOOPING);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        Sleep(500);
+        hr = IDirectSoundBuffer_Stop(buffer);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    }
+
+    IDirectSound3DBuffer_Release(buffer_3d);
+    ref = IDirectSoundBuffer_Release(buffer);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IDirectSoundBuffer_Release(ref_buffer);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
+static void test_doppler(GUID *guid, BOOL play)
+{
+    IDirectSound3DListener *listener;
+    IDirectSoundBuffer *primary;
+    IDirectSound *dsound;
+    DSBUFFERDESC desc;
+    HRESULT hr;
+    HWND hwnd;
+    LONG ref;
+
+    hwnd = get_hwnd();
+
+    hr = DirectSoundCreate(guid, &dsound, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSound_SetCooperativeLevel(dsound, hwnd, DSSCL_PRIORITY);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DSBCAPS_PRIMARYBUFFER | DSBCAPS_CTRL3D;
+    hr = IDirectSound_CreateSoundBuffer(dsound, &desc, &primary, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirectSoundBuffer_QueryInterface(primary, &IID_IDirectSound3DListener, (void *)&listener);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    /* When run in interactive mode, the following tests should produce a series
+     * of 440Hz tones. Any deviation from 440Hz indicates a test failure. */
+
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, 0, 22050, 22050);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, -90, 1, -90, 22050, 22050);
+
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, -90, 22050, 29400);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, 90, 22050, 17640);
+
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 0, -90, 22050, 22050);
+
+    /* The Doppler shift does not depend on the frame of reference. */
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 90, 1, 0, 22050, 29400);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, -90, 1, 0, 22050, 17640);
+
+    /* The Doppler shift is limited to +-0.5 speed of sound. */
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, -240, 22050, 44100);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, 240, 22050, 14700);
+
+    /* The shifted frequency is limited to DSBFREQUENCY_MAX. */
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, -90, 176400, 200000);
+
+    check_doppler(dsound, listener, play, DS3DMODE_HEADRELATIVE, 0, -90, 1, -90, 22050, 29400);
+
+    check_doppler(dsound, listener, play, DS3DMODE_DISABLE, 0, 0, 1, -90, 22050, 22050);
+
+    hr = IDirectSound3DListener_SetDistanceFactor(listener, 10, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 0.1f, -9, 22050, 29400);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 0.1f, 9, 22050, 17640);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 9, 0.1f, 0, 22050, 29400);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, -9, 0.1f, 0, 22050, 17640);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 0.1f, -24, 22050, 44100);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 0.1f, 24, 22050, 14700);
+
+    hr = IDirectSound3DListener_SetDistanceFactor(listener, DS3D_DEFAULTDISTANCEFACTOR, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSound3DListener_SetDopplerFactor(listener, 2, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, -45, 22050, 29400);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, 45, 22050, 17640);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 45, 1, 0, 22050, 29400);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, -45, 1, 0, 22050, 17640);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, -120, 22050, 44100);
+    check_doppler(dsound, listener, play, DS3DMODE_NORMAL, 0, 0, 1, 120, 22050, 14700);
+
+    hr = IDirectSound3DListener_SetDopplerFactor(listener, DS3D_DEFAULTDOPPLERFACTOR, DS3D_DEFERRED);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    IDirectSound3DListener_Release(listener);
+    ref = IDirectSoundBuffer_Release(primary);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IDirectSound_Release(dsound);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
 static unsigned driver_count = 0;
 
 static BOOL WINAPI dsenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
@@ -1294,6 +1534,8 @@ static BOOL WINAPI dsenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
     test_secondary(lpGuid,winetest_interactive,1,1,1,0,1,0);
     test_secondary(lpGuid,winetest_interactive,1,1,1,0,0,1);
     test_secondary(lpGuid,winetest_interactive,1,1,1,0,1,1);
+
+    test_doppler(lpGuid,winetest_interactive);
 
     return TRUE;
 }

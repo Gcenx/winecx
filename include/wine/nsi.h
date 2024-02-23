@@ -380,6 +380,7 @@ struct nsi_udp_endpoint_static
 #define IOCTL_NSIPROXY_WINE_GET_ALL_PARAMETERS    CTL_CODE(FILE_DEVICE_NETWORK, 0x401, METHOD_BUFFERED, 0)
 #define IOCTL_NSIPROXY_WINE_GET_PARAMETER         CTL_CODE(FILE_DEVICE_NETWORK, 0x402, METHOD_BUFFERED, 0)
 #define IOCTL_NSIPROXY_WINE_ICMP_ECHO             CTL_CODE(FILE_DEVICE_NETWORK, 0x403, METHOD_BUFFERED, 0)
+#define IOCTL_NSIPROXY_WINE_CHANGE_NOTIFICATION   CTL_CODE(FILE_DEVICE_NETWORK, 0x404, METHOD_BUFFERED, 0)
 
 /* input for IOCTL_NSIPROXY_WINE_ENUMERATE_ALL */
 struct nsiproxy_enumerate_all
@@ -434,6 +435,13 @@ struct nsiproxy_icmp_echo
     UINT req_size;
     UINT timeout;
     BYTE data[1]; /* ((opt_size + 3) & ~3) + req_size */
+};
+
+/* input for IOCTL_NSIPROXY_WINE_CHANGE_NOTIFICATION */
+struct nsiproxy_request_notification
+{
+    NPI_MODULEID module;
+    UINT table;
 };
 
 /* Undocumented Nsi api */
@@ -492,9 +500,19 @@ struct nsi_get_parameter_ex
     UINT data_offset;
 };
 
+struct nsi_request_change_notification_ex
+{
+    DWORD unk;
+    const NPI_MODULEID *module;
+    UINT_PTR table;
+    OVERLAPPED *ovr;
+    HANDLE *handle;
+};
+
 DWORD WINAPI NsiAllocateAndGetTable( DWORD unk, const NPI_MODULEID *module, DWORD table, void **key_data, DWORD key_size,
                                      void **rw_data, DWORD rw_size, void **dynamic_data, DWORD dynamic_size,
                                      void **static_data, DWORD static_size, DWORD *count, DWORD unk2 );
+DWORD WINAPI NsiCancelChangeNotification( OVERLAPPED *ovr );
 DWORD WINAPI NsiEnumerateObjectsAllParameters( DWORD unk, DWORD unk2, const NPI_MODULEID *module, DWORD table,
                                                void *key_data, DWORD key_size, void *rw_data, DWORD rw_size,
                                                void *dynamic_data, DWORD dynamic_size, void *static_data, DWORD static_size,
@@ -508,5 +526,8 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params );
 DWORD WINAPI NsiGetParameter( DWORD unk, const NPI_MODULEID *module, DWORD table, const void *key, DWORD key_size,
                               DWORD param_type, void *data, DWORD data_size, DWORD data_offset );
 DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params );
+DWORD WINAPI NsiRequestChangeNotification( DWORD unk, const NPI_MODULEID *module, DWORD table, OVERLAPPED *ovr,
+                                           HANDLE *handle );
+DWORD WINAPI NsiRequestChangeNotificationEx( struct nsi_request_change_notification_ex *params );
 
 #endif /* __WINE_NSI_H */

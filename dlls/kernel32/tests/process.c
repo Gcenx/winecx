@@ -96,6 +96,7 @@ static BOOL   (WINAPI *pUpdateProcThreadAttribute)(struct _PROC_THREAD_ATTRIBUTE
 static void   (WINAPI *pDeleteProcThreadAttributeList)(struct _PROC_THREAD_ATTRIBUTE_LIST*);
 static DWORD  (WINAPI *pGetActiveProcessorCount)(WORD);
 static DWORD  (WINAPI *pGetMaximumProcessorCount)(WORD);
+static BOOL   (WINAPI *pGetProcessInformation)(HANDLE,PROCESS_INFORMATION_CLASS,void*,DWORD);
 
 /* ############################### */
 static char     base[MAX_PATH];
@@ -237,7 +238,7 @@ static BOOL init(void)
 
     myARGC = winetest_get_mainargs( &myARGV );
     if (!GetCurrentDirectoryA(sizeof(base), base)) return FALSE;
-    strcpy(selfname, myARGV[0]);
+    GetModuleFileNameA( 0, selfname, sizeof(selfname) );
 
     /* Strip the path of selfname */
     if ((p = strrchr(selfname, '\\')) != NULL) exename = p + 1;
@@ -282,6 +283,7 @@ static BOOL init(void)
     pDeleteProcThreadAttributeList = (void *)GetProcAddress(hkernel32, "DeleteProcThreadAttributeList");
     pGetActiveProcessorCount = (void *)GetProcAddress(hkernel32, "GetActiveProcessorCount");
     pGetMaximumProcessorCount = (void *)GetProcAddress(hkernel32, "GetMaximumProcessorCount");
+    pGetProcessInformation = (void *)GetProcAddress(hkernel32, "GetProcessInformation");
 
     return TRUE;
 }
@@ -317,6 +319,42 @@ static void WINAPIV __WINE_PRINTF_ATTR(2,3) childPrintf(HANDLE h, const char* fm
     WriteFile(h, buffer, strlen(buffer), &w, NULL);
 }
 
+/* bits 0..1 contains FILE_TYPE_{UNKNOWN, CHAR, PIPE, DISK} */
+#define HATTR_NULL      0x08               /* NULL handle value */
+#define HATTR_INVALID   0x04               /* INVALID_HANDLE_VALUE */
+#define HATTR_TYPE      0x0c               /* valid handle, with type set */
+#define HATTR_INHERIT   0x10               /* inheritance flag set */
+#define HATTR_UNTOUCHED 0x20               /* Identify fields untouched by GetStartupInfoW */
+
+#define HANDLE_UNTOUCHEDW (HANDLE)(DWORD_PTR)(0x5050505050505050ull)
+
+static unsigned encode_handle_attributes(HANDLE h)
+{
+    DWORD dw;
+    unsigned result;
+
+    if (h == NULL)
+        result = HATTR_NULL;
+    else if (h == INVALID_HANDLE_VALUE)
+        result = HATTR_INVALID;
+    else if (h == HANDLE_UNTOUCHEDW)
+        result = HATTR_UNTOUCHED;
+    else
+    {
+        result = HATTR_TYPE;
+        dw = GetFileType(h);
+        if (dw == FILE_TYPE_CHAR || dw == FILE_TYPE_DISK || dw == FILE_TYPE_PIPE)
+        {
+            DWORD info;
+            if (GetHandleInformation(h, &info) && (info & HANDLE_FLAG_INHERIT))
+                result |= HATTR_INHERIT;
+        }
+        else
+            dw = FILE_TYPE_UNKNOWN;
+        result |= dw;
+    }
+    return result;
+}
 
 /******************************************************************
  *		doChild
@@ -341,40 +379,48 @@ static void     doChild(const char* file, const char* option)
     if (hFile == INVALID_HANDLE_VALUE) return;
 
     /* output of startup info (Ansi) */
+    memset(&siA, 0xA0, sizeof(siA));
     GetStartupInfoA(&siA);
     childPrintf(hFile,
                 "[StartupInfoA]\ncb=%08lu\nlpDesktop=%s\nlpTitle=%s\n"
                 "dwX=%lu\ndwY=%lu\ndwXSize=%lu\ndwYSize=%lu\n"
                 "dwXCountChars=%lu\ndwYCountChars=%lu\ndwFillAttribute=%lu\n"
                 "dwFlags=%lu\nwShowWindow=%u\n"
-                "hStdInput=%Iu\nhStdOutput=%Iu\nhStdError=%Iu\n\n",
+                "hStdInput=%Iu\nhStdOutput=%Iu\nhStdError=%Iu\n"
+                "hStdInputEncode=%u\nhStdOutputEncode=%u\nhStdErrorEncode=%u\n\n",
                 siA.cb, encodeA(siA.lpDesktop), encodeA(siA.lpTitle),
                 siA.dwX, siA.dwY, siA.dwXSize, siA.dwYSize,
                 siA.dwXCountChars, siA.dwYCountChars, siA.dwFillAttribute,
                 siA.dwFlags, siA.wShowWindow,
-                (DWORD_PTR)siA.hStdInput, (DWORD_PTR)siA.hStdOutput, (DWORD_PTR)siA.hStdError);
+                (DWORD_PTR)siA.hStdInput, (DWORD_PTR)siA.hStdOutput, (DWORD_PTR)siA.hStdError,
+                encode_handle_attributes(siA.hStdInput), encode_handle_attributes(siA.hStdOutput),
+                encode_handle_attributes(siA.hStdError));
 
     /* check the console handles in the TEB */
-    childPrintf(hFile, "[TEB]\nhStdInput=%Iu\nhStdOutput=%Iu\nhStdError=%Iu\n\n",
+    childPrintf(hFile,
+                "[TEB]\nhStdInput=%Iu\nhStdOutput=%Iu\nhStdError=%Iu\n"
+                "hStdInputEncode=%u\nhStdOutputEncode=%u\nhStdErrorEncode=%u\n\n",
                 (DWORD_PTR)params->hStdInput, (DWORD_PTR)params->hStdOutput,
-                (DWORD_PTR)params->hStdError);
+                (DWORD_PTR)params->hStdError,
+                encode_handle_attributes(params->hStdInput), encode_handle_attributes(params->hStdOutput),
+                encode_handle_attributes(params->hStdError));
 
-    /* since GetStartupInfoW is only implemented in win2k,
-     * zero out before calling so we can notice the difference
-     */
-    memset(&siW, 0, sizeof(siW));
+    memset(&siW, 0x50, sizeof(siW));
     GetStartupInfoW(&siW);
     childPrintf(hFile,
                 "[StartupInfoW]\ncb=%08lu\nlpDesktop=%s\nlpTitle=%s\n"
                 "dwX=%lu\ndwY=%lu\ndwXSize=%lu\ndwYSize=%lu\n"
                 "dwXCountChars=%lu\ndwYCountChars=%lu\ndwFillAttribute=%lu\n"
                 "dwFlags=%lu\nwShowWindow=%u\n"
-                "hStdInput=%Iu\nhStdOutput=%Iu\nhStdError=%Iu\n\n",
+                "hStdInput=%Iu\nhStdOutput=%Iu\nhStdError=%Iu\n"
+                "hStdInputEncode=%u\nhStdOutputEncode=%u\nhStdErrorEncode=%u\n\n",
                 siW.cb, encodeW(siW.lpDesktop), encodeW(siW.lpTitle),
                 siW.dwX, siW.dwY, siW.dwXSize, siW.dwYSize,
                 siW.dwXCountChars, siW.dwYCountChars, siW.dwFillAttribute,
                 siW.dwFlags, siW.wShowWindow,
-                (DWORD_PTR)siW.hStdInput, (DWORD_PTR)siW.hStdOutput, (DWORD_PTR)siW.hStdError);
+                (DWORD_PTR)siW.hStdInput, (DWORD_PTR)siW.hStdOutput, (DWORD_PTR)siW.hStdError,
+                encode_handle_attributes(siW.hStdInput), encode_handle_attributes(siW.hStdOutput),
+                encode_handle_attributes(siW.hStdError));
 
     /* Arguments */
     childPrintf(hFile, "[Arguments]\nargcA=%d\n", myARGC);
@@ -595,10 +641,17 @@ static void ok_child_int( int line, const char *sect, const char *key, UINT expe
     ok_(__FILE__, line)( result == expect, "%s:%s expected %u, but got %u\n", sect, key, expect, result );
 }
 
+static void ok_child_hexint( int line, const char *sect, const char *key, UINT expect, UINT is_broken )
+{
+    UINT result = GetPrivateProfileIntA( sect, key, !expect, resfile );
+    ok_(__FILE__, line)( result == expect || broken( is_broken && result == is_broken ), "%s:%s expected %#x, but got %#x\n", sect, key, expect, result );
+}
+
 #define okChildString(sect, key, expect) ok_child_string(__LINE__, (sect), (key), (expect), 1 )
 #define okChildIString(sect, key, expect) ok_child_string(__LINE__, (sect), (key), (expect), 0 )
 #define okChildStringWA(sect, key, expect) ok_child_stringWA(__LINE__, (sect), (key), (expect), 1 )
 #define okChildInt(sect, key, expect) ok_child_int(__LINE__, (sect), (key), (expect))
+#define okChildHexInt(sect, key, expect, is_broken) ok_child_hexint(__LINE__, (sect), (key), (expect), (is_broken))
 
 static void test_Startup(void)
 {
@@ -2185,7 +2238,7 @@ static void test_IsWow64Process2(void)
 
     if (!pIsWow64Process2)
     {
-        skip("IsWow64Process2 is not available\n");
+        win_skip("IsWow64Process2 is not available\n");
         return;
     }
 
@@ -2202,12 +2255,12 @@ static void test_IsWow64Process2(void)
 
 #if defined(__i386__) || defined(__x86_64__)
         ok(machine == IMAGE_FILE_MACHINE_I386, "got %#x\n", machine);
-        expect_native = IMAGE_FILE_MACHINE_AMD64;
+        ok( native_machine == IMAGE_FILE_MACHINE_AMD64 ||
+            native_machine == IMAGE_FILE_MACHINE_ARM64, "got %#x\n", native_machine);
+        expect_native = native_machine;
 #else
         skip("not supported architecture\n");
 #endif
-        ok(native_machine == expect_native, "got %#x\n", native_machine);
-
         ret = TerminateProcess(pi.hProcess, 0);
         ok(ret, "TerminateProcess error\n");
 
@@ -2279,6 +2332,7 @@ static void test_SystemInfo(void)
 {
     SYSTEM_INFO si, nsi;
     BOOL is_wow64;
+    USHORT machine, native_machine;
 
     if (!pGetNativeSystemInfo)
     {
@@ -2292,21 +2346,26 @@ static void test_SystemInfo(void)
     pGetNativeSystemInfo(&nsi);
     if (is_wow64)
     {
-        if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
+        if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
         {
-            ok(S(U(nsi)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64,
+            ok(nsi.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64,
                "Expected PROCESSOR_ARCHITECTURE_AMD64, got %d\n",
-               S(U(nsi)).wProcessorArchitecture);
-            ok(nsi.dwProcessorType == PROCESSOR_AMD_X8664,
-               "Expected PROCESSOR_AMD_X8664, got %ld\n",
-               nsi.dwProcessorType);
+               nsi.wProcessorArchitecture);
+            if (pIsWow64Process2 && pIsWow64Process2(GetCurrentProcess(), &machine, &native_machine) &&
+                native_machine == IMAGE_FILE_MACHINE_ARM64)
+            {
+                ok(nsi.dwProcessorType == PROCESSOR_INTEL_PENTIUM, "got %ld\n", nsi.dwProcessorType);
+                ok(nsi.wProcessorLevel == 15, "got %d\n", nsi.wProcessorLevel);
+                ok(nsi.wProcessorRevision == 0x40a, "got %d\n", nsi.wProcessorRevision);
+            }
+            else ok(nsi.dwProcessorType == PROCESSOR_AMD_X8664, "got %ld\n", nsi.dwProcessorType);
         }
     }
     else
     {
-        ok(S(U(si)).wProcessorArchitecture == S(U(nsi)).wProcessorArchitecture,
+        ok(si.wProcessorArchitecture == nsi.wProcessorArchitecture,
            "Expected no difference for wProcessorArchitecture, got %d and %d\n",
-           S(U(si)).wProcessorArchitecture, S(U(nsi)).wProcessorArchitecture);
+           si.wProcessorArchitecture, nsi.wProcessorArchitecture);
         ok(si.dwProcessorType == nsi.dwProcessorType,
            "Expected no difference for dwProcessorType, got %ld and %ld\n",
            si.dwProcessorType, nsi.dwProcessorType);
@@ -3051,73 +3110,282 @@ static void test_BreakawayOk(HANDLE parent_job)
     ok(ret, "SetInformationJobObject error %lu\n", GetLastError());
 }
 
-static void test_StartupNoConsole(void)
+/* copy an executable, but changing its subsystem */
+static void copy_change_subsystem(const char* in, const char* out, DWORD subsyst)
 {
-#ifndef _WIN64
-    char                buffer[2 * MAX_PATH + 25];
-    STARTUPINFOA        startup;
-    PROCESS_INFORMATION info;
+    BOOL ret;
+    HANDLE hFile, hMap;
+    void* mapping;
+    IMAGE_NT_HEADERS *nthdr;
 
-    memset(&startup, 0, sizeof(startup));
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_SHOWNORMAL;
-    get_file_name(resfile);
-    sprintf(buffer, "\"%s\" process dump \"%s\"", selfname, resfile);
-    ok(CreateProcessA(NULL, buffer, NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &startup,
-                      &info), "CreateProcess\n");
-    wait_and_close_child_process(&info);
+    ret = CopyFileA(in, out, FALSE);
+    ok(ret, "Failed to copy executable %s in %s (%lu)\n", in, out, GetLastError());
 
-    reload_child_info(resfile);
-    okChildInt("StartupInfoA", "hStdInput", (UINT)INVALID_HANDLE_VALUE);
-    okChildInt("StartupInfoA", "hStdOutput", (UINT)INVALID_HANDLE_VALUE);
-    okChildInt("StartupInfoA", "hStdError", (UINT)INVALID_HANDLE_VALUE);
-    okChildInt("TEB", "hStdInput", 0);
-    okChildInt("TEB", "hStdOutput", 0);
-    okChildInt("TEB", "hStdError", 0);
-    release_memory();
-    DeleteFileA(resfile);
-#endif
+    hFile = CreateFileA(out, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(hFile != INVALID_HANDLE_VALUE, "Couldn't open file %s (%lu)\n", out, GetLastError());
+    hMap = CreateFileMappingW(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
+    ok(hMap != NULL, "Couldn't create map (%lu)\n", GetLastError());
+    mapping = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    ok(mapping != NULL, "Couldn't map (%lu)\n", GetLastError());
+    nthdr = RtlImageNtHeader(mapping);
+    ok(nthdr != NULL, "Cannot get NT headers out of %s\n", out);
+    if (nthdr) nthdr->OptionalHeader.Subsystem = subsyst;
+    ret = UnmapViewOfFile(mapping);
+    ok(ret, "Couldn't unmap (%lu)\n", GetLastError());
+    CloseHandle(hMap);
+    CloseHandle(hFile);
 }
 
-static void test_DetachConsoleHandles(void)
+#define H_CONSOLE  0
+#define H_DISK     1
+#define H_CHAR     2
+#define H_PIPE     3
+
+#define ARG_STD                 0x80000000
+#define ARG_STARTUPINFO         0x00000000
+#define ARG_CP_INHERIT          0x40000000
+#define ARG_HANDLE_INHERIT      0x20000000
+#define ARG_HANDLE_MASK         (~0xff000000)
+
+static  BOOL check_run_child(const char *exec, DWORD flags, BOOL cp_inherit,
+                             STARTUPINFOA *si)
 {
-#ifndef _WIN64
-    char                buffer[2 * MAX_PATH + 25];
-    STARTUPINFOA        startup;
     PROCESS_INFORMATION info;
-    UINT                result;
+    char buffer[2 * MAX_PATH + 64];
+    DWORD exit_code;
+    BOOL res;
+    DWORD ret;
 
-    memset(&startup, 0, sizeof(startup));
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESHOWWINDOW|STARTF_USESTDHANDLES;
-    startup.wShowWindow = SW_SHOWNORMAL;
-    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     get_file_name(resfile);
-    sprintf(buffer, "\"%s\" process dump \"%s\"", selfname, resfile);
-    ok(CreateProcessA(NULL, buffer, NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &startup,
-                      &info), "CreateProcess\n");
-    wait_and_close_child_process(&info);
+    sprintf(buffer, "\"%s\" process dump \"%s\"", exec, resfile);
 
-    reload_child_info(resfile);
-    result = GetPrivateProfileIntA("StartupInfoA", "hStdInput", 0, resfile);
-    ok(result != 0 && result != (UINT)INVALID_HANDLE_VALUE, "bad handle %x\n", result);
-    result = GetPrivateProfileIntA("StartupInfoA", "hStdOutput", 0, resfile);
-    ok(result != 0 && result != (UINT)INVALID_HANDLE_VALUE, "bad handle %x\n", result);
-    result = GetPrivateProfileIntA("StartupInfoA", "hStdError", 0, resfile);
-    ok(result != 0 && result != (UINT)INVALID_HANDLE_VALUE, "bad handle %x\n", result);
-    result = GetPrivateProfileIntA("TEB", "hStdInput", 0, resfile);
-    ok(result != 0 && result != (UINT)INVALID_HANDLE_VALUE, "bad handle %x\n", result);
-    result = GetPrivateProfileIntA("TEB", "hStdOutput", 0, resfile);
-    ok(result != 0 && result != (UINT)INVALID_HANDLE_VALUE, "bad handle %x\n", result);
-    result = GetPrivateProfileIntA("TEB", "hStdError", 0, resfile);
-    ok(result != 0 && result != (UINT)INVALID_HANDLE_VALUE, "bad handle %x\n", result);
+    res = CreateProcessA(NULL, buffer, NULL, NULL, cp_inherit, flags, NULL, NULL, si, &info);
+    ok(res, "CreateProcess failed: %lu %s\n", GetLastError(), buffer);
+    CloseHandle(info.hThread);
+    ret = WaitForSingleObject(info.hProcess, 30000);
+    ok(ret == WAIT_OBJECT_0, "Could not wait for the child process: %ld le=%lu\n",
+        ret, GetLastError());
+    res = GetExitCodeProcess(info.hProcess, &exit_code);
+    ok(res && exit_code == 0, "Couldn't get exit_code\n");
+    CloseHandle(info.hProcess);
+    return res;
+}
 
-    release_memory();
-    DeleteFileA(resfile);
-#endif
+static char std_handle_file[MAX_PATH];
+
+static BOOL build_startupinfo( STARTUPINFOA *startup, unsigned args, HANDLE hstd[2] )
+{
+    SECURITY_ATTRIBUTES inherit_sa = { sizeof(inherit_sa), NULL, TRUE };
+    SECURITY_ATTRIBUTES *psa;
+    BOOL ret, needs_close = FALSE;
+
+    psa = (args & ARG_HANDLE_INHERIT) ? &inherit_sa : NULL;
+
+    memset(startup, 0, sizeof(*startup));
+    startup->cb = sizeof(*startup);
+
+    switch (args & ARG_HANDLE_MASK)
+    {
+    case H_CONSOLE:
+        hstd[0] = CreateFileA("CONIN$", GENERIC_READ, 0, psa, OPEN_EXISTING, 0, 0);
+        ok(hstd[0] != INVALID_HANDLE_VALUE, "Couldn't create input to console\n");
+        hstd[1] = CreateFileA("CONOUT$", GENERIC_READ|GENERIC_WRITE, 0, psa, OPEN_EXISTING, 0, 0);
+        ok(hstd[1] != INVALID_HANDLE_VALUE, "Couldn't create input to console\n");
+        needs_close = TRUE;
+        break;
+    case H_DISK:
+        hstd[0] = CreateFileA(std_handle_file, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, psa, OPEN_EXISTING, 0, 0);
+        ok(hstd[0] != INVALID_HANDLE_VALUE, "Couldn't create input to file %s\n", std_handle_file);
+        hstd[1] = CreateFileA(std_handle_file, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, psa, OPEN_EXISTING, 0, 0);
+        ok(hstd[1] != INVALID_HANDLE_VALUE, "Couldn't create input to file %s\n", std_handle_file);
+        needs_close = TRUE;
+        break;
+    case H_CHAR:
+        hstd[0] = CreateFileA("NUL", GENERIC_READ, 0, psa, OPEN_EXISTING, 0, 0);
+        ok(hstd[0] != INVALID_HANDLE_VALUE, "Couldn't create input to NUL\n");
+        hstd[1] = CreateFileA("NUL", GENERIC_READ|GENERIC_WRITE, 0, psa, OPEN_EXISTING, 0, 0);
+        ok(hstd[1] != INVALID_HANDLE_VALUE, "Couldn't create input to NUL\n");
+        needs_close = TRUE;
+        break;
+    case H_PIPE:
+        ret = CreatePipe(&hstd[0], &hstd[1], psa, 0);
+        ok(ret, "Couldn't create anon pipe\n");
+        needs_close = TRUE;
+        break;
+    default:
+        ok(0, "Unsupported handle type %x\n", args & ARG_HANDLE_MASK);
+        return FALSE;
+    }
+
+    if (args & ARG_STD)
+    {
+        SetStdHandle(STD_INPUT_HANDLE,  hstd[0]);
+        SetStdHandle(STD_OUTPUT_HANDLE, hstd[1]);
+    }
+    else /* through startup info */
+    {
+        startup->dwFlags |= STARTF_USESTDHANDLES;
+        startup->hStdInput  = hstd[0];
+        startup->hStdOutput = hstd[1];
+    }
+    return needs_close;
+}
+
+struct std_handle_test
+{
+    /* input */
+    unsigned args;
+    /* output */
+    DWORD expected;
+    unsigned is_todo; /* bitmask: 1 on TEB values, 2 on StartupInfoA values, 4 on StartupInfoW values */
+    DWORD is_broken; /* Win7 broken file types */
+};
+
+static void test_StdHandleInheritance(void)
+{
+    HANDLE hsavestd[3];
+    static char guiexec[MAX_PATH];
+    static char cuiexec[MAX_PATH];
+    char **argv;
+    BOOL ret;
+    int i, j;
+
+    static const struct std_handle_test
+    nothing_cui[] =
+    {
+        /* all others handles type behave as H_DISK */
+/* 0*/  {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_DISK},
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_DISK},
+
+        /* all others handles type behave as H_DISK */
+        {ARG_STARTUPINFO |                  ARG_HANDLE_INHERIT | H_DISK,      HATTR_NULL, .is_broken = HATTR_TYPE | FILE_TYPE_UNKNOWN},
+        {ARG_STD         |                  ARG_HANDLE_INHERIT | H_DISK,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_DISK},
+    },
+    nothing_gui[] =
+    {
+        /* testing all types because of discrepancies */
+/* 0*/  {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_DISK},
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_DISK},
+        {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_PIPE,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_PIPE},
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_PIPE,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_PIPE},
+        {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CHAR,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_CHAR},
+/* 5*/  {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CHAR,      HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_CHAR},
+        {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CONSOLE,   HATTR_NULL, .is_broken = HATTR_TYPE | FILE_TYPE_UNKNOWN},
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CONSOLE,   HATTR_NULL, .is_broken = HATTR_TYPE | FILE_TYPE_UNKNOWN},
+
+        /* all others handles type behave as H_DISK */
+        {ARG_STARTUPINFO |                  ARG_HANDLE_INHERIT | H_DISK,      HATTR_NULL, .is_broken = HATTR_TYPE | FILE_TYPE_UNKNOWN},
+        {ARG_STD         |                  ARG_HANDLE_INHERIT | H_DISK,      HATTR_NULL},
+    },
+    detached_cui[] =
+    {
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CONSOLE,  HATTR_NULL},
+        {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CONSOLE,  HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_CHAR, .is_broken = HATTR_TYPE | FILE_TYPE_UNKNOWN},
+        /* all others handles type behave as H_DISK */
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,     HATTR_NULL},
+        {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,     HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_DISK},
+    },
+    detached_gui[] =
+    {
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CONSOLE,  HATTR_NULL},
+        {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_CONSOLE,  HATTR_NULL, .is_broken = HATTR_TYPE | FILE_TYPE_UNKNOWN},
+        /* all others handles type behave as H_DISK */
+        {ARG_STD         | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,     HATTR_NULL},
+        {ARG_STARTUPINFO | ARG_CP_INHERIT | ARG_HANDLE_INHERIT | H_DISK,     HATTR_TYPE | HATTR_INHERIT | FILE_TYPE_DISK},
+    };
+    static const struct
+    {
+        DWORD cp_flags;
+        BOOL use_cui;
+        const struct std_handle_test* tests;
+        size_t count;
+        const char* descr;
+    }
+    tests[] =
+    {
+#define X(d, cg, s) {(d), (cg), s, ARRAY_SIZE(s), #s}
+        X(0,                TRUE,  nothing_cui),
+        X(0,                FALSE, nothing_gui),
+        X(DETACHED_PROCESS, TRUE,  detached_cui),
+        X(DETACHED_PROCESS, FALSE, detached_gui),
+#undef X
+    };
+
+    hsavestd[0] = GetStdHandle(STD_INPUT_HANDLE);
+    hsavestd[1] = GetStdHandle(STD_OUTPUT_HANDLE);
+    hsavestd[2] = GetStdHandle(STD_ERROR_HANDLE);
+
+    winetest_get_mainargs(&argv);
+
+    GetTempPathA(ARRAY_SIZE(guiexec), guiexec);
+    strcat(guiexec, "process_gui.exe");
+    copy_change_subsystem(argv[0], guiexec, IMAGE_SUBSYSTEM_WINDOWS_GUI);
+    GetTempPathA(ARRAY_SIZE(cuiexec), cuiexec);
+    strcat(cuiexec, "process_cui.exe");
+    copy_change_subsystem(argv[0], cuiexec, IMAGE_SUBSYSTEM_WINDOWS_CUI);
+    get_file_name(std_handle_file);
+
+    for (j = 0; j < ARRAY_SIZE(tests); j++)
+    {
+        const struct std_handle_test* std_tests = tests[j].tests;
+
+        for (i = 0; i < tests[j].count; i++)
+        {
+            STARTUPINFOA startup;
+            HANDLE hstd[2] = {};
+            BOOL needs_close;
+            unsigned startup_expected;
+
+            winetest_push_context("%s[%u] ", tests[j].descr, i);
+            needs_close = build_startupinfo( &startup, std_tests[i].args, hstd );
+
+            ret = check_run_child(tests[j].use_cui ? cuiexec : guiexec,
+                                  tests[j].cp_flags, !!(std_tests[i].args & ARG_CP_INHERIT),
+                                  &startup);
+            ok(ret, "Couldn't run child\n");
+            reload_child_info(resfile);
+
+            startup_expected = (std_tests[i].args & ARG_STD) ? HATTR_INVALID : std_tests[i].expected;
+
+            todo_wine_if(std_tests[i].is_todo & 2)
+            {
+            okChildHexInt("StartupInfoA", "hStdInputEncode", startup_expected, std_tests[i].is_broken);
+            okChildHexInt("StartupInfoA", "hStdOutputEncode", startup_expected, std_tests[i].is_broken);
+            }
+
+            startup_expected = (std_tests[i].args & ARG_STD) ? HATTR_UNTOUCHED : std_tests[i].expected;
+
+            todo_wine_if(std_tests[i].is_todo & 4)
+            {
+            okChildHexInt("StartupInfoW", "hStdInputEncode", startup_expected, std_tests[i].is_broken);
+            okChildHexInt("StartupInfoW", "hStdOutputEncode", startup_expected, std_tests[i].is_broken);
+            }
+
+            todo_wine_if(std_tests[i].is_todo & 1)
+            {
+            okChildHexInt("TEB", "hStdInputEncode", std_tests[i].expected, std_tests[i].is_broken);
+            okChildHexInt("TEB", "hStdOutputEncode", std_tests[i].expected, std_tests[i].is_broken);
+            }
+
+            release_memory();
+            DeleteFileA(resfile);
+            if (needs_close)
+            {
+                CloseHandle(hstd[0]);
+                CloseHandle(hstd[1]);
+            }
+            winetest_pop_context();
+        }
+    }
+
+    DeleteFileA(guiexec);
+    DeleteFileA(cuiexec);
+    DeleteFileA(std_handle_file);
+
+    SetStdHandle(STD_INPUT_HANDLE,  hsavestd[0]);
+    SetStdHandle(STD_OUTPUT_HANDLE, hsavestd[1]);
+    SetStdHandle(STD_ERROR_HANDLE,  hsavestd[2]);
 }
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -3255,7 +3523,6 @@ static void test_SuspendProcessNewThread(void)
     ok( !ctx.R13, "r13 is not zero %Ix\n", ctx.R13 );
     ok( !ctx.R14, "r14 is not zero %Ix\n", ctx.R14 );
     ok( !ctx.R15, "r15 is not zero %Ix\n", ctx.R15 );
-    ok( !((ctx.Rsp + 0x28) & 0xfff), "rsp is not at top of stack page %Ix\n", ctx.Rsp );
     ok( ctx.EFlags == 0x200, "wrong flags %08lx\n", ctx.EFlags );
     ok( ctx.MxCsr == 0x1f80, "wrong mxcsr %08lx\n", ctx.MxCsr );
     ok( ctx.FltSave.ControlWord == 0x27f, "wrong control %08x\n", ctx.FltSave.ControlWord );
@@ -3270,8 +3537,6 @@ static void test_SuspendProcessNewThread(void)
     }
     ok( ctx.Eax == (ULONG_PTR)exit_thread_ptr, "wrong eax %08lx/%p\n", ctx.Eax, exit_thread_ptr );
     ok( ctx.Ebx == 0x1234, "wrong ebx %08lx\n", ctx.Ebx );
-    ok( !((ctx.Esp + 0x10) & 0xfff) || broken( !((ctx.Esp + 4) & 0xfff) ), /* winxp, w2k3 */
-        "esp is not at top of stack page or properly aligned: %08lx\n", ctx.Esp );
     ok( (ctx.EFlags & ~2) == 0x200, "wrong flags %08lx\n", ctx.EFlags );
     ok( (WORD)ctx.FloatSave.ControlWord == 0x27f, "wrong control %08lx\n", ctx.FloatSave.ControlWord );
     ok( *(WORD *)ctx.ExtendedRegisters == 0x27f, "wrong control %08x\n", *(WORD *)ctx.ExtendedRegisters );
@@ -3406,7 +3671,6 @@ static void test_SuspendProcessState(void)
     ok( !ctx.R13, "r13 is not zero %Ix\n", ctx.R13 );
     ok( !ctx.R14, "r14 is not zero %Ix\n", ctx.R14 );
     ok( !ctx.R15, "r15 is not zero %Ix\n", ctx.R15 );
-    ok( !((ctx.Rsp + 0x28) & 0xfff), "rsp is not at top of stack page %Ix\n", ctx.Rsp );
     ok( ctx.EFlags == 0x200, "wrong flags %08lx\n", ctx.EFlags );
     ok( ctx.MxCsr == 0x1f80, "wrong mxcsr %08lx\n", ctx.MxCsr );
     ok( ctx.FltSave.ControlWord == 0x27f, "wrong control %08x\n", ctx.FltSave.ControlWord );
@@ -3436,8 +3700,6 @@ static void test_SuspendProcessState(void)
         ok( !ctx.Esi, "esi is not zero %08lx\n", ctx.Esi );
         ok( !ctx.Edi, "edi is not zero %08lx\n", ctx.Edi );
     }
-    ok( !((ctx.Esp + 0x10) & 0xfff) || broken( !((ctx.Esp + 4) & 0xfff) ), /* winxp, w2k3 */
-        "esp is not at top of stack page or properly aligned: %08lx\n", ctx.Esp );
     ok( (ctx.EFlags & ~2) == 0x200, "wrong flags %08lx\n", ctx.EFlags );
     ok( (WORD)ctx.FloatSave.ControlWord == 0x27f, "wrong control %08lx\n", ctx.FloatSave.ControlWord );
     ok( *(WORD *)ctx.ExtendedRegisters == 0x27f, "wrong control %08x\n", *(WORD *)ctx.ExtendedRegisters );
@@ -3568,59 +3830,6 @@ static void test_SuspendProcessState(void)
 }
 #endif
 
-static void test_DetachStdHandles(void)
-{
-#ifndef _WIN64
-    char                buffer[2 * MAX_PATH + 25], tempfile[MAX_PATH];
-    STARTUPINFOA        startup;
-    PROCESS_INFORMATION info;
-    HANDLE              hstdin, hstdout, hstderr, htemp;
-    BOOL                res;
-
-    hstdin = GetStdHandle(STD_INPUT_HANDLE);
-    hstdout = GetStdHandle(STD_OUTPUT_HANDLE);
-    hstderr = GetStdHandle(STD_ERROR_HANDLE);
-
-    get_file_name(tempfile);
-    htemp = CreateFileA(tempfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
-    ok(htemp != INVALID_HANDLE_VALUE, "failed opening temporary file\n");
-
-    memset(&startup, 0, sizeof(startup));
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_SHOWNORMAL;
-    get_file_name(resfile);
-    sprintf(buffer, "\"%s\" process dump \"%s\"", selfname, resfile);
-
-    SetStdHandle(STD_INPUT_HANDLE, htemp);
-    SetStdHandle(STD_OUTPUT_HANDLE, htemp);
-    SetStdHandle(STD_ERROR_HANDLE, htemp);
-
-    res = CreateProcessA(NULL, buffer, NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &startup,
-                      &info);
-
-    SetStdHandle(STD_INPUT_HANDLE, hstdin);
-    SetStdHandle(STD_OUTPUT_HANDLE, hstdout);
-    SetStdHandle(STD_ERROR_HANDLE, hstderr);
-
-    ok(res, "CreateProcess failed\n");
-    wait_and_close_child_process(&info);
-
-    reload_child_info(resfile);
-    okChildInt("StartupInfoA", "hStdInput", (UINT)INVALID_HANDLE_VALUE);
-    okChildInt("StartupInfoA", "hStdOutput", (UINT)INVALID_HANDLE_VALUE);
-    okChildInt("StartupInfoA", "hStdError", (UINT)INVALID_HANDLE_VALUE);
-    okChildInt("TEB", "hStdInput", 0);
-    okChildInt("TEB", "hStdOutput", 0);
-    okChildInt("TEB", "hStdError", 0);
-    release_memory();
-    DeleteFileA(resfile);
-
-    CloseHandle(htemp);
-    DeleteFileA(tempfile);
-#endif
-}
-
 static void test_GetNumaProcessorNode(void)
 {
     SYSTEM_INFO si;
@@ -3710,7 +3919,7 @@ static void test_process_info(HANDLE hproc)
         0 /* FIXME: sizeof(?) ProcessTlsInformation */,
         sizeof(ULONG) /* ProcessCookie */,
         sizeof(SECTION_IMAGE_INFORMATION) /* ProcessImageInformation */,
-        0 /* FIXME: sizeof(PROCESS_CYCLE_TIME_INFORMATION) ProcessCycleTime */,
+        sizeof(PROCESS_CYCLE_TIME_INFORMATION) /* ProcessCycleTime */,
         sizeof(ULONG) /* ProcessPagePriority */,
         40 /* ProcessInstrumentationCallback */,
         0 /* FIXME: sizeof(PROCESS_STACK_ALLOCATION_INFORMATION) ProcessThreadStackAllocation */,
@@ -3780,6 +3989,7 @@ static void test_process_info(HANDLE hproc)
         case ProcessHandleCount:
         case ProcessImageFileName:
         case ProcessImageInformation:
+        case ProcessCycleTime:
         case ProcessPagePriority:
         case ProcessImageFileNameWin32:
             ok(status == STATUS_SUCCESS, "for info %lu expected STATUS_SUCCESS, got %08lx (ret_len %lu)\n", i, status, ret_len);
@@ -4989,6 +5199,150 @@ static void test_services_exe(void)
     ok(services_session_id == 0, "got services.exe SessionId %lu\n", services_session_id);
 }
 
+static void test_startupinfo( void )
+{
+    STARTUPINFOA startup_beforeA, startup_afterA;
+    STARTUPINFOW startup_beforeW, startup_afterW;
+    RTL_USER_PROCESS_PARAMETERS *params;
+
+    params = RtlGetCurrentPeb()->ProcessParameters;
+
+    startup_beforeA.hStdInput = (HANDLE)0x56780000;
+    GetStartupInfoA(&startup_beforeA);
+
+    startup_beforeW.hStdInput = (HANDLE)0x12340000;
+    GetStartupInfoW(&startup_beforeW);
+
+    /* change a couple of fields in PEB */
+    params->dwX = ~params->dwX;
+    params->hStdInput = (HANDLE)~(DWORD_PTR)params->hStdInput;
+
+    startup_afterA.hStdInput = (HANDLE)0x87650000;
+    GetStartupInfoA(&startup_afterA);
+
+    /* wharf... ansi version is cached... */
+    ok(startup_beforeA.dwX == startup_afterA.dwX, "Unexpected field value\n");
+    ok(startup_beforeA.dwFlags == startup_afterA.dwFlags, "Unexpected field value\n");
+    ok(startup_beforeA.hStdInput == startup_afterA.hStdInput, "Unexpected field value\n");
+
+    if (startup_beforeW.dwFlags & STARTF_USESTDHANDLES)
+    {
+        ok(startup_beforeA.hStdInput != NULL && startup_beforeA.hStdInput != INVALID_HANDLE_VALUE,
+           "Unexpected field value\n");
+        ok(startup_afterA.hStdInput != NULL && startup_afterA.hStdInput != INVALID_HANDLE_VALUE,
+           "Unexpected field value\n");
+    }
+    else
+    {
+        ok(startup_beforeA.hStdInput == INVALID_HANDLE_VALUE, "Unexpected field value %p\n", startup_beforeA.hStdInput);
+        ok(startup_afterA.hStdInput == INVALID_HANDLE_VALUE, "Unexpected field value %p\n", startup_afterA.hStdInput);
+    }
+
+    /* ... while unicode is not */
+    startup_afterW.hStdInput = (HANDLE)0x43210000;
+    GetStartupInfoW(&startup_afterW);
+
+    ok(~startup_beforeW.dwX == startup_afterW.dwX, "Unexpected field value\n");
+    if (startup_beforeW.dwFlags & STARTF_USESTDHANDLES)
+    {
+        ok(params->hStdInput == startup_afterW.hStdInput, "Unexpected field value\n");
+        ok((HANDLE)~(DWORD_PTR)startup_beforeW.hStdInput == startup_afterW.hStdInput, "Unexpected field value\n");
+    }
+    else
+    {
+        ok(startup_beforeW.hStdInput == (HANDLE)0x12340000, "Unexpected field value\n");
+        ok(startup_afterW.hStdInput == (HANDLE)0x43210000, "Unexpected field value\n");
+    }
+
+    /* check impact of STARTF_USESTDHANDLES bit */
+    params->dwFlags ^= STARTF_USESTDHANDLES;
+
+    startup_afterW.hStdInput = (HANDLE)0x43210000;
+    GetStartupInfoW(&startup_afterW);
+
+    ok((startup_beforeW.dwFlags ^ STARTF_USESTDHANDLES) == startup_afterW.dwFlags, "Unexpected field value\n");
+    if (startup_afterW.dwFlags & STARTF_USESTDHANDLES)
+    {
+        ok(params->hStdInput == startup_afterW.hStdInput, "Unexpected field value\n");
+        ok(startup_afterW.hStdInput != (HANDLE)0x43210000, "Unexpected field value\n");
+    }
+    else
+    {
+        ok(startup_afterW.hStdInput == (HANDLE)0x43210000, "Unexpected field value\n");
+    }
+
+    /* FIXME add more tests to check whether the dwFlags controls the returned
+     * values (as done for STARTF_USESTDHANDLES) in unicode case.
+     */
+
+    /* reset the modified fields in PEB */
+    params->dwX = ~params->dwX;
+    params->hStdInput = (HANDLE)~(DWORD_PTR)params->hStdInput;
+    params->dwFlags ^= STARTF_USESTDHANDLES;
+}
+
+static void test_GetProcessInformation(void)
+{
+    SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
+    PROCESS_MACHINE_INFORMATION mi;
+    NTSTATUS status;
+    HANDLE process;
+    unsigned int i;
+    BOOL ret;
+
+    if (!pGetProcessInformation)
+    {
+        win_skip("GetProcessInformation() is not available.\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pGetProcessInformation(GetCurrentProcess(), ProcessMachineTypeInfo, NULL, 0);
+    if (!ret && GetLastError() == ERROR_INVALID_PARAMETER)
+    {
+        win_skip("GetProcessInformation(ProcessMachineTypeInfo) is not supported.\n"); /* < win11 */
+        return;
+    }
+    ok(!ret, "Unexpected return value %d.\n", ret);
+    ok(GetLastError() == ERROR_BAD_LENGTH, "Unexpected error %ld.\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pGetProcessInformation(GetCurrentProcess(), ProcessMachineTypeInfo, &mi, 0);
+    ok(!ret, "Unexpected return value %d.\n", ret);
+    ok(GetLastError() == ERROR_BAD_LENGTH, "Unexpected error %ld.\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pGetProcessInformation(GetCurrentProcess(), ProcessMachineTypeInfo, &mi, sizeof(mi) - 1);
+    ok(!ret, "Unexpected return value %d.\n", ret);
+    ok(GetLastError() == ERROR_BAD_LENGTH, "Unexpected error %ld.\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pGetProcessInformation(GetCurrentProcess(), ProcessMachineTypeInfo, &mi, sizeof(mi) + 1);
+    ok(!ret, "Unexpected return value %d.\n", ret);
+    ok(GetLastError() == ERROR_BAD_LENGTH, "Unexpected error %ld.\n", GetLastError());
+
+    ret = pGetProcessInformation(GetCurrentProcess(), ProcessMachineTypeInfo, &mi, sizeof(mi));
+    ok(ret, "Unexpected return value %d.\n", ret);
+
+    process = GetCurrentProcess();
+    status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+            machines, sizeof(machines), NULL );
+    ok(!status, "Failed to get architectures information.\n");
+    for (i = 0; machines[i].Machine; i++)
+    {
+        if (machines[i].Process)
+        {
+            ok(mi.ProcessMachine == machines[i].Machine, "Unexpected process machine %#x.\n", mi.ProcessMachine);
+            ok(!!(mi.MachineAttributes & UserEnabled) == machines[i].UserMode, "Unexpected attributes %#x.\n",
+                    mi.MachineAttributes);
+            ok(!!(mi.MachineAttributes & KernelEnabled) == machines[i].KernelMode, "Unexpected attributes %#x.\n",
+                    mi.MachineAttributes);
+            ok(!!(mi.MachineAttributes & Wow64Container) == machines[i].WoW64Container, "Unexpected attributes %#x.\n",
+                    mi.MachineAttributes);
+            ok(!(mi.MachineAttributes & ~(UserEnabled | KernelEnabled | Wow64Container)), "Unexpected attributes %#x.\n",
+                    mi.MachineAttributes);
+            break;
+        }
+    }
+}
+
 START_TEST(process)
 {
     HANDLE job, hproc, h, h2;
@@ -5104,9 +5458,7 @@ START_TEST(process)
     test_ProcessorCount();
     test_RegistryQuota();
     test_DuplicateHandle();
-    test_StartupNoConsole();
-    test_DetachConsoleHandles();
-    test_DetachStdHandles();
+    test_StdHandleInheritance();
     test_GetNumaProcessorNode();
     test_session_info();
     test_GetLogicalProcessorInformationEx();
@@ -5119,6 +5471,8 @@ START_TEST(process)
     test_handle_list_attribute(FALSE, NULL, NULL);
     test_dead_process();
     test_services_exe();
+    test_startupinfo();
+    test_GetProcessInformation();
 
     /* things that can be tested:
      *  lookup:         check the way program to be executed is searched

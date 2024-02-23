@@ -75,6 +75,7 @@
 #define MSHTML_E_INVALID_PROPERTY 0x800a01b6
 #define MSHTML_E_INVALID_ACTION   0x800a01bd
 #define MSHTML_E_NODOC            0x800a025c
+#define MSHTML_E_NOT_FUNC         0x800a138a
 
 typedef struct DOMEvent DOMEvent;
 typedef struct HTMLDOMNode HTMLDOMNode;
@@ -237,6 +238,7 @@ typedef struct EventTarget EventTarget;
     XIID(IHTMLPerformanceTiming) \
     XIID(IHTMLPluginsCollection) \
     XIID(IHTMLRect) \
+    XIID(IHTMLRect2) \
     XIID(IHTMLRectCollection) \
     XIID(IHTMLScreen) \
     XIID(IHTMLScriptElement) \
@@ -292,7 +294,8 @@ typedef struct EventTarget EventTarget;
     XIID(IWinePageTransitionEvent) \
     XIID(IWineXMLHttpRequestPrivate) \
     XIID(IWineMSHTMLConsole) \
-    XIID(IWineMSHTMLMediaQueryList)
+    XIID(IWineMSHTMLMediaQueryList) \
+    XIID(IWineMSHTMLMutationObserver)
 
 typedef enum {
 #define XIID(iface) iface ## _tid,
@@ -324,7 +327,7 @@ typedef struct {
     unsigned ie_version;
 } compat_mode_info_t;
 
-extern const compat_mode_info_t compat_mode_info[COMPAT_MODE_CNT] DECLSPEC_HIDDEN;
+extern const compat_mode_info_t compat_mode_info[COMPAT_MODE_CNT];
 
 typedef struct dispex_data_t dispex_data_t;
 typedef struct dispex_dynamic_data_t dispex_dynamic_data_t;
@@ -334,20 +337,54 @@ typedef struct dispex_dynamic_data_t dispex_dynamic_data_t;
 #define MSHTML_CUSTOM_DISPID_CNT (MSHTML_DISPID_CUSTOM_MAX-MSHTML_DISPID_CUSTOM_MIN)
 
 typedef struct DispatchEx DispatchEx;
+typedef struct nsCycleCollectionTraversalCallback nsCycleCollectionTraversalCallback;
 
 typedef struct {
+    UINT_PTR x;
+} nsCycleCollectingAutoRefCnt;
+
+/*
+   dispex is our base IDispatchEx implementation for all mshtml objects, and the vtbl allows
+   customizing the behavior depending on the object. Objects have basically 3 types of props:
+
+   - builtin props: These props are implicitly generated from the TypeInfo (disp_tid and iface_tids in dispex_static_data_t).
+   - custom props:  These props are specific to an object, they are created using vtbl below (e.g. indexed props in HTMLRectCollection).
+   - dynamic props: These props are generally allocated by external code (e.g. 'document.wine = 42' creates 'wine' dynamic prop on document)
+*/
+typedef struct {
+    /* Used to provide object specific interfaces (do not AddRef, just return the iface) */
+    void *(*query_interface)(DispatchEx*,REFIID);
+
+    /* Used to implement Cycle Collection callbacks; note that the destructor is not optional!
+       Unlike delete_cycle_collectable, unlink is called before the destructor (if available). */
+    void (*destructor)(DispatchEx*);
+    void (*traverse)(DispatchEx*,nsCycleCollectionTraversalCallback*);
+    void (*unlink)(DispatchEx*);
+
+    /* Called on the last release, when the refcount reaches 0 */
+    void (*last_release)(DispatchEx*);
+
+    /* Called when the object wants to handle DISPID_VALUE invocations */
     HRESULT (*value)(DispatchEx*,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
+
+    /* Used when the object has custom props, and this returns DISPIDs for them */
     HRESULT (*get_dispid)(DispatchEx*,BSTR,DWORD,DISPID*);
+
+    /* These are called when the object implements GetMemberName, InvokeEx, DeleteMemberByDispID and GetNextDispID for custom props */
     HRESULT (*get_name)(DispatchEx*,DISPID,BSTR*);
     HRESULT (*invoke)(DispatchEx*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
     HRESULT (*delete)(DispatchEx*,DISPID);
     HRESULT (*next_dispid)(DispatchEx*,DISPID,DISPID*);
+
+    /* Used by objects that want to delay their compat mode initialization until actually needed */
     compat_mode_t (*get_compat_mode)(DispatchEx*);
+
+    /* Used by objects that want to populate some dynamic props on initialization */
     HRESULT (*populate_props)(DispatchEx*);
 } dispex_static_data_vtbl_t;
 
 typedef struct {
-    const WCHAR *name;
+    const char *name;
     const dispex_static_data_vtbl_t *vtbl;
     const tid_t disp_tid;
     const tid_t* const iface_tids;
@@ -368,23 +405,17 @@ typedef struct {
 struct DispatchEx {
     IDispatchEx IDispatchEx_iface;
 
-    IUnknown *outer;
+    nsCycleCollectingAutoRefCnt ccref;
 
     dispex_data_t *info;
     dispex_dynamic_data_t *dynamic_data;
 };
 
 typedef struct {
-    UINT_PTR x;
-} nsCycleCollectingAutoRefCnt;
-
-typedef struct {
     void *vtbl;
     int ref_flags;
     void *callbacks;
 } ExternalCycleCollectionParticipant;
-
-typedef struct nsCycleCollectionTraversalCallback nsCycleCollectionTraversalCallback;
 
 typedef struct {
     nsresult (NSAPI *traverse)(void*,void*,nsCycleCollectionTraversalCallback*);
@@ -394,31 +425,28 @@ typedef struct {
 
 DEFINE_GUID(IID_nsXPCOMCycleCollectionParticipant, 0x9674489b,0x1f6f,0x4550,0xa7,0x30, 0xcc,0xae,0xdd,0x10,0x4c,0xf9);
 
-extern nsrefcnt (__cdecl *ccref_incr)(nsCycleCollectingAutoRefCnt*,nsISupports*) DECLSPEC_HIDDEN;
-extern nsrefcnt (__cdecl *ccref_decr)(nsCycleCollectingAutoRefCnt*,nsISupports*,ExternalCycleCollectionParticipant*) DECLSPEC_HIDDEN;
-extern void (__cdecl *ccref_init)(nsCycleCollectingAutoRefCnt*,nsrefcnt) DECLSPEC_HIDDEN;
-extern void (__cdecl *ccp_init)(ExternalCycleCollectionParticipant*,const CCObjCallback*) DECLSPEC_HIDDEN;
-extern void (__cdecl *describe_cc_node)(nsCycleCollectingAutoRefCnt*,const char*,nsCycleCollectionTraversalCallback*) DECLSPEC_HIDDEN;
-extern void (__cdecl *note_cc_edge)(nsISupports*,const char*,nsCycleCollectionTraversalCallback*) DECLSPEC_HIDDEN;
+extern nsrefcnt (__cdecl *ccref_incr)(nsCycleCollectingAutoRefCnt*,nsISupports*);
+extern nsrefcnt (__cdecl *ccref_decr)(nsCycleCollectingAutoRefCnt*,nsISupports*,ExternalCycleCollectionParticipant*);
+extern void (__cdecl *ccref_init)(nsCycleCollectingAutoRefCnt*,nsrefcnt);
+extern void (__cdecl *ccp_init)(ExternalCycleCollectionParticipant*,const CCObjCallback*);
+extern void (__cdecl *describe_cc_node)(nsCycleCollectingAutoRefCnt*,const char*,nsCycleCollectionTraversalCallback*);
+extern void (__cdecl *note_cc_edge)(nsISupports*,const char*,nsCycleCollectionTraversalCallback*);
 
-void init_dispatch(DispatchEx*,IUnknown*,dispex_static_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
-void release_dispex(DispatchEx*) DECLSPEC_HIDDEN;
-BOOL dispex_query_interface(DispatchEx*,REFIID,void**) DECLSPEC_HIDDEN;
-HRESULT change_type(VARIANT*,VARIANT*,VARTYPE,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT dispex_get_dprop_ref(DispatchEx*,const WCHAR*,BOOL,VARIANT**) DECLSPEC_HIDDEN;
-HRESULT get_dispids(tid_t,DWORD*,DISPID**) DECLSPEC_HIDDEN;
-HRESULT remove_attribute(DispatchEx*,DISPID,VARIANT_BOOL*) DECLSPEC_HIDDEN;
-HRESULT dispex_get_dynid(DispatchEx*,const WCHAR*,BOOL,DISPID*) DECLSPEC_HIDDEN;
-void dispex_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*) DECLSPEC_HIDDEN;
-void dispex_unlink(DispatchEx*) DECLSPEC_HIDDEN;
-void release_typelib(void) DECLSPEC_HIDDEN;
-HRESULT get_class_typeinfo(const CLSID*,ITypeInfo**) DECLSPEC_HIDDEN;
-const void *dispex_get_vtbl(DispatchEx*) DECLSPEC_HIDDEN;
-void dispex_info_add_interface(dispex_data_t*,tid_t,const dispex_hook_t*) DECLSPEC_HIDDEN;
-compat_mode_t dispex_compat_mode(DispatchEx*) DECLSPEC_HIDDEN;
-HRESULT dispex_to_string(DispatchEx*,BSTR*) DECLSPEC_HIDDEN;
+void init_dispatch(DispatchEx*,dispex_static_data_t*,compat_mode_t);
+void dispex_props_unlink(DispatchEx*);
+HRESULT change_type(VARIANT*,VARIANT*,VARTYPE,IServiceProvider*);
+HRESULT dispex_get_dprop_ref(DispatchEx*,const WCHAR*,BOOL,VARIANT**);
+HRESULT get_dispids(tid_t,DWORD*,DISPID**);
+HRESULT remove_attribute(DispatchEx*,DISPID,VARIANT_BOOL*);
+HRESULT dispex_get_dynid(DispatchEx*,const WCHAR*,BOOL,DISPID*);
+void release_typelib(void);
+HRESULT get_class_typeinfo(const CLSID*,ITypeInfo**);
+const void *dispex_get_vtbl(DispatchEx*);
+void dispex_info_add_interface(dispex_data_t*,tid_t,const dispex_hook_t*);
+compat_mode_t dispex_compat_mode(DispatchEx*);
+HRESULT dispex_to_string(DispatchEx*,BSTR*);
 HRESULT dispex_call_builtin(DispatchEx *dispex, DISPID id, DISPPARAMS *dp,
-                            VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller) DECLSPEC_HIDDEN;
+                            VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller);
 
 typedef enum {
     DISPEXPROP_CUSTOM,
@@ -426,7 +454,7 @@ typedef enum {
     DISPEXPROP_BUILTIN
 } dispex_prop_type_t;
 
-dispex_prop_type_t get_dispid_type(DISPID) DECLSPEC_HIDDEN;
+dispex_prop_type_t get_dispid_type(DISPID);
 
 typedef struct HTMLWindow HTMLWindow;
 typedef struct HTMLInnerWindow HTMLInnerWindow;
@@ -463,16 +491,12 @@ typedef struct {
     DispatchEx dispex;
     IHTMLOptionElementFactory IHTMLOptionElementFactory_iface;
 
-    LONG ref;
-
     HTMLInnerWindow *window;
 } HTMLOptionElementFactory;
 
 typedef struct {
     DispatchEx dispex;
     IHTMLImageElementFactory IHTMLImageElementFactory_iface;
-
-    LONG ref;
 
     HTMLInnerWindow *window;
 } HTMLImageElementFactory;
@@ -481,8 +505,6 @@ typedef struct {
     DispatchEx dispex;
     IHTMLXMLHttpRequestFactory IHTMLXMLHttpRequestFactory_iface;
 
-    LONG ref;
-
     HTMLInnerWindow *window;
 } HTMLXMLHttpRequestFactory;
 
@@ -490,25 +512,108 @@ struct HTMLLocation {
     DispatchEx dispex;
     IHTMLLocation IHTMLLocation_iface;
 
-    LONG ref;
-
-    HTMLInnerWindow *window;
+    HTMLOuterWindow *window;
 };
 
 typedef struct {
     DispatchEx dispex;
     IOmHistory IOmHistory_iface;
 
-    LONG ref;
-
     HTMLInnerWindow *window;
 } OmHistory;
 
-typedef struct {
-    DispatchEx dispex;
-    IHTMLPerformanceTiming IHTMLPerformanceTiming_iface;
+typedef struct nsChannelBSC nsChannelBSC;
 
-    LONG ref;
+struct HTMLWindow {
+    IHTMLWindow2       IHTMLWindow2_iface;
+    IHTMLWindow3       IHTMLWindow3_iface;
+    IHTMLWindow4       IHTMLWindow4_iface;
+    IHTMLWindow5       IHTMLWindow5_iface;
+    IHTMLWindow6       IHTMLWindow6_iface;
+    IHTMLWindow7       IHTMLWindow7_iface;
+    IHTMLPrivateWindow IHTMLPrivateWindow_iface;
+    IDispatchEx        IDispatchEx_iface;
+    IServiceProvider   IServiceProvider_iface;
+    ITravelLogClient   ITravelLogClient_iface;
+    IObjectIdentity    IObjectIdentity_iface;
+    IProvideMultipleClassInfo IProvideMultipleClassInfo_iface;
+    IWineHTMLWindowPrivate IWineHTMLWindowPrivate_iface;
+    IWineHTMLWindowCompatPrivate IWineHTMLWindowCompatPrivate_iface;
+
+    HTMLInnerWindow *inner_window;
+    HTMLOuterWindow *outer_window;
+};
+
+struct HTMLOuterWindow {
+    HTMLWindow base;
+    IEventTarget IEventTarget_iface;
+
+    nsCycleCollectingAutoRefCnt ccref;
+    LONG task_magic;
+
+    nsIDOMWindow *nswindow;
+    mozIDOMWindowProxy *window_proxy;
+    HTMLOuterWindow *parent;
+    HTMLFrameBase *frame_element;
+
+    GeckoBrowser *browser;
+    struct list browser_entry;
+
+    READYSTATE readystate;
+    unsigned readystate_locked;
+    BOOL readystate_pending;
+
+    HTMLInnerWindow *pending_window;
+    HTMLLocation *location;
+    IMoniker *mon;
+    IUri *uri;
+    IUri *uri_nofrag;
+    BSTR url;
+    DWORD load_flags;
+
+    struct list sibling_entry;
+    struct wine_rb_entry entry;
+};
+
+struct HTMLInnerWindow {
+    HTMLWindow base;
+    EventTarget event_target;
+
+    HTMLDocumentNode *doc;
+    nsIDOMWindow *dom_window;
+
+    struct list children;
+    struct list script_hosts;
+
+    IHTMLEventObj *event;
+
+    HTMLImageElementFactory *image_factory;
+    HTMLOptionElementFactory *option_factory;
+    HTMLXMLHttpRequestFactory *xhr_factory;
+    IHTMLScreen *screen;
+    OmHistory *history;
+    IOmNavigator *navigator;
+    IHTMLStorage *session_storage;
+    IHTMLStorage *local_storage;
+    IWineMSHTMLConsole *console;
+
+    BOOL performance_initialized;
+    VARIANT performance;
+
+    unsigned blocking_depth;
+    unsigned parser_callback_cnt;
+    struct list script_queue;
+
+    global_prop_t *global_props;
+    DWORD global_prop_cnt;
+    DWORD global_prop_size;
+
+    LONG task_magic;
+
+    IMoniker *mon;
+    IDispatch *mutation_observer_ctor;
+    nsChannelBSC *bscallback;
+    struct list bindings;
 
     ULONG navigation_type;
     ULONG redirect_count;
@@ -529,100 +634,6 @@ typedef struct {
     ULONGLONG load_event_start_time;
     ULONGLONG load_event_end_time;
     ULONGLONG first_paint_time;
-} HTMLPerformanceTiming;
-
-typedef struct nsChannelBSC nsChannelBSC;
-
-struct HTMLWindow {
-    IHTMLWindow2       IHTMLWindow2_iface;
-    IHTMLWindow3       IHTMLWindow3_iface;
-    IHTMLWindow4       IHTMLWindow4_iface;
-    IHTMLWindow5       IHTMLWindow5_iface;
-    IHTMLWindow6       IHTMLWindow6_iface;
-    IHTMLWindow7       IHTMLWindow7_iface;
-    IHTMLPrivateWindow IHTMLPrivateWindow_iface;
-    IDispatchEx        IDispatchEx_iface;
-    IServiceProvider   IServiceProvider_iface;
-    ITravelLogClient   ITravelLogClient_iface;
-    IObjectIdentity    IObjectIdentity_iface;
-    IProvideMultipleClassInfo IProvideMultipleClassInfo_iface;
-    IWineHTMLWindowPrivate IWineHTMLWindowPrivate_iface;
-    IWineHTMLWindowCompatPrivate IWineHTMLWindowCompatPrivate_iface;
-
-    IWineMSHTMLConsole *console;
-
-    LONG ref;
-
-    HTMLInnerWindow *inner_window;
-    HTMLOuterWindow *outer_window;
-};
-
-struct HTMLOuterWindow {
-    HTMLWindow base;
-
-    LONG task_magic;
-
-    nsIDOMWindow *nswindow;
-    mozIDOMWindowProxy *window_proxy;
-    HTMLOuterWindow *parent;
-    HTMLFrameBase *frame_element;
-
-    GeckoBrowser *browser;
-    struct list browser_entry;
-
-    READYSTATE readystate;
-    BOOL readystate_locked;
-    unsigned readystate_pending;
-
-    HTMLInnerWindow *pending_window;
-    IMoniker *mon;
-    IUri *uri;
-    IUri *uri_nofrag;
-    BSTR url;
-    DWORD load_flags;
-
-    struct list sibling_entry;
-    struct wine_rb_entry entry;
-};
-
-struct HTMLInnerWindow {
-    HTMLWindow base;
-    EventTarget event_target;
-
-    HTMLDocumentNode *doc;
-
-    struct list children;
-    struct list script_hosts;
-
-    IHTMLEventObj *event;
-
-    HTMLImageElementFactory *image_factory;
-    HTMLOptionElementFactory *option_factory;
-    HTMLXMLHttpRequestFactory *xhr_factory;
-    IHTMLScreen *screen;
-    OmHistory *history;
-    IOmNavigator *navigator;
-    IHTMLStorage *session_storage;
-    IHTMLStorage *local_storage;
-
-    BOOL performance_initialized;
-    VARIANT performance;
-    HTMLPerformanceTiming *performance_timing;
-
-    unsigned parser_callback_cnt;
-    struct list script_queue;
-
-    global_prop_t *global_props;
-    DWORD global_prop_cnt;
-    DWORD global_prop_size;
-
-    LONG task_magic;
-
-    HTMLLocation *location;
-
-    IMoniker *mon;
-    nsChannelBSC *bscallback;
-    struct list bindings;
 };
 
 typedef enum {
@@ -803,24 +814,15 @@ struct GeckoBrowser {
 
 typedef struct {
     const CLSID *clsid;
-    HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
-    void (*destructor)(HTMLDOMNode*);
     const cpc_entry_t *cpc_entries;
     HRESULT (*clone)(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**);
-    HRESULT (*dispatch_nsevent_hook)(HTMLDOMNode*,DOMEvent*);
-    HRESULT (*handle_event)(HTMLDOMNode*,DWORD,nsIDOMEvent*,BOOL*);
     HRESULT (*get_attr_col)(HTMLDOMNode*,HTMLAttributeCollection**);
     EventTarget *(*get_event_prop_target)(HTMLDOMNode*,int);
     HRESULT (*put_disabled)(HTMLDOMNode*,VARIANT_BOOL);
     HRESULT (*get_disabled)(HTMLDOMNode*,VARIANT_BOOL*);
     HRESULT (*get_document)(HTMLDOMNode*,IDispatch**);
     HRESULT (*get_readystate)(HTMLDOMNode*,BSTR*);
-    HRESULT (*get_dispid)(HTMLDOMNode*,BSTR,DWORD,DISPID*);
-    HRESULT (*get_name)(HTMLDOMNode*,DISPID,BSTR*);
-    HRESULT (*invoke)(HTMLDOMNode*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
     HRESULT (*bind_to_tree)(HTMLDOMNode*);
-    void (*traverse)(HTMLDOMNode*,nsCycleCollectionTraversalCallback*);
-    void (*unlink)(HTMLDOMNode*);
     BOOL (*is_text_edit)(HTMLDOMNode*);
     BOOL (*is_settable)(HTMLDOMNode*,DISPID);
 } NodeImplVtbl;
@@ -832,13 +834,11 @@ struct HTMLDOMNode {
     IHTMLDOMNode3 IHTMLDOMNode3_iface;
     const NodeImplVtbl *vtbl;
 
-    nsCycleCollectingAutoRefCnt ccref;
-
     nsIDOMNode *nsnode;
     HTMLDocumentNode *doc;
 };
 
-HTMLDOMNode *unsafe_impl_from_IHTMLDOMNode(IHTMLDOMNode*) DECLSPEC_HIDDEN;
+HTMLDOMNode *unsafe_impl_from_IHTMLDOMNode(IHTMLDOMNode*);
 
 static inline void node_addref(HTMLDOMNode *node)
 {
@@ -883,9 +883,10 @@ typedef struct {
     IHTMLElement4_tid,      \
     IHTMLUniqueName_tid
 
-extern cp_static_data_t HTMLElementEvents2_data DECLSPEC_HIDDEN;
+extern const tid_t HTMLElement_iface_tids[];
+extern cp_static_data_t HTMLElementEvents2_data;
 #define HTMLELEMENT_CPC {&DIID_HTMLElementEvents2, &HTMLElementEvents2_data}
-extern const cpc_entry_t HTMLElement_cpc[] DECLSPEC_HIDDEN;
+extern const cpc_entry_t HTMLElement_cpc[];
 
 struct HTMLFrameBase {
     HTMLElement element;
@@ -938,11 +939,7 @@ struct HTMLDocumentNode {
     IInternetHostSecurityManager IInternetHostSecurityManager_iface;
 
     nsIDocumentObserver          nsIDocumentObserver_iface;
-
-    LONG ref;
-
     ConnectionPointContainer cp_container;
-    HTMLOuterWindow *outer_window;
     HTMLInnerWindow *window;
     HTMLDocumentObj *doc_obj;
 
@@ -954,8 +951,8 @@ struct HTMLDocumentNode {
 
     nsIDOMDocument *dom_document;
     nsIDOMHTMLDocument *html_document;
-    BOOL content_ready : 1;
-    BOOL unload_sent : 1;
+    unsigned int content_ready : 1;
+    unsigned int unload_sent : 1;
 
     IHTMLDOMImplementation *dom_implementation;
     IHTMLNamespaceCollection *namespaces;
@@ -979,154 +976,154 @@ struct HTMLDocumentNode {
     struct list plugin_hosts;
 };
 
-HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
-HRESULT MHTMLDocument_Create(IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
-HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
-HRESULT create_marshaled_doc(HWND,REFIID,void**) DECLSPEC_HIDDEN;
+HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
+HRESULT MHTMLDocument_Create(IUnknown*,REFIID,void**);
+HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
+HRESULT create_marshaled_doc(HWND,REFIID,void**);
 HRESULT create_document_node(nsIDOMDocument*,GeckoBrowser*,HTMLInnerWindow*,
-                             compat_mode_t,HTMLDocumentNode**) DECLSPEC_HIDDEN;
-HRESULT create_doctype_node(HTMLDocumentNode*,nsIDOMNode*,HTMLDOMNode**) DECLSPEC_HIDDEN;
+                             compat_mode_t,HTMLDocumentNode**);
+HRESULT create_doctype_node(HTMLDocumentNode*,nsIDOMNode*,HTMLDOMNode**);
 
-HRESULT create_outer_window(GeckoBrowser*,mozIDOMWindowProxy*,HTMLOuterWindow*,HTMLOuterWindow**) DECLSPEC_HIDDEN;
-HRESULT update_window_doc(HTMLInnerWindow*) DECLSPEC_HIDDEN;
-HTMLOuterWindow *mozwindow_to_window(const mozIDOMWindowProxy*) DECLSPEC_HIDDEN;
-void get_top_window(HTMLOuterWindow*,HTMLOuterWindow**) DECLSPEC_HIDDEN;
-HRESULT HTMLOptionElementFactory_Create(HTMLInnerWindow*,HTMLOptionElementFactory**) DECLSPEC_HIDDEN;
-HRESULT HTMLImageElementFactory_Create(HTMLInnerWindow*,HTMLImageElementFactory**) DECLSPEC_HIDDEN;
-HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow*,HTMLXMLHttpRequestFactory**) DECLSPEC_HIDDEN;
-HRESULT HTMLLocation_Create(HTMLInnerWindow*,HTMLLocation**) DECLSPEC_HIDDEN;
-HRESULT create_navigator(compat_mode_t,IOmNavigator**) DECLSPEC_HIDDEN;
-HRESULT create_html_screen(compat_mode_t,IHTMLScreen**) DECLSPEC_HIDDEN;
-HRESULT create_performance(HTMLInnerWindow*,IHTMLPerformance**) DECLSPEC_HIDDEN;
-HRESULT create_performance_timing(HTMLPerformanceTiming**) DECLSPEC_HIDDEN;
-HRESULT create_history(HTMLInnerWindow*,OmHistory**) DECLSPEC_HIDDEN;
-HRESULT create_namespace_collection(compat_mode_t,IHTMLNamespaceCollection**) DECLSPEC_HIDDEN;
-HRESULT create_dom_implementation(HTMLDocumentNode*,IHTMLDOMImplementation**) DECLSPEC_HIDDEN;
-void detach_dom_implementation(IHTMLDOMImplementation*) DECLSPEC_HIDDEN;
+HRESULT create_outer_window(GeckoBrowser*,mozIDOMWindowProxy*,HTMLOuterWindow*,HTMLOuterWindow**);
+HRESULT update_window_doc(HTMLInnerWindow*);
+HTMLOuterWindow *mozwindow_to_window(const mozIDOMWindowProxy*);
+void get_top_window(HTMLOuterWindow*,HTMLOuterWindow**);
+HRESULT HTMLOptionElementFactory_Create(HTMLInnerWindow*,HTMLOptionElementFactory**);
+HRESULT HTMLImageElementFactory_Create(HTMLInnerWindow*,HTMLImageElementFactory**);
+HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow*,HTMLXMLHttpRequestFactory**);
+HRESULT create_location(HTMLOuterWindow*,HTMLLocation**);
+HRESULT create_navigator(compat_mode_t,IOmNavigator**);
+HRESULT create_html_screen(compat_mode_t,IHTMLScreen**);
+HRESULT create_performance(HTMLInnerWindow*,IHTMLPerformance**);
+HRESULT create_history(HTMLInnerWindow*,OmHistory**);
+HRESULT create_namespace_collection(compat_mode_t,IHTMLNamespaceCollection**);
+HRESULT create_dom_implementation(HTMLDocumentNode*,IHTMLDOMImplementation**);
+void detach_dom_implementation(IHTMLDOMImplementation*);
+HRESULT create_html_storage(HTMLInnerWindow*,BOOL,IHTMLStorage**);
 
-HRESULT create_html_storage(HTMLInnerWindow*,BOOL,IHTMLStorage**) DECLSPEC_HIDDEN;
-void detach_html_storage(IHTMLStorage*) DECLSPEC_HIDDEN;
+void HTMLDocument_View_Init(HTMLDocumentObj*);
+void HTMLDocumentObj_Persist_Init(HTMLDocumentObj*);
+void HTMLDocumentObj_Service_Init(HTMLDocumentObj*);
+void HTMLDocumentObj_OleCmd_Init(HTMLDocumentObj*);
+void TargetContainer_Init(HTMLDocumentObj*);
 
-void HTMLDocument_View_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-void HTMLDocumentObj_Persist_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-void HTMLDocumentObj_Service_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-void HTMLDocumentObj_OleCmd_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-void TargetContainer_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
+void HTMLDocumentNode_Persist_Init(HTMLDocumentNode*);
+void HTMLDocumentNode_Service_Init(HTMLDocumentNode*);
+void HTMLDocumentNode_OleCmd_Init(HTMLDocumentNode*);
+void HTMLDocumentNode_OleObj_Init(HTMLDocumentNode*);
+void HTMLDocumentNode_SecMgr_Init(HTMLDocumentNode*);
 
-void HTMLDocumentNode_Persist_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void HTMLDocumentNode_Service_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void HTMLDocumentNode_OleCmd_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void HTMLDocumentNode_OleObj_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void HTMLDocumentNode_SecMgr_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
+HRESULT HTMLCurrentStyle_Create(HTMLElement*,IHTMLCurrentStyle**);
 
-HRESULT HTMLCurrentStyle_Create(HTMLElement*,IHTMLCurrentStyle**) DECLSPEC_HIDDEN;
+void ConnectionPointContainer_Init(ConnectionPointContainer*,IUnknown*,const cpc_entry_t*);
+void ConnectionPointContainer_Destroy(ConnectionPointContainer*);
 
-void ConnectionPointContainer_Init(ConnectionPointContainer*,IUnknown*,const cpc_entry_t*) DECLSPEC_HIDDEN;
-void ConnectionPointContainer_Destroy(ConnectionPointContainer*) DECLSPEC_HIDDEN;
+HRESULT create_gecko_browser(HTMLDocumentObj*,GeckoBrowser**);
+void detach_gecko_browser(GeckoBrowser*);
 
-HRESULT create_gecko_browser(HTMLDocumentObj*,GeckoBrowser**) DECLSPEC_HIDDEN;
-void detach_gecko_browser(GeckoBrowser*) DECLSPEC_HIDDEN;
+DWORD get_compat_mode_version(compat_mode_t compat_mode);
+compat_mode_t lock_document_mode(HTMLDocumentNode*);
 
-compat_mode_t lock_document_mode(HTMLDocumentNode*) DECLSPEC_HIDDEN;
+void init_mutation(nsIComponentManager*);
+void init_document_mutation(HTMLDocumentNode*);
+void release_document_mutation(HTMLDocumentNode*);
+JSContext *get_context_from_document(nsIDOMDocument*);
 
-void init_mutation(nsIComponentManager*) DECLSPEC_HIDDEN;
-void init_document_mutation(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void release_document_mutation(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-JSContext *get_context_from_document(nsIDOMDocument*) DECLSPEC_HIDDEN;
+void HTMLDocument_LockContainer(HTMLDocumentObj*,BOOL);
+void show_context_menu(HTMLDocumentObj*,DWORD,POINT*,IDispatch*);
+void notif_focus(HTMLDocumentObj*);
 
-void HTMLDocument_LockContainer(HTMLDocumentObj*,BOOL) DECLSPEC_HIDDEN;
-void show_context_menu(HTMLDocumentObj*,DWORD,POINT*,IDispatch*) DECLSPEC_HIDDEN;
-void notif_focus(HTMLDocumentObj*) DECLSPEC_HIDDEN;
+void show_tooltip(HTMLDocumentObj*,DWORD,DWORD,LPCWSTR);
+void hide_tooltip(HTMLDocumentObj*);
+HRESULT get_client_disp_property(IOleClientSite*,DISPID,VARIANT*);
 
-void show_tooltip(HTMLDocumentObj*,DWORD,DWORD,LPCWSTR) DECLSPEC_HIDDEN;
-void hide_tooltip(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-HRESULT get_client_disp_property(IOleClientSite*,DISPID,VARIANT*) DECLSPEC_HIDDEN;
+UINT get_document_charset(HTMLDocumentNode*);
 
-UINT get_document_charset(HTMLDocumentNode*) DECLSPEC_HIDDEN;
+HRESULT ProtocolFactory_Create(REFCLSID,REFIID,void**);
 
-HRESULT ProtocolFactory_Create(REFCLSID,REFIID,void**) DECLSPEC_HIDDEN;
+BOOL load_gecko(void);
+void close_gecko(void);
+void register_nsservice(nsIComponentRegistrar*,nsIServiceManager*);
+void init_nsio(nsIComponentManager*);
+void release_nsio(void);
+BOOL is_gecko_path(const char*);
+void set_viewer_zoom(GeckoBrowser*,float);
+float get_viewer_zoom(GeckoBrowser*);
 
-BOOL load_gecko(void) DECLSPEC_HIDDEN;
-void close_gecko(void) DECLSPEC_HIDDEN;
-void register_nsservice(nsIComponentRegistrar*,nsIServiceManager*) DECLSPEC_HIDDEN;
-void init_nsio(nsIComponentManager*) DECLSPEC_HIDDEN;
-void release_nsio(void) DECLSPEC_HIDDEN;
-BOOL is_gecko_path(const char*) DECLSPEC_HIDDEN;
-void set_viewer_zoom(GeckoBrowser*,float) DECLSPEC_HIDDEN;
-float get_viewer_zoom(GeckoBrowser*) DECLSPEC_HIDDEN;
+void init_dispex_cc(void);
+void init_window_cc(void);
 
-void init_node_cc(void) DECLSPEC_HIDDEN;
+HRESULT nsuri_to_url(LPCWSTR,BOOL,BSTR*);
 
-HRESULT nsuri_to_url(LPCWSTR,BOOL,BSTR*) DECLSPEC_HIDDEN;
+HRESULT call_disp_func(IDispatch*,DISPPARAMS*,VARIANT*);
+void call_property_onchanged(ConnectionPointContainer*,DISPID);
+HRESULT call_set_active_object(IOleInPlaceUIWindow*,IOleInPlaceActiveObject*);
 
-void call_property_onchanged(ConnectionPointContainer*,DISPID) DECLSPEC_HIDDEN;
-HRESULT call_set_active_object(IOleInPlaceUIWindow*,IOleInPlaceActiveObject*) DECLSPEC_HIDDEN;
+void nsfree(void*);
+void *nsalloc(size_t) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(nsfree) __WINE_MALLOC;
 
-void nsfree(void*) DECLSPEC_HIDDEN;
-void *nsalloc(size_t) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(nsfree) __WINE_MALLOC DECLSPEC_HIDDEN;
+BOOL nsACString_Init(nsACString *str, const char *data);
+void nsACString_InitDepend(nsACString*,const char*);
+void nsACString_SetData(nsACString*,const char*);
+UINT32 nsACString_GetData(const nsACString*,const char**);
+void nsACString_Finish(nsACString*);
 
-BOOL nsACString_Init(nsACString *str, const char *data) DECLSPEC_HIDDEN;
-void nsACString_InitDepend(nsACString*,const char*) DECLSPEC_HIDDEN;
-void nsACString_SetData(nsACString*,const char*) DECLSPEC_HIDDEN;
-UINT32 nsACString_GetData(const nsACString*,const char**) DECLSPEC_HIDDEN;
-void nsACString_Finish(nsACString*) DECLSPEC_HIDDEN;
-
-BOOL nsAString_Init(nsAString*,const PRUnichar*) DECLSPEC_HIDDEN;
-void nsAString_InitDepend(nsAString*,const PRUnichar*) DECLSPEC_HIDDEN;
-void nsAString_SetData(nsAString*,const PRUnichar*) DECLSPEC_HIDDEN;
-UINT32 nsAString_GetData(const nsAString*,const PRUnichar**) DECLSPEC_HIDDEN;
-void nsAString_Finish(nsAString*) DECLSPEC_HIDDEN;
+BOOL nsAString_Init(nsAString*,const PRUnichar*);
+void nsAString_InitDepend(nsAString*,const PRUnichar*);
+void nsAString_SetData(nsAString*,const PRUnichar*);
+UINT32 nsAString_GetData(const nsAString*,const PRUnichar**);
+void nsAString_Finish(nsAString*);
 
 #define NSSTR_IMPLICIT_PX    0x01
 #define NSSTR_COLOR          0x02
 
-HRESULT map_nsresult(nsresult) DECLSPEC_HIDDEN;
-HRESULT return_nsstr(nsresult,nsAString*,BSTR*) DECLSPEC_HIDDEN;
-HRESULT return_nsstr_variant(nsresult,nsAString*,unsigned,VARIANT*) DECLSPEC_HIDDEN;
-HRESULT variant_to_nsstr(VARIANT*,BOOL,nsAString*) DECLSPEC_HIDDEN;
-HRESULT return_nsform(nsresult,nsIDOMHTMLFormElement*,IHTMLFormElement**) DECLSPEC_HIDDEN;
+HRESULT map_nsresult(nsresult);
+HRESULT return_nsstr(nsresult,nsAString*,BSTR*);
+HRESULT return_nsstr_variant(nsresult,nsAString*,unsigned,VARIANT*);
+HRESULT variant_to_nsstr(VARIANT*,BOOL,nsAString*);
+HRESULT return_nsform(nsresult,nsIDOMHTMLFormElement*,IHTMLFormElement**);
 
-nsICommandParams *create_nscommand_params(void) DECLSPEC_HIDDEN;
-HRESULT nsnode_to_nsstring(nsIDOMNode*,nsAString*) DECLSPEC_HIDDEN;
-void setup_editor_controller(GeckoBrowser*) DECLSPEC_HIDDEN;
-nsresult get_nsinterface(nsISupports*,REFIID,void**) DECLSPEC_HIDDEN;
-nsIWritableVariant *create_nsvariant(void) DECLSPEC_HIDDEN;
-nsIXMLHttpRequest *create_nsxhr(nsIDOMWindow *nswindow) DECLSPEC_HIDDEN;
-nsresult create_nsfile(const PRUnichar*,nsIFile**) DECLSPEC_HIDDEN;
-char *get_nscategory_entry(const char*,const char*) DECLSPEC_HIDDEN;
+nsICommandParams *create_nscommand_params(void);
+HRESULT nsnode_to_nsstring(nsIDOMNode*,nsAString*);
+void setup_editor_controller(GeckoBrowser*);
+nsresult get_nsinterface(nsISupports*,REFIID,void**);
+nsIWritableVariant *create_nsvariant(void);
+nsIXMLHttpRequest *create_nsxhr(nsIDOMWindow *nswindow);
+nsresult create_nsfile(const PRUnichar*,nsIFile**);
+char *get_nscategory_entry(const char*,const char*);
 
-HRESULT create_pending_window(HTMLOuterWindow*,nsChannelBSC*) DECLSPEC_HIDDEN;
-HRESULT start_binding(HTMLInnerWindow*,BSCallback*,IBindCtx*) DECLSPEC_HIDDEN;
-HRESULT async_start_doc_binding(HTMLOuterWindow*,HTMLInnerWindow*,DWORD) DECLSPEC_HIDDEN;
-void abort_window_bindings(HTMLInnerWindow*) DECLSPEC_HIDDEN;
-void set_download_state(HTMLDocumentObj*,int) DECLSPEC_HIDDEN;
-void call_docview_84(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-HRESULT reload_page(HTMLOuterWindow*) DECLSPEC_HIDDEN;
+HRESULT create_pending_window(HTMLOuterWindow*,nsChannelBSC*);
+HRESULT start_binding(HTMLInnerWindow*,BSCallback*,IBindCtx*);
+HRESULT async_start_doc_binding(HTMLOuterWindow*,HTMLInnerWindow*,DWORD);
+void abort_window_bindings(HTMLInnerWindow*);
+void set_download_state(HTMLDocumentObj*,int);
+void call_docview_84(HTMLDocumentObj*);
+HRESULT reload_page(HTMLOuterWindow*);
 
-void set_ready_state(HTMLOuterWindow*,READYSTATE) DECLSPEC_HIDDEN;
-HRESULT get_readystate_string(READYSTATE,BSTR*) DECLSPEC_HIDDEN;
+void set_ready_state(HTMLOuterWindow*,READYSTATE);
+HRESULT get_readystate_string(READYSTATE,BSTR*);
 
-HRESULT HTMLSelectionObject_Create(HTMLDocumentNode*,nsISelection*,IHTMLSelectionObject**) DECLSPEC_HIDDEN;
-HRESULT HTMLTxtRange_Create(HTMLDocumentNode*,nsIDOMRange*,IHTMLTxtRange**) DECLSPEC_HIDDEN;
-HRESULT create_style_sheet(nsIDOMStyleSheet*,compat_mode_t,IHTMLStyleSheet**) DECLSPEC_HIDDEN;
+HRESULT HTMLSelectionObject_Create(HTMLDocumentNode*,nsISelection*,IHTMLSelectionObject**);
+HRESULT HTMLTxtRange_Create(HTMLDocumentNode*,nsIDOMRange*,IHTMLTxtRange**);
+HRESULT create_style_sheet(nsIDOMStyleSheet*,compat_mode_t,IHTMLStyleSheet**);
 HRESULT create_style_sheet_collection(nsIDOMStyleSheetList*,compat_mode_t,
-                                      IHTMLStyleSheetsCollection**) DECLSPEC_HIDDEN;
-HRESULT create_dom_range(nsIDOMRange*,compat_mode_t,IHTMLDOMRange**) DECLSPEC_HIDDEN;
-HRESULT create_markup_pointer(IMarkupPointer**) DECLSPEC_HIDDEN;
+                                      IHTMLStyleSheetsCollection**);
+HRESULT create_dom_range(nsIDOMRange*,compat_mode_t,IHTMLDOMRange**);
+HRESULT create_markup_pointer(IMarkupPointer**);
 
-void detach_document_node(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void detach_selection(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void detach_ranges(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-HRESULT get_node_text(HTMLDOMNode*,BSTR*) DECLSPEC_HIDDEN;
-HRESULT replace_node_by_html(nsIDOMDocument*,nsIDOMNode*,const WCHAR*) DECLSPEC_HIDDEN;
+void detach_document_node(HTMLDocumentNode*);
+void detach_selection(HTMLDocumentNode*);
+void detach_ranges(HTMLDocumentNode*);
+HRESULT get_node_text(HTMLDOMNode*,BSTR*);
+HRESULT replace_node_by_html(nsIDOMDocument*,nsIDOMNode*,const WCHAR*);
 
-HRESULT create_nselem(HTMLDocumentNode*,const WCHAR*,nsIDOMElement**) DECLSPEC_HIDDEN;
-HRESULT create_element(HTMLDocumentNode*,const WCHAR*,HTMLElement**) DECLSPEC_HIDDEN;
+HRESULT create_nselem(HTMLDocumentNode*,const WCHAR*,nsIDOMElement**);
+HRESULT create_element(HTMLDocumentNode*,const WCHAR*,HTMLElement**);
 
-HRESULT HTMLDOMTextNode_Create(HTMLDocumentNode*,nsIDOMNode*,HTMLDOMNode**) DECLSPEC_HIDDEN;
+HRESULT HTMLDOMTextNode_Create(HTMLDocumentNode*,nsIDOMNode*,HTMLDOMNode**);
 
-BOOL variant_to_nscolor(const VARIANT *v, nsAString *nsstr) DECLSPEC_HIDDEN;
-HRESULT nscolor_to_str(LPCWSTR color, BSTR *ret) DECLSPEC_HIDDEN;
+BOOL variant_to_nscolor(const VARIANT *v, nsAString *nsstr);
+HRESULT nscolor_to_str(LPCWSTR color, BSTR *ret);
 
 static inline BOOL is_main_content_window(HTMLOuterWindow *window)
 {
@@ -1139,8 +1136,6 @@ struct HTMLAttributeCollection {
     IHTMLAttributeCollection2 IHTMLAttributeCollection2_iface;
     IHTMLAttributeCollection3 IHTMLAttributeCollection3_iface;
 
-    LONG ref;
-
     HTMLElement *elem;
     struct list attrs;
 };
@@ -1149,8 +1144,6 @@ typedef struct {
     DispatchEx dispex;
     IHTMLDOMAttribute IHTMLDOMAttribute_iface;
     IHTMLDOMAttribute2 IHTMLDOMAttribute2_iface;
-
-    LONG ref;
 
     /* value is valid only for detached attributes (when elem == NULL). */
     VARIANT value;
@@ -1162,88 +1155,91 @@ typedef struct {
     struct list entry;
 } HTMLDOMAttribute;
 
-HTMLDOMAttribute *unsafe_impl_from_IHTMLDOMAttribute(IHTMLDOMAttribute*) DECLSPEC_HIDDEN;
+HTMLDOMAttribute *unsafe_impl_from_IHTMLDOMAttribute(IHTMLDOMAttribute*);
 
-HRESULT HTMLDOMAttribute_Create(const WCHAR*,HTMLElement*,DISPID,compat_mode_t,HTMLDOMAttribute**) DECLSPEC_HIDDEN;
+HRESULT HTMLDOMAttribute_Create(const WCHAR*,HTMLElement*,DISPID,compat_mode_t,HTMLDOMAttribute**);
 
-HRESULT HTMLElement_Create(HTMLDocumentNode*,nsIDOMNode*,BOOL,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLCommentElement_Create(HTMLDocumentNode*,nsIDOMNode*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLAnchorElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLAreaElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLBodyElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLButtonElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLEmbedElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLFormElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLFrameElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLHeadElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLHtmlElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLIFrame_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLStyleElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLImgElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLInputElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLLabelElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLLinkElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLMetaElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLObjectElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLOptionElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLScriptElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLSelectElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLTable_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLTableCell_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLTableRow_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLTextAreaElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLTitleElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT HTMLGenericElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
+HRESULT HTMLElement_Create(HTMLDocumentNode*,nsIDOMNode*,BOOL,HTMLElement**);
+HRESULT HTMLCommentElement_Create(HTMLDocumentNode*,nsIDOMNode*,HTMLElement**);
+HRESULT HTMLAnchorElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLAreaElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLBodyElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLButtonElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLEmbedElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLFormElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLFrameElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLHeadElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLHtmlElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLIFrame_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLStyleElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLImgElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLInputElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLLabelElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLLinkElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLMetaElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLObjectElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLOptionElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLScriptElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLSelectElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLTable_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLTableCell_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLTableRow_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLTextAreaElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLTitleElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+HRESULT HTMLGenericElement_Create(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
 
-HRESULT create_svg_element(HTMLDocumentNode*,nsIDOMSVGElement*,const WCHAR*,HTMLElement**) DECLSPEC_HIDDEN;
+HRESULT create_svg_element(HTMLDocumentNode*,nsIDOMSVGElement*,const WCHAR*,HTMLElement**);
 
-void HTMLDOMNode_Init(HTMLDocumentNode*,HTMLDOMNode*,nsIDOMNode*,dispex_static_data_t*) DECLSPEC_HIDDEN;
-void HTMLElement_Init(HTMLElement*,HTMLDocumentNode*,nsIDOMElement*,dispex_static_data_t*) DECLSPEC_HIDDEN;
+void HTMLDOMNode_Init(HTMLDocumentNode*,HTMLDOMNode*,nsIDOMNode*,dispex_static_data_t*);
+void HTMLElement_Init(HTMLElement*,HTMLDocumentNode*,nsIDOMElement*,dispex_static_data_t*);
 
-void EventTarget_Init(EventTarget*,IUnknown*,dispex_static_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
-HRESULT EventTarget_QI(EventTarget*,REFIID,void**) DECLSPEC_HIDDEN;
-void EventTarget_init_dispex_info(dispex_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
+void EventTarget_Init(EventTarget*,dispex_static_data_t*,compat_mode_t);
+void *EventTarget_query_interface(EventTarget*,REFIID);
+void EventTarget_init_dispex_info(dispex_data_t*,compat_mode_t);
 
-HRESULT HTMLDOMNode_QI(HTMLDOMNode*,REFIID,void**) DECLSPEC_HIDDEN;
-void HTMLDOMNode_destructor(HTMLDOMNode*) DECLSPEC_HIDDEN;
-void HTMLDOMNode_init_dispex_info(dispex_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
+void *HTMLDOMNode_query_interface(DispatchEx*,REFIID);
+void HTMLDOMNode_destructor(DispatchEx*);
+void HTMLDOMNode_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*);
+void HTMLDOMNode_unlink(DispatchEx*);
+void HTMLDOMNode_init_dispex_info(dispex_data_t*,compat_mode_t);
 
-HRESULT HTMLElement_QI(HTMLDOMNode*,REFIID,void**) DECLSPEC_HIDDEN;
-void HTMLElement_destructor(HTMLDOMNode*) DECLSPEC_HIDDEN;
-HRESULT HTMLElement_clone(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**) DECLSPEC_HIDDEN;
-HRESULT HTMLElement_get_attr_col(HTMLDOMNode*,HTMLAttributeCollection**) DECLSPEC_HIDDEN;
-HRESULT HTMLElement_dispatch_nsevent_hook(HTMLDOMNode*,DOMEvent*) DECLSPEC_HIDDEN;
-HRESULT HTMLElement_handle_event(HTMLDOMNode*,DWORD,nsIDOMEvent*,BOOL*) DECLSPEC_HIDDEN;
-void HTMLElement_init_dispex_info(dispex_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
+void *HTMLElement_query_interface(DispatchEx*,REFIID);
+void HTMLElement_destructor(DispatchEx*);
+void HTMLElement_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*);
+void HTMLElement_unlink(DispatchEx*);
+HRESULT HTMLElement_populate_props(DispatchEx*);
+HRESULT HTMLElement_clone(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**);
+HRESULT HTMLElement_get_attr_col(HTMLDOMNode*,HTMLAttributeCollection**);
+void HTMLElement_init_dispex_info(dispex_data_t*,compat_mode_t);
 
-HRESULT get_node(nsIDOMNode*,BOOL,HTMLDOMNode**) DECLSPEC_HIDDEN;
-HRESULT get_element(nsIDOMElement*,HTMLElement**) DECLSPEC_HIDDEN;
-HRESULT get_document_node(nsIDOMDocument*,HTMLDocumentNode**) DECLSPEC_HIDDEN;
+HRESULT get_node(nsIDOMNode*,BOOL,HTMLDOMNode**);
+HRESULT get_element(nsIDOMElement*,HTMLElement**);
+HRESULT get_document_node(nsIDOMDocument*,HTMLDocumentNode**);
 
-HTMLElement *unsafe_impl_from_IHTMLElement(IHTMLElement*) DECLSPEC_HIDDEN;
+HTMLElement *unsafe_impl_from_IHTMLElement(IHTMLElement*);
 
-HRESULT search_window_props(HTMLInnerWindow*,BSTR,DWORD,DISPID*) DECLSPEC_HIDDEN;
-HRESULT get_frame_by_name(HTMLOuterWindow*,const WCHAR*,BOOL,HTMLOuterWindow**) DECLSPEC_HIDDEN;
-HRESULT get_doc_elem_by_id(HTMLDocumentNode*,const WCHAR*,HTMLElement**) DECLSPEC_HIDDEN;
-HTMLOuterWindow *get_target_window(HTMLOuterWindow*,nsAString*,BOOL*) DECLSPEC_HIDDEN;
-HRESULT handle_link_click_event(HTMLElement*,nsAString*,nsAString*,nsIDOMEvent*,BOOL*) DECLSPEC_HIDDEN;
+HRESULT search_window_props(HTMLInnerWindow*,BSTR,DWORD,DISPID*);
+HRESULT get_frame_by_name(HTMLOuterWindow*,const WCHAR*,BOOL,HTMLOuterWindow**);
+HRESULT get_doc_elem_by_id(HTMLDocumentNode*,const WCHAR*,HTMLElement**);
+HTMLOuterWindow *get_target_window(HTMLOuterWindow*,nsAString*,BOOL*);
+HRESULT handle_link_click_event(HTMLElement*,nsAString*,nsAString*,nsIDOMEvent*,BOOL*);
 
-HRESULT wrap_iface(IUnknown*,IUnknown*,IUnknown**) DECLSPEC_HIDDEN;
+HRESULT wrap_iface(IUnknown*,IUnknown*,IUnknown**);
 
-IHTMLElementCollection *create_all_collection(HTMLDOMNode*,BOOL) DECLSPEC_HIDDEN;
-IHTMLElementCollection *create_collection_from_nodelist(nsIDOMNodeList*,compat_mode_t) DECLSPEC_HIDDEN;
-IHTMLElementCollection *create_collection_from_htmlcol(nsIDOMHTMLCollection*,compat_mode_t) DECLSPEC_HIDDEN;
-HRESULT create_child_collection(nsIDOMNodeList*,compat_mode_t,IHTMLDOMChildrenCollection**) DECLSPEC_HIDDEN;
+IHTMLElementCollection *create_all_collection(HTMLDOMNode*,BOOL);
+IHTMLElementCollection *create_collection_from_nodelist(nsIDOMNodeList*,compat_mode_t);
+IHTMLElementCollection *create_collection_from_htmlcol(nsIDOMHTMLCollection*,compat_mode_t);
+HRESULT create_child_collection(nsIDOMNodeList*,compat_mode_t,IHTMLDOMChildrenCollection**);
 
-HRESULT attr_value_to_string(VARIANT*) DECLSPEC_HIDDEN;
-HRESULT get_elem_attr_value_by_dispid(HTMLElement*,DISPID,VARIANT*) DECLSPEC_HIDDEN;
-HRESULT get_elem_source_index(HTMLElement*,LONG*) DECLSPEC_HIDDEN;
+HRESULT attr_value_to_string(VARIANT*);
+HRESULT get_elem_attr_value_by_dispid(HTMLElement*,DISPID,VARIANT*);
+HRESULT get_elem_source_index(HTMLElement*,LONG*);
 
-nsresult get_elem_attr_value(nsIDOMElement*,const WCHAR*,nsAString*,const PRUnichar**) DECLSPEC_HIDDEN;
-HRESULT elem_string_attr_getter(HTMLElement*,const WCHAR*,BOOL,BSTR*) DECLSPEC_HIDDEN;
-HRESULT elem_string_attr_setter(HTMLElement*,const WCHAR*,const WCHAR*) DECLSPEC_HIDDEN;
+nsresult get_elem_attr_value(nsIDOMElement*,const WCHAR*,nsAString*,const PRUnichar**);
+HRESULT elem_string_attr_getter(HTMLElement*,const WCHAR*,BOOL,BSTR*);
+HRESULT elem_string_attr_setter(HTMLElement*,const WCHAR*,const WCHAR*);
 
-HRESULT elem_unique_id(unsigned id, BSTR *p) DECLSPEC_HIDDEN;
+HRESULT elem_unique_id(unsigned id, BSTR *p);
 
 /* commands */
 typedef struct {
@@ -1252,31 +1248,31 @@ typedef struct {
     HRESULT (*exec)(HTMLDocumentNode*,DWORD,VARIANT*,VARIANT*);
 } cmdtable_t;
 
-extern const cmdtable_t editmode_cmds[] DECLSPEC_HIDDEN;
+extern const cmdtable_t editmode_cmds[];
 
-void do_ns_command(HTMLDocumentNode*,const char*,nsICommandParams*) DECLSPEC_HIDDEN;
+void do_ns_command(HTMLDocumentNode*,const char*,nsICommandParams*);
 
 /* timer */
 #define UPDATE_UI       0x0001
 #define UPDATE_TITLE    0x0002
 
-void update_doc(HTMLDocumentObj*,DWORD) DECLSPEC_HIDDEN;
-void update_title(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-void set_document_navigation(HTMLDocumentObj*,BOOL) DECLSPEC_HIDDEN;
+void update_doc(HTMLDocumentObj*,DWORD);
+void update_title(HTMLDocumentObj*);
+void set_document_navigation(HTMLDocumentObj*,BOOL);
 
-HRESULT do_query_service(IUnknown*,REFGUID,REFIID,void**) DECLSPEC_HIDDEN;
+HRESULT do_query_service(IUnknown*,REFGUID,REFIID,void**);
 
 /* editor */
-HRESULT setup_edit_mode(HTMLDocumentObj*) DECLSPEC_HIDDEN;
-void init_editor(HTMLDocumentNode*) DECLSPEC_HIDDEN;
-void handle_edit_event(HTMLDocumentNode*,nsIDOMEvent*) DECLSPEC_HIDDEN;
-HRESULT editor_exec_copy(HTMLDocumentNode*,DWORD,VARIANT*,VARIANT*) DECLSPEC_HIDDEN;
-HRESULT editor_exec_cut(HTMLDocumentNode*,DWORD,VARIANT*,VARIANT*) DECLSPEC_HIDDEN;
-HRESULT editor_exec_paste(HTMLDocumentNode*,DWORD,VARIANT*,VARIANT*) DECLSPEC_HIDDEN;
-HRESULT browser_is_dirty(GeckoBrowser*) DECLSPEC_HIDDEN;
-void set_dirty(GeckoBrowser*,VARIANT_BOOL) DECLSPEC_HIDDEN;
+HRESULT setup_edit_mode(HTMLDocumentObj*);
+void init_editor(HTMLDocumentNode*);
+void handle_edit_event(HTMLDocumentNode*,nsIDOMEvent*);
+HRESULT editor_exec_copy(HTMLDocumentNode*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_cut(HTMLDocumentNode*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_paste(HTMLDocumentNode*,DWORD,VARIANT*,VARIANT*);
+HRESULT browser_is_dirty(GeckoBrowser*);
+void set_dirty(GeckoBrowser*,VARIANT_BOOL);
 
-extern DWORD mshtml_tls DECLSPEC_HIDDEN;
+extern DWORD mshtml_tls;
 
 typedef struct task_t task_t;
 typedef void (*task_proc_t)(task_t*);
@@ -1288,6 +1284,18 @@ struct task_t {
     struct list entry;
 };
 
+typedef struct event_task_t event_task_t;
+typedef void (*event_task_proc_t)(event_task_t*);
+
+struct event_task_t {
+    LONG target_magic;
+    BOOL thread_blocked;
+    event_task_proc_t proc;
+    event_task_proc_t destr;
+    struct list entry;
+    HTMLInnerWindow *window;
+};
+
 typedef struct {
     task_t header;
     HTMLDocumentObj *doc;
@@ -1296,19 +1304,24 @@ typedef struct {
 typedef struct {
     HWND thread_hwnd;
     struct list task_list;
+    struct list event_task_list;
     struct list timer_list;
+    struct list *pending_xhr_events_tail;
     struct wine_rb_tree session_storage_map;
+    void *blocking_xhr;
 } thread_data_t;
 
-thread_data_t *get_thread_data(BOOL) DECLSPEC_HIDDEN;
-HWND get_thread_hwnd(void) DECLSPEC_HIDDEN;
-int session_storage_map_cmp(const void*,const struct wine_rb_entry*) DECLSPEC_HIDDEN;
-void destroy_session_storage(thread_data_t*) DECLSPEC_HIDDEN;
+thread_data_t *get_thread_data(BOOL);
+HWND get_thread_hwnd(void);
+void unblock_tasks_and_timers(thread_data_t*);
+int session_storage_map_cmp(const void*,const struct wine_rb_entry*);
+void destroy_session_storage(thread_data_t*);
 
-LONG get_task_target_magic(void) DECLSPEC_HIDDEN;
-HRESULT push_task(task_t*,task_proc_t,task_proc_t,LONG) DECLSPEC_HIDDEN;
-void remove_target_tasks(LONG) DECLSPEC_HIDDEN;
-ULONGLONG get_time_stamp(void) DECLSPEC_HIDDEN;
+LONG get_task_target_magic(void);
+HRESULT push_task(task_t*,task_proc_t,task_proc_t,LONG);
+HRESULT push_event_task(event_task_t*,HTMLInnerWindow*,event_task_proc_t,event_task_proc_t,LONG);
+void remove_target_tasks(LONG);
+ULONGLONG get_time_stamp(void);
 
 enum timer_type {
     TIMER_TIMEOUT,
@@ -1316,13 +1329,13 @@ enum timer_type {
     TIMER_ANIMATION_FRAME,
 };
 
-HRESULT set_task_timer(HTMLInnerWindow*,LONG,enum timer_type,IDispatch*,LONG*) DECLSPEC_HIDDEN;
-HRESULT clear_task_timer(HTMLInnerWindow*,DWORD) DECLSPEC_HIDDEN;
-HRESULT clear_animation_timer(HTMLInnerWindow*,DWORD) DECLSPEC_HIDDEN;
+HRESULT set_task_timer(HTMLInnerWindow*,LONG,enum timer_type,IDispatch*,LONG*);
+HRESULT clear_task_timer(HTMLInnerWindow*,DWORD);
+HRESULT clear_animation_timer(HTMLInnerWindow*,DWORD);
 
-const WCHAR *parse_compat_version(const WCHAR*,compat_mode_t*) DECLSPEC_HIDDEN;
+const WCHAR *parse_compat_version(const WCHAR*,compat_mode_t*);
 
-const char *debugstr_mshtml_guid(const GUID*) DECLSPEC_HIDDEN;
+const char *debugstr_mshtml_guid(const GUID*);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
@@ -1450,18 +1463,42 @@ static inline BOOL is_power_of_2(unsigned x)
     return !(x & (x - 1));
 }
 
+static inline void unlink_ref(void *p)
+{
+    IUnknown **ref = p;
+    if(*ref) {
+        IUnknown *unk = *ref;
+        *ref = NULL;
+        IUnknown_Release(unk);
+    }
+}
+
+static inline void unlink_variant(VARIANT *v)
+{
+    if(V_VT(v) == VT_DISPATCH || V_VT(v) == VT_UNKNOWN)
+        unlink_ref(&V_UNKNOWN(v));
+}
+
+static inline void traverse_variant(VARIANT *v, const char *name, nsCycleCollectionTraversalCallback *cb)
+{
+    if(V_VT(v) == VT_DISPATCH || V_VT(v) == VT_UNKNOWN)
+        note_cc_edge((nsISupports*)V_UNKNOWN(v), name, cb);
+}
+
 #ifdef __i386__
 extern void *call_thiscall_func;
 #endif
 
-compat_mode_t get_max_compat_mode(IUri*) DECLSPEC_HIDDEN;
-UINT cp_from_charset_string(BSTR) DECLSPEC_HIDDEN;
-BSTR charset_string_from_cp(UINT) DECLSPEC_HIDDEN;
-HRESULT get_mime_type_display_name(const WCHAR*,BSTR*) DECLSPEC_HIDDEN;
-HINSTANCE get_shdoclc(void) DECLSPEC_HIDDEN;
-void set_statustext(HTMLDocumentObj*,INT,LPCWSTR) DECLSPEC_HIDDEN;
-IInternetSecurityManager *get_security_manager(void) DECLSPEC_HIDDEN;
+compat_mode_t get_max_compat_mode(IUri*);
+UINT cp_from_charset_string(BSTR);
+BSTR charset_string_from_cp(UINT);
+HRESULT get_mime_type_display_name(const WCHAR*,BSTR*);
+HINSTANCE get_shdoclc(void);
+void set_statustext(HTMLDocumentObj*,INT,LPCWSTR);
+IInternetSecurityManager *get_security_manager(void);
 
-extern HINSTANCE hInst DECLSPEC_HIDDEN;
-void create_console(compat_mode_t compat_mode, IWineMSHTMLConsole **ret) DECLSPEC_HIDDEN;
-HRESULT create_media_query_list(HTMLWindow *window, BSTR media_query, IDispatch **ret) DECLSPEC_HIDDEN;
+extern HINSTANCE hInst;
+void create_console(compat_mode_t compat_mode, IWineMSHTMLConsole **ret);
+HRESULT create_media_query_list(HTMLWindow *window, BSTR media_query, IDispatch **ret);
+
+HRESULT create_mutation_observer_ctor(compat_mode_t compat_mode, IDispatch **ret);

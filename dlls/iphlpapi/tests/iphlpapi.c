@@ -196,7 +196,7 @@ static void testGetIpAddrTable(void)
        "GetIpAddrTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_IPADDRTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+        PMIB_IPADDRTABLE buf = malloc(dwSize);
 
         apiReturn = GetIpAddrTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
@@ -215,7 +215,7 @@ static void testGetIpAddrTable(void)
                       ntoa(buf->table[i].dwAddr), buf->table[i].dwIndex, buf->table[i].wType);
             }
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -237,7 +237,7 @@ static void testGetIfTable(void)
        "GetIfTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_IFTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+        PMIB_IFTABLE buf = malloc(dwSize);
 
         apiReturn = GetIfTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
@@ -286,7 +286,7 @@ static void testGetIfTable(void)
                 ok( !wcscmp( row->wszName, name ), "got %s vs %s\n", debugstr_w( row->wszName ), debugstr_w( name ) );
             }
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -399,7 +399,7 @@ static void testGetIpNetTable(void)
     if (apiReturn == ERROR_NO_DATA)
         ; /* empty ARP table's okay */
     else if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_IPNETTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+        PMIB_IPNETTABLE buf = malloc(dwSize);
 
         memset(buf, 0xcc, dwSize);
         apiReturn = GetIpNetTable(buf, &dwSize, TRUE);
@@ -419,12 +419,12 @@ static void testGetIpNetTable(void)
             }
 
             igmp3_found = ssdp_found = FALSE;
-            prev_idx = ~0ul;
+            prev_idx = ~0u;
             for (i = 0; i < buf->dwNumEntries; ++i)
             {
                 if (buf->table[i].dwIndex != prev_idx)
                 {
-                    if (prev_idx != ~0ul)
+                    if (prev_idx != ~0u)
                     {
                         ok( igmp3_found, "%s not found, iface index %lu.\n", ntoa( igmp3_addr ), prev_idx);
                         ok( ssdp_found || broken(!ssdp_found) /* 239.255.255.250 is always present since Win10 */,
@@ -466,13 +466,13 @@ static void testGetIpNetTable(void)
             for (i = 0; i < buf->dwNumEntries; i++)
             {
                 trace( "%lu: idx %lu type %lu addr %s phys",
-                       i, buf->table[i].dwIndex, U(buf->table[i]).dwType, ntoa( buf->table[i].dwAddr ));
+                       i, buf->table[i].dwIndex, buf->table[i].dwType, ntoa( buf->table[i].dwAddr ));
                 for (j = 0; j < buf->table[i].dwPhysAddrLen; j++)
                     printf( " %02x", buf->table[i].bPhysAddr[j] );
                 printf( "\n" );
             }
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -537,7 +537,7 @@ static void testGetIpStatistics(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "IP stats:\n" );
-        trace( "    dwForwarding:      %lu\n", U(stats).dwForwarding );
+        trace( "    dwForwarding:      %lu\n", stats.dwForwarding );
         trace( "    dwDefaultTTL:      %lu\n", stats.dwDefaultTTL );
         trace( "    dwInReceives:      %lu\n", stats.dwInReceives );
         trace( "    dwInHdrErrors:     %lu\n", stats.dwInHdrErrors );
@@ -582,7 +582,7 @@ static void testGetTcpStatistics(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP stats:\n" );
-        trace( "    dwRtoAlgorithm: %lu\n", U(stats).dwRtoAlgorithm );
+        trace( "    dwRtoAlgorithm: %lu\n", stats.dwRtoAlgorithm );
         trace( "    dwRtoMin:       %lu\n", stats.dwRtoMin );
         trace( "    dwRtoMax:       %lu\n", stats.dwRtoMax );
         trace( "    dwMaxConn:      %lu\n", stats.dwMaxConn );
@@ -687,7 +687,7 @@ static void testGetIpStatisticsEx(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "IP IPv4 Ex stats:\n" );
-        trace( "    dwForwarding:      %lu\n", U(stats).dwForwarding );
+        trace( "    dwForwarding:      %lu\n", stats.dwForwarding );
         trace( "    dwDefaultTTL:      %lu\n", stats.dwDefaultTTL );
         trace( "    dwInReceives:      %lu\n", stats.dwInReceives );
         trace( "    dwInHdrErrors:     %lu\n", stats.dwInHdrErrors );
@@ -718,7 +718,7 @@ static void testGetIpStatisticsEx(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "IP IPv6 Ex stats:\n" );
-        trace( "    dwForwarding:      %lu\n", U(stats).dwForwarding );
+        trace( "    dwForwarding:      %lu\n", stats.dwForwarding );
         trace( "    dwDefaultTTL:      %lu\n", stats.dwDefaultTTL );
         trace( "    dwInReceives:      %lu\n", stats.dwInReceives );
         trace( "    dwInHdrErrors:     %lu\n", stats.dwInHdrErrors );
@@ -762,7 +762,7 @@ static void testGetTcpStatisticsEx(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP IPv4 Ex stats:\n" );
-        trace( "    dwRtoAlgorithm: %lu\n", U(stats).dwRtoAlgorithm );
+        trace( "    dwRtoAlgorithm: %lu\n", stats.dwRtoAlgorithm );
         trace( "    dwRtoMin:       %lu\n", stats.dwRtoMin );
         trace( "    dwRtoMax:       %lu\n", stats.dwRtoMax );
         trace( "    dwMaxConn:      %lu\n", stats.dwMaxConn );
@@ -785,7 +785,7 @@ static void testGetTcpStatisticsEx(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP IPv6 Ex stats:\n" );
-        trace( "    dwRtoAlgorithm: %lu\n", U(stats).dwRtoAlgorithm );
+        trace( "    dwRtoAlgorithm: %lu\n", stats.dwRtoAlgorithm );
         trace( "    dwRtoMin:       %lu\n", stats.dwRtoMin );
         trace( "    dwRtoMax:       %lu\n", stats.dwRtoMax );
         trace( "    dwMaxConn:      %lu\n", stats.dwMaxConn );
@@ -856,7 +856,7 @@ static void testGetTcpTable(void)
        "GetTcpTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_TCPTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+        PMIB_TCPTABLE buf = malloc(dwSize);
 
         apiReturn = GetTcpTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
@@ -872,10 +872,10 @@ static void testGetTcpTable(void)
                 trace( "%lu: local %s:%u remote %s:%u state %lu\n", i,
                        ntoa(buf->table[i].dwLocalAddr), ntohs(buf->table[i].dwLocalPort),
                        ntoa(buf->table[i].dwRemoteAddr), ntohs(buf->table[i].dwRemotePort),
-                       U(buf->table[i]).dwState );
+                       buf->table[i].dwState );
             }
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -893,7 +893,7 @@ static void testGetUdpTable(void)
        "GetUdpTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_UDPTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+        PMIB_UDPTABLE buf = malloc(dwSize);
 
         apiReturn = GetUdpTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
@@ -908,7 +908,7 @@ static void testGetUdpTable(void)
                 trace( "%lu: %s:%u\n",
                        i, ntoa( buf->table[i].dwLocalAddr ), ntohs(buf->table[i].dwLocalPort) );
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -932,7 +932,7 @@ static void testSetTcpEntry(void)
     }
     todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %lu, expected %u\n", ret, ERROR_INVALID_PARAMETER);
 
-    U(row).dwState = MIB_TCP_STATE_DELETE_TCB;
+    row.dwState = MIB_TCP_STATE_DELETE_TCB;
     ret = SetTcpEntry(&row);
     todo_wine ok( ret == ERROR_MR_MID_NOT_FOUND || broken(ret == ERROR_INVALID_PARAMETER),
        "got %lu, expected %u\n", ret, ERROR_MR_MID_NOT_FOUND);
@@ -1425,7 +1425,7 @@ static void testGetInterfaceInfo(void)
        "GetInterfaceInfo returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PIP_INTERFACE_INFO buf = HeapAlloc(GetProcessHeap(), 0, len);
+        PIP_INTERFACE_INFO buf = malloc(len);
 
         apiReturn = GetInterfaceInfo(buf, &len);
         ok(apiReturn == NO_ERROR,
@@ -1440,7 +1440,7 @@ static void testGetInterfaceInfo(void)
                 debugstr_w( buf->Adapter[i].Name ), debugstr_w( row.wszName ) );
             ok( row.dwType != IF_TYPE_SOFTWARE_LOOPBACK, "got loopback\n" );
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -1510,13 +1510,13 @@ static void testGetNetworkParams(void)
        "GetNetworkParams returned %ld, expected ERROR_BUFFER_OVERFLOW\n",
        apiReturn);
     if (apiReturn == ERROR_BUFFER_OVERFLOW) {
-        PFIXED_INFO buf = HeapAlloc(GetProcessHeap(), 0, len);
+        PFIXED_INFO buf = malloc(len);
 
         apiReturn = GetNetworkParams(buf, &len);
         ok(apiReturn == NO_ERROR,
            "GetNetworkParams(buf, &dwSize) returned %ld, expected NO_ERROR\n",
            apiReturn);
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -1652,10 +1652,10 @@ static void testGetPerAdapterInfo(void)
     if (ret == ERROR_NO_DATA) return;  /* no such adapter */
     ok( ret == ERROR_BUFFER_OVERFLOW, "got %lu instead of ERROR_BUFFER_OVERFLOW\n", ret );
     ok( needed != 0xdeadbeef, "needed not set\n" );
-    buffer = HeapAlloc( GetProcessHeap(), 0, needed );
+    buffer = malloc( needed );
     ret = GetPerAdapterInfo(1, buffer, &needed);
     ok( ret == NO_ERROR, "got %lu instead of NO_ERROR\n", ret );
-    HeapFree( GetProcessHeap(), 0, buffer );
+    free( buffer );
 }
 
 static void testNotifyAddrChange(void)
@@ -1670,9 +1670,11 @@ static void testNotifyAddrChange(void)
     ret = NotifyAddrChange(&handle, &overlapped);
     ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %ld, expected ERROR_IO_PENDING\n", ret);
     ret = GetLastError();
-    todo_wine ok(ret == ERROR_IO_PENDING, "GetLastError returned %ld, expected ERROR_IO_PENDING\n", ret);
+    ok(ret == ERROR_IO_PENDING, "GetLastError returned %ld, expected ERROR_IO_PENDING\n", ret);
     success = CancelIPChangeNotify(&overlapped);
-    todo_wine ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
+    ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
+    success = GetOverlappedResult( handle, &overlapped, &bytes, TRUE );
+    ok( !success && GetLastError() == ERROR_OPERATION_ABORTED, "got bret %d, err %lu.\n", success, GetLastError() );
 
     ZeroMemory(&overlapped, sizeof(overlapped));
     success = CancelIPChangeNotify(&overlapped);
@@ -1683,13 +1685,15 @@ static void testNotifyAddrChange(void)
     overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     ret = NotifyAddrChange(&handle, &overlapped);
     ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %ld, expected ERROR_IO_PENDING\n", ret);
-    todo_wine ok(handle != INVALID_HANDLE_VALUE, "NotifyAddrChange returned invalid file handle\n");
+    ok(handle != INVALID_HANDLE_VALUE, "NotifyAddrChange returned invalid file handle\n");
     success = GetOverlappedResult(handle, &overlapped, &bytes, FALSE);
     ok(success == FALSE, "GetOverlappedResult returned TRUE, expected FALSE\n");
     ret = GetLastError();
     ok(ret == ERROR_IO_INCOMPLETE, "GetLastError returned %ld, expected ERROR_IO_INCOMPLETE\n", ret);
     success = CancelIPChangeNotify(&overlapped);
-    todo_wine ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
+    ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
+    success = GetOverlappedResult( handle, &overlapped, &bytes, TRUE );
+    ok( !success && GetLastError() == ERROR_OPERATION_ABORTED, "got bret %d, err %lu.\n", success, GetLastError() );
 
     if (winetest_interactive)
     {
@@ -1710,7 +1714,7 @@ static void testNotifyAddrChange(void)
         trace("Testing synchronous ipv4 address change notification. Please "
               "change the ipv4 address of one of your network interfaces\n");
         ret = NotifyAddrChange(NULL, NULL);
-        todo_wine ok(ret == NO_ERROR, "NotifyAddrChange returned %ld, expected NO_ERROR\n", ret);
+        ok(ret == NO_ERROR, "NotifyAddrChange returned %ld, expected NO_ERROR\n", ret);
     }
 }
 
@@ -1755,16 +1759,23 @@ static void test_GetAdaptersAddresses(void)
     ok(ret == ERROR_BUFFER_OVERFLOW, "expected ERROR_BUFFER_OVERFLOW, got %lu\n", ret);
     ok(osize == size, "expected %ld, got %ld\n", size, osize);
 
-    ptr = HeapAlloc(GetProcessHeap(), 0, size);
+    ptr = malloc(size);
     ret = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, ptr, &size);
     ok(!ret, "expected ERROR_SUCCESS got %lu\n", ret);
-    HeapFree(GetProcessHeap(), 0, ptr);
+    free(ptr);
 
     /* higher size must not be changed to lower size */
     size *= 2;
     osize = size;
-    ptr = HeapAlloc(GetProcessHeap(), 0, osize);
+    ptr = malloc(osize);
     ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_FRIENDLY_NAME, NULL, ptr, &osize);
+    while (ret == ERROR_BUFFER_OVERFLOW)
+    {
+        size = osize * 2;
+        osize = size;
+        ptr = realloc(ptr, osize);
+        ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_FRIENDLY_NAME, NULL, ptr, &osize);
+    }
     ok(!ret, "expected ERROR_SUCCESS got %lu\n", ret);
     ok(osize == size, "expected %ld, got %ld\n", size, osize);
 
@@ -1775,9 +1786,9 @@ static void test_GetAdaptersAddresses(void)
         DWORD status;
         GUID guid;
 
-        ok(S(U(*aa)).Length == sizeof(IP_ADAPTER_ADDRESSES_LH) ||
-           S(U(*aa)).Length == sizeof(IP_ADAPTER_ADDRESSES_XP),
-           "Unknown structure size of %lu bytes\n", S(U(*aa)).Length);
+        ok(aa->Length == sizeof(IP_ADAPTER_ADDRESSES_LH) ||
+           aa->Length == sizeof(IP_ADAPTER_ADDRESSES_XP),
+           "Unknown structure size of %lu bytes\n", aa->Length);
         ok(aa->DnsSuffix != NULL, "DnsSuffix is not a valid pointer\n");
         ok(aa->Description != NULL, "Description is not a valid pointer\n");
         ok(aa->FriendlyName != NULL, "FriendlyName is not a valid pointer\n");
@@ -1786,15 +1797,15 @@ static void test_GetAdaptersAddresses(void)
             sprintf(temp + i * 3, "%02X-", aa->PhysicalAddress[i]);
         temp[i ? i * 3 - 1 : 0] = '\0';
         trace("idx %lu name %s %s dns %s descr %s phys %s mtu %lu flags %08lx type %lu\n",
-              S(U(*aa)).IfIndex, aa->AdapterName,
+              aa->IfIndex, aa->AdapterName,
               wine_dbgstr_w(aa->FriendlyName), wine_dbgstr_w(aa->DnsSuffix),
               wine_dbgstr_w(aa->Description), temp, aa->Mtu, aa->Flags, aa->IfType );
         ua = aa->FirstUnicastAddress;
         while (ua)
         {
-            ok(S(U(*ua)).Length == sizeof(IP_ADAPTER_UNICAST_ADDRESS_LH) ||
-               S(U(*ua)).Length == sizeof(IP_ADAPTER_UNICAST_ADDRESS_XP),
-               "Unknown structure size of %lu bytes\n", S(U(*ua)).Length);
+            ok(ua->Length == sizeof(IP_ADAPTER_UNICAST_ADDRESS_LH) ||
+               ua->Length == sizeof(IP_ADAPTER_UNICAST_ADDRESS_XP),
+               "Unknown structure size of %lu bytes\n", ua->Length);
             ok(ua->PrefixOrigin != IpPrefixOriginOther,
                "bad address config value %d\n", ua->PrefixOrigin);
             ok(ua->SuffixOrigin != IpSuffixOriginOther,
@@ -1811,9 +1822,9 @@ static void test_GetAdaptersAddresses(void)
             ok(ua->DadState != IpDadStateInvalid && ua->DadState != IpDadStateDuplicate,
                "bad address duplication value %d\n", ua->DadState);
             trace("  flags %08lx origin %u/%u state %u lifetime %lu/%lu/%lu prefix %u\n",
-                  S(U(*ua)).Flags, ua->PrefixOrigin, ua->SuffixOrigin, ua->DadState,
+                  ua->Flags, ua->PrefixOrigin, ua->SuffixOrigin, ua->DadState,
                   ua->ValidLifetime, ua->PreferredLifetime, ua->LeaseLifetime,
-                  S(U(*ua)).Length < sizeof(IP_ADAPTER_UNICAST_ADDRESS_LH) ? 0 : ua->OnLinkPrefixLength);
+                  ua->Length < sizeof(IP_ADAPTER_UNICAST_ADDRESS_LH) ? 0 : ua->OnLinkPrefixLength);
 
             if (ua->Flags & IP_ADAPTER_ADDRESS_DNS_ELIGIBLE)
                 dns_eligible_found = TRUE;
@@ -1832,11 +1843,11 @@ static void test_GetAdaptersAddresses(void)
         while (prefix)
         {
             trace( "  prefix %u/%lu flags %08lx\n", prefix->Address.iSockaddrLength,
-                   prefix->PrefixLength, S(U(*prefix)).Flags );
+                   prefix->PrefixLength, prefix->Flags );
             prefix = prefix->Next;
         }
 
-        if (S(U(*aa)).Length < sizeof(IP_ADAPTER_ADDRESSES_LH)) continue;
+        if (aa->Length < sizeof(IP_ADAPTER_ADDRESSES_LH)) continue;
         trace("speed %s/%s metrics %lu/%lu guid %s type %u/%u\n",
               wine_dbgstr_longlong(aa->TransmitLinkSpeed),
               wine_dbgstr_longlong(aa->ReceiveLinkSpeed),
@@ -1852,12 +1863,30 @@ static void test_GetAdaptersAddresses(void)
         ok(!strcasecmp(aa->AdapterName, buf), "expected '%s' got '%s'\n", aa->AdapterName, buf);
     }
     ok(dns_eligible_found, "Did not find any dns eligible addresses.\n");
-    HeapFree(GetProcessHeap(), 0, ptr);
+    free(ptr);
+}
+
+static DWORD get_extended_tcp_table( ULONG family, TCP_TABLE_CLASS class, void **table )
+{
+    DWORD ret, size = 0;
+
+    *table = NULL;
+    ret = pGetExtendedTcpTable( NULL, &size, TRUE, family, class, 0 );
+    if (ret != ERROR_INSUFFICIENT_BUFFER) return ret;
+
+    *table = malloc( size );
+    ret = pGetExtendedTcpTable( *table, &size, TRUE, family, class, 0 );
+    while (ret == ERROR_INSUFFICIENT_BUFFER)
+    {
+        *table = realloc( *table, size );
+        ret = pGetExtendedTcpTable( *table, &size, TRUE, family, class, 0 );
+    }
+    return ret;
 }
 
 static void test_GetExtendedTcpTable(void)
 {
-    DWORD ret, size;
+    DWORD ret;
     MIB_TCPTABLE *table;
     MIB_TCPTABLE_OWNER_PID *table_pid;
     MIB_TCPTABLE_OWNER_MODULE *table_module;
@@ -1870,59 +1899,29 @@ static void test_GetExtendedTcpTable(void)
     ret = pGetExtendedTcpTable( NULL, NULL, TRUE, AF_INET, TCP_TABLE_BASIC_ALL, 0 );
     ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
-    size = 0;
-    ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_BASIC_ALL, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedTcpTable( table, &size, TRUE, AF_INET, TCP_TABLE_BASIC_ALL, 0 );
+    ret = get_extended_tcp_table( AF_INET, TCP_TABLE_BASIC_ALL, (void **)&table );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table );
+    free( table );
 
-    size = 0;
-    ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_BASIC_LISTENER, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedTcpTable( table, &size, TRUE, AF_INET, TCP_TABLE_BASIC_LISTENER, 0 );
+    ret = get_extended_tcp_table( AF_INET, TCP_TABLE_BASIC_LISTENER, (void **)&table );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table );
+    free( table );
 
-    size = 0;
-    ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table_pid = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedTcpTable( table_pid, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0 );
+    ret = get_extended_tcp_table( AF_INET, TCP_TABLE_OWNER_PID_ALL, (void **)&table_pid );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table_pid );
+    free( table_pid );
 
-    size = 0;
-    ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table_pid = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedTcpTable( table_pid, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0 );
+    ret = get_extended_tcp_table( AF_INET, TCP_TABLE_OWNER_PID_LISTENER, (void **)&table_pid );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table_pid );
+    free( table_pid );
 
-    size = 0;
-    ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table_module = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedTcpTable( table_module, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0 );
+    ret = get_extended_tcp_table( AF_INET, TCP_TABLE_OWNER_MODULE_ALL, (void **)&table_module );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table_module );
+    free( table_module );
 
-    size = 0;
-    ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_LISTENER, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table_module = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedTcpTable( table_module, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_LISTENER, 0 );
+    ret = get_extended_tcp_table( AF_INET, TCP_TABLE_OWNER_MODULE_LISTENER, (void **)&table_module );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table_module );
+    free( table_module );
 }
 
 static void test_AllocateAndGetTcpExTableFromStack(void)
@@ -1932,7 +1931,7 @@ static void test_AllocateAndGetTcpExTableFromStack(void)
 
     if (!pAllocateAndGetTcpExTableFromStack)
     {
-        skip("AllocateAndGetTcpExTableFromStack not available\n");
+        win_skip("AllocateAndGetTcpExTableFromStack not available\n");
         return;
     }
 
@@ -1965,7 +1964,7 @@ static void test_AllocateAndGetTcpExTableFromStack(void)
           trace( "%lu: local %s:%u remote %s:%u state %lu pid %lu\n", i,
                  ntoa(table_ex->table[i].dwLocalAddr), ntohs(table_ex->table[i].dwLocalPort),
                  remote_ip, ntohs(table_ex->table[i].dwRemotePort),
-                 U(table_ex->table[i]).dwState, table_ex->table[i].dwOwningPid );
+                 table_ex->table[i].dwState, table_ex->table[i].dwOwningPid );
         }
     }
     HeapFree(GetProcessHeap(), 0, table_ex);
@@ -1974,9 +1973,27 @@ static void test_AllocateAndGetTcpExTableFromStack(void)
     ok( ret == ERROR_NOT_SUPPORTED, "got %lu\n", ret );
 }
 
+static DWORD get_extended_udp_table( ULONG family, UDP_TABLE_CLASS class, void **table )
+{
+    DWORD ret, size = 0;
+
+    *table = NULL;
+    ret = pGetExtendedUdpTable( NULL, &size, TRUE, family, class, 0 );
+    if (ret != ERROR_INSUFFICIENT_BUFFER) return ret;
+
+    *table = malloc( size );
+    ret = pGetExtendedUdpTable( *table, &size, TRUE, family, class, 0 );
+    while (ret == ERROR_INSUFFICIENT_BUFFER)
+    {
+        *table = realloc( *table, size );
+        ret = pGetExtendedUdpTable( *table, &size, TRUE, family, class, 0 );
+    }
+    return ret;
+}
+
 static void test_GetExtendedUdpTable(void)
 {
-    DWORD ret, size;
+    DWORD ret;
     MIB_UDPTABLE *table;
     MIB_UDPTABLE_OWNER_PID *table_pid;
     MIB_UDPTABLE_OWNER_MODULE *table_module;
@@ -1989,32 +2006,17 @@ static void test_GetExtendedUdpTable(void)
     ret = pGetExtendedUdpTable( NULL, NULL, TRUE, AF_INET, UDP_TABLE_BASIC, 0 );
     ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
-    size = 0;
-    ret = pGetExtendedUdpTable( NULL, &size, TRUE, AF_INET, UDP_TABLE_BASIC, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedUdpTable( table, &size, TRUE, AF_INET, UDP_TABLE_BASIC, 0 );
+    ret = get_extended_udp_table( AF_INET, UDP_TABLE_BASIC, (void **)&table );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table );
+    free( table );
 
-    size = 0;
-    ret = pGetExtendedUdpTable( NULL, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table_pid = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedUdpTable( table_pid, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0 );
+    ret = get_extended_udp_table( AF_INET, UDP_TABLE_OWNER_PID, (void **)&table_pid );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table_pid );
+    free( table_pid );
 
-    size = 0;
-    ret = pGetExtendedUdpTable( NULL, &size, TRUE, AF_INET, UDP_TABLE_OWNER_MODULE, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
-
-    table_module = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = pGetExtendedUdpTable( table_module, &size, TRUE, AF_INET, UDP_TABLE_OWNER_MODULE, 0 );
+    ret = get_extended_udp_table( AF_INET, UDP_TABLE_OWNER_MODULE, (void **)&table_module );
     ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
-    HeapFree( GetProcessHeap(), 0, table_module );
+    free( table_module );
 }
 
 static void test_CreateSortedAddressPairs(void)
@@ -2076,16 +2078,32 @@ static void test_CreateSortedAddressPairs(void)
     FreeMibTable( pair );
 }
 
+static IP_ADAPTER_ADDRESSES *get_adapters( ULONG flags )
+{
+    ULONG err, size = 4096;
+    IP_ADAPTER_ADDRESSES *tmp, *ret;
+
+    if (!(ret = malloc( size ))) return NULL;
+    err = GetAdaptersAddresses( AF_UNSPEC, flags, NULL, ret, &size );
+    while (err == ERROR_BUFFER_OVERFLOW)
+    {
+        if (!(tmp = realloc( ret, size ))) break;
+        ret = tmp;
+        err = GetAdaptersAddresses( AF_UNSPEC, flags, NULL, ret, &size );
+    }
+    if (err == ERROR_SUCCESS) return ret;
+    free( ret );
+    return NULL;
+}
+
 static DWORD get_interface_index(void)
 {
-    DWORD size = 0, ret = 0;
+    DWORD ret = 0;
     IP_ADAPTER_ADDRESSES *buf, *aa;
 
-    if (GetAdaptersAddresses( AF_UNSPEC, 0, NULL, NULL, &size ) != ERROR_BUFFER_OVERFLOW)
-        return 0;
+    buf = get_adapters( 0 );
+    if (!buf) return 0;
 
-    buf = HeapAlloc( GetProcessHeap(), 0, size );
-    GetAdaptersAddresses( AF_UNSPEC, 0, NULL, buf, &size );
     for (aa = buf; aa; aa = aa->Next)
     {
         if (aa->IfType == IF_TYPE_ETHERNET_CSMACD)
@@ -2094,7 +2112,7 @@ static DWORD get_interface_index(void)
             break;
         }
     }
-    HeapFree( GetProcessHeap(), 0, buf );
+    free( buf );
     return ret;
 }
 
@@ -2451,7 +2469,7 @@ static void test_GetUnicastIpAddressEntry(void)
 {
     IP_ADAPTER_ADDRESSES *aa, *ptr;
     MIB_UNICASTIPADDRESS_ROW row;
-    DWORD ret, size;
+    DWORD ret;
 
     if (!pGetUnicastIpAddressEntry)
     {
@@ -2494,13 +2512,8 @@ static void test_GetUnicastIpAddressEntry(void)
     ret = pGetUnicastIpAddressEntry( &row );
     ok( ret == ERROR_FILE_NOT_FOUND, "got %lu\n", ret );
 
-    ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_INTERFACES, NULL, NULL, &size);
-    ok(ret == ERROR_BUFFER_OVERFLOW, "expected ERROR_BUFFER_OVERFLOW, got %lu\n", ret);
-    if (ret != ERROR_BUFFER_OVERFLOW) return;
-
-    ptr = HeapAlloc(GetProcessHeap(), 0, size);
-    ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_INTERFACES, NULL, ptr, &size);
-    ok(!ret, "expected ERROR_SUCCESS got %lu\n", ret);
+    ptr = get_adapters( GAA_FLAG_INCLUDE_ALL_INTERFACES );
+    ok(ptr != NULL, "can't get adapters\n");
 
     for (aa = ptr; !ret && aa; aa = aa->Next)
     {
@@ -2518,7 +2531,7 @@ static void test_GetUnicastIpAddressEntry(void)
 
             /* test with index */
             memset( &row, 0, sizeof(row) );
-            row.InterfaceIndex = S(U(*aa)).IfIndex;
+            row.InterfaceIndex = aa->IfIndex;
             memcpy(&row.Address, ua->Address.lpSockaddr, ua->Address.iSockaddrLength);
             ret = pGetUnicastIpAddressEntry( &row );
             ok( ret == NO_ERROR, "got %lu\n", ret );
@@ -2530,8 +2543,8 @@ static void test_GetUnicastIpAddressEntry(void)
                     aa->Luid.Info.NetLuidIndex, row.InterfaceLuid.Info.NetLuidIndex);
                 ok(row.InterfaceLuid.Info.IfType == aa->Luid.Info.IfType, "Expected %d, got %d\n",
                     aa->Luid.Info.IfType, row.InterfaceLuid.Info.IfType);
-                ok(row.InterfaceIndex == S(U(*aa)).IfIndex, "Expected %ld, got %ld\n",
-                    S(U(*aa)).IfIndex, row.InterfaceIndex);
+                ok(row.InterfaceIndex == aa->IfIndex, "Expected %ld, got %ld\n",
+                    aa->IfIndex, row.InterfaceIndex);
                 ok(row.PrefixOrigin == ua->PrefixOrigin, "Expected %d, got %d\n",
                     ua->PrefixOrigin, row.PrefixOrigin);
                 ok(row.SuffixOrigin == ua->SuffixOrigin, "Expected %d, got %d\n",
@@ -2552,7 +2565,7 @@ static void test_GetUnicastIpAddressEntry(void)
             ua = ua->Next;
         }
     }
-    HeapFree(GetProcessHeap(), 0, ptr);
+    free(ptr);
 }
 
 static void test_GetUnicastIpAddressTable(void)
@@ -2663,7 +2676,7 @@ static void test_GetTcp6Table(void)
        "GetTcp6Table(NULL, &size, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n", ret);
     if (ret != ERROR_INSUFFICIENT_BUFFER) return;
 
-    buf = HeapAlloc(GetProcessHeap(), 0, size);
+    buf = malloc(size);
 
     ret = pGetTcp6Table(buf, &size, FALSE);
     ok(ret == NO_ERROR,
@@ -2683,7 +2696,7 @@ static void test_GetTcp6Table(void)
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
 }
 
 static void test_GetUdp6Table(void)
@@ -2705,7 +2718,7 @@ static void test_GetUdp6Table(void)
        "GetUdp6Table(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_UDP6TABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+        PMIB_UDP6TABLE buf = malloc(dwSize);
 
         apiReturn = pGetUdp6Table(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
@@ -2720,7 +2733,7 @@ static void test_GetUdp6Table(void)
                 trace( "%lu: %s%%%u:%u\n",
                        i, ntoa6(&buf->table[i].dwLocalAddr), ntohs(buf->table[i].dwLocalScopeId), ntohs(buf->table[i].dwLocalPort) );
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
     }
 }
 
@@ -2893,6 +2906,14 @@ static void test_ConvertGuidToString( void )
     ok( err == ERROR_INVALID_PARAMETER, "got %ld\n", err );
 }
 
+static void test_compartments(void)
+{
+    NET_IF_COMPARTMENT_ID id;
+
+    id = GetCurrentThreadCompartmentId();
+    ok(id == NET_IF_COMPARTMENT_ID_PRIMARY, "got %u\n", id);
+}
+
 START_TEST(iphlpapi)
 {
 
@@ -2927,6 +2948,7 @@ START_TEST(iphlpapi)
     test_ParseNetworkString();
     test_NotifyUnicastIpAddressChange();
     test_ConvertGuidToString();
+    test_compartments();
     freeIPHlpApi();
   }
 }

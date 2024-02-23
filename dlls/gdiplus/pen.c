@@ -94,8 +94,8 @@ GpStatus WINGDIPAPI GdipClonePen(GpPen *pen, GpPen **clonepen)
     if(!pen || !clonepen)
         return InvalidParameter;
 
-    *clonepen = heap_alloc_zero(sizeof(GpPen));
-    if(!*clonepen)  return OutOfMemory;
+    *clonepen = malloc(sizeof(GpPen));
+    if(!*clonepen) return OutOfMemory;
 
     **clonepen = *pen;
 
@@ -115,7 +115,7 @@ GpStatus WINGDIPAPI GdipClonePen(GpPen *pen, GpPen **clonepen)
 
     if (stat == Ok && pen->dashes)
     {
-        (*clonepen)->dashes = heap_alloc_zero(pen->numdashes * sizeof(REAL));
+        (*clonepen)->dashes = malloc(pen->numdashes * sizeof(REAL));
         if ((*clonepen)->dashes)
             memcpy((*clonepen)->dashes, pen->dashes, pen->numdashes * sizeof(REAL));
         else
@@ -124,7 +124,7 @@ GpStatus WINGDIPAPI GdipClonePen(GpPen *pen, GpPen **clonepen)
 
     if (stat == Ok && pen->compound_array)
     {
-        (*clonepen)->compound_array = heap_alloc_zero(pen->compound_array_size * sizeof(REAL));
+        (*clonepen)->compound_array = malloc(pen->compound_array_size * sizeof(REAL));
         if ((*clonepen)->compound_array)
             memcpy((*clonepen)->compound_array, pen->compound_array, pen->compound_array_size * sizeof(REAL));
         else
@@ -168,8 +168,8 @@ GpStatus WINGDIPAPI GdipCreatePen2(GpBrush *brush, REAL width, GpUnit unit,
     if(!pen || !brush)
         return InvalidParameter;
 
-    gp_pen = heap_alloc_zero(sizeof(GpPen));
-    if(!gp_pen)    return OutOfMemory;
+    gp_pen = calloc(1, sizeof(GpPen));
+    if(!gp_pen) return OutOfMemory;
 
     gp_pen->style = GP_DEFAULT_PENSTYLE;
     gp_pen->width = width;
@@ -187,7 +187,7 @@ GpStatus WINGDIPAPI GdipCreatePen2(GpBrush *brush, REAL width, GpUnit unit,
 
     if(!((gp_pen->unit == UnitWorld) || (gp_pen->unit == UnitPixel))) {
         FIXME("UnitWorld, UnitPixel only supported units\n");
-        heap_free(gp_pen);
+        free(gp_pen);
         return NotImplemented;
     }
 
@@ -210,9 +210,9 @@ GpStatus WINGDIPAPI GdipDeletePen(GpPen *pen)
     GdipDeleteBrush(pen->brush);
     GdipDeleteCustomLineCap(pen->customstart);
     GdipDeleteCustomLineCap(pen->customend);
-    heap_free(pen->compound_array);
-    heap_free(pen->dashes);
-    heap_free(pen);
+    free(pen->compound_array);
+    free(pen->dashes);
+    free(pen);
 
     return Ok;
 }
@@ -445,8 +445,9 @@ GpStatus WINGDIPAPI GdipResetPenTransform(GpPen *pen)
 GpStatus WINGDIPAPI GdipSetPenTransform(GpPen *pen, GpMatrix *matrix)
 {
     static int calls;
+    BOOL result;
 
-    TRACE("(%p,%p)\n", pen, matrix);
+    TRACE("(%p, %s)\n", pen, debugstr_matrix(matrix));
 
     if(!pen || !matrix)
         return InvalidParameter;
@@ -454,6 +455,9 @@ GpStatus WINGDIPAPI GdipSetPenTransform(GpPen *pen, GpMatrix *matrix)
     if(!(calls++))
         FIXME("(%p,%p) Semi-stub\n", pen, matrix);
 
+    GdipIsMatrixInvertible(matrix, &result);
+    if (!result)
+        return InvalidParameter;
     pen->transform = *matrix;
 
     return Ok;
@@ -461,7 +465,7 @@ GpStatus WINGDIPAPI GdipSetPenTransform(GpPen *pen, GpMatrix *matrix)
 
 GpStatus WINGDIPAPI GdipGetPenTransform(GpPen *pen, GpMatrix *matrix)
 {
-    TRACE("(%p,%p)\n", pen, matrix);
+    TRACE("(%p,%s)\n", pen, debugstr_matrix(matrix));
 
     if(!pen || !matrix)
         return InvalidParameter;
@@ -504,7 +508,7 @@ GpStatus WINGDIPAPI GdipRotatePenTransform(GpPen *pen, REAL angle, GpMatrixOrder
 GpStatus WINGDIPAPI GdipMultiplyPenTransform(GpPen *pen, GDIPCONST GpMatrix *matrix,
     GpMatrixOrder order)
 {
-    TRACE("(%p,%p,%u)\n", pen, matrix, order);
+    TRACE("(%p,%s,%u)\n", pen, debugstr_matrix(matrix), order);
 
     if(!pen)
         return InvalidParameter;
@@ -573,10 +577,10 @@ GpStatus WINGDIPAPI GdipSetPenCompoundArray(GpPen *pen, GDIPCONST REAL *compound
             return InvalidParameter;
     }
 
-    tmp = heap_alloc_zero(count * sizeof(REAL));
+    tmp = malloc(count * sizeof(REAL));
     if(!tmp)
         return OutOfMemory;
-    heap_free(pen->compound_array);
+    free(pen->compound_array);
     pen->compound_array = tmp;
     memcpy(pen->compound_array, compoundarray, count * sizeof(REAL));
     pen->compound_array_size = count;
@@ -625,7 +629,6 @@ GpStatus WINGDIPAPI GdipSetPenDashArray(GpPen *pen, GDIPCONST REAL *dash,
     INT count)
 {
     INT i;
-    REAL sum = 0;
 
     TRACE("(%p, %p, %d)\n", pen, dash, count);
 
@@ -636,16 +639,15 @@ GpStatus WINGDIPAPI GdipSetPenDashArray(GpPen *pen, GDIPCONST REAL *dash,
         return OutOfMemory;
 
     for(i = 0; i < count; i++){
-        sum += dash[i];
         if(dash[i] <= 0.0)
             return InvalidParameter;
     }
 
-    heap_free(pen->dashes);
+    free(pen->dashes);
     pen->dashes = NULL;
 
     if(count > 0)
-        pen->dashes = heap_alloc_zero(count * sizeof(REAL));
+        pen->dashes = malloc(count * sizeof(REAL));
     if(!pen->dashes){
         pen->numdashes = 0;
         return OutOfMemory;
@@ -691,7 +693,7 @@ GpStatus WINGDIPAPI GdipSetPenDashStyle(GpPen *pen, GpDashStyle dash)
         return InvalidParameter;
 
     if(dash != DashStyleCustom){
-        heap_free(pen->dashes);
+        free(pen->dashes);
         pen->dashes = NULL;
         pen->numdashes = 0;
     }

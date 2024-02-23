@@ -19,7 +19,6 @@
  */
 
 #define COBJMACROS
-#define NONAMELESSUNION
 
 #include <stdint.h>
 #include "dwrite_private.h"
@@ -3141,7 +3140,7 @@ static unsigned int opentype_get_sbix_formats(IDWriteFontFace5 *fontface)
                         ret |= DWRITE_GLYPH_IMAGE_FORMATS_TIFF;
                         break;
                     default:
-                        FIXME("unexpected bitmap format %s\n", debugstr_tag(GET_BE_DWORD(glyph_data->graphic_type)));
+                        FIXME("unexpected bitmap format %s\n", debugstr_fourcc(GET_BE_DWORD(glyph_data->graphic_type)));
                 }
             }
         }
@@ -5937,7 +5936,7 @@ static BOOL opentype_layout_apply_gsub_lookup(struct scriptshaping_context *cont
 
 static unsigned int unicode_get_mirrored_char(unsigned int codepoint)
 {
-    extern const WCHAR wine_mirror_map[] DECLSPEC_HIDDEN;
+    extern const WCHAR wine_mirror_map[];
     WCHAR mirror;
     /* TODO: check if mirroring for higher planes makes sense at all */
     if (codepoint > 0xffff) return codepoint;

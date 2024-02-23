@@ -186,6 +186,13 @@ HRESULT node_get_nodeName(xmlnode *This, BSTR *name)
     hr = node_get_base_name(This, &base);
     if (hr != S_OK) return hr;
 
+    if (!base[0] && xmldoc_version(This->node->doc) != MSXML6)
+    {
+        SysFreeString(base);
+        *name = SysAllocString(L"xmlns");
+        return S_OK;
+    }
+
     hr = node_get_prefix(This, &prefix);
     if (hr == S_OK)
     {
@@ -194,10 +201,17 @@ HRESULT node_get_nodeName(xmlnode *This, BSTR *name)
 
         /* +1 for ':' */
         ptr = *name = SysAllocStringLen(NULL, SysStringLen(base) + SysStringLen(prefix) + 1);
-        memcpy(ptr, prefix, SysStringByteLen(prefix));
-        ptr += SysStringLen(prefix);
-        memcpy(ptr++, &colW, sizeof(WCHAR));
-        memcpy(ptr, base, SysStringByteLen(base));
+        if (SysStringByteLen(prefix))
+        {
+            memcpy(ptr, prefix, SysStringByteLen(prefix));
+            ptr += SysStringLen(prefix);
+        }
+        if (SysStringByteLen(base))
+        {
+            if (SysStringByteLen(prefix))
+                memcpy(ptr++, &colW, sizeof(WCHAR));
+            memcpy(ptr, base, SysStringByteLen(base));
+        }
 
         SysFreeString(base);
         SysFreeString(prefix);
@@ -1560,6 +1574,9 @@ HRESULT node_select_singlenode(const xmlnode *This, BSTR query, IXMLDOMNode **no
     IXMLDOMNodeList *list;
     HRESULT hr;
 
+    if (node)
+        *node = NULL;
+
     hr = node_select_nodes(This, query, &list);
     if (hr == S_OK)
     {
@@ -1606,7 +1623,11 @@ HRESULT node_get_base_name(xmlnode *This, BSTR *name)
 {
     if (!name) return E_INVALIDARG;
 
-    *name = bstr_from_xmlChar(This->node->name);
+    if (xmldoc_version(This->node->doc) != MSXML6 &&
+        xmlStrEqual(This->node->name, BAD_CAST "xmlns"))
+        *name = SysAllocString(L"");
+    else
+        *name = bstr_from_xmlChar(This->node->name);
     if (!*name) return E_OUTOFMEMORY;
 
     TRACE("returning %s\n", debugstr_w(*name));

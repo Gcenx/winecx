@@ -21,22 +21,24 @@
 #ifndef __WINE_WINE_UNIXLIB_H
 #define __WINE_WINE_UNIXLIB_H
 
-typedef UINT64 unixlib_handle_t;
+#include "winternl.h"
 
-extern NTSTATUS WINAPI __wine_unix_call( unixlib_handle_t handle, unsigned int code, void *args );
+typedef UINT64 unixlib_handle_t;
 
 #ifdef WINE_UNIX_LIB
 
 typedef NTSTATUS (*unixlib_entry_t)( void *args );
 
+extern DECLSPEC_EXPORT const unixlib_entry_t __wine_unix_call_funcs[];
+extern DECLSPEC_EXPORT const unixlib_entry_t __wine_unix_call_wow64_funcs[];
+
 /* some useful helpers from ntdll */
-extern const char *ntdll_get_build_dir(void);
-extern const char *ntdll_get_data_dir(void);
-extern DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen );
-extern int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOOL strict );
-extern int ntdll_wcsicmp( const WCHAR *str1, const WCHAR *str2 );
-extern int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n );
-extern NTSTATUS ntdll_init_syscalls( ULONG id, SYSTEM_SERVICE_TABLE *table, void **dispatcher );
+NTSYSAPI const char *ntdll_get_build_dir(void);
+NTSYSAPI const char *ntdll_get_data_dir(void);
+NTSYSAPI DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen );
+NTSYSAPI int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOOL strict );
+NTSYSAPI int ntdll_wcsicmp( const WCHAR *str1, const WCHAR *str2 );
+NTSYSAPI int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n );
 
 /* exception handling */
 
@@ -52,10 +54,10 @@ typedef struct { __int64 reg[24]; } __wine_jmp_buf;
 typedef struct { int reg; } __wine_jmp_buf;
 #endif
 
-extern int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) __wine_setjmpex( __wine_jmp_buf *buf,
-                                                   EXCEPTION_REGISTRATION_RECORD *frame );
-extern void DECLSPEC_NORETURN __cdecl __wine_longjmp( __wine_jmp_buf *buf, int retval );
-extern void ntdll_set_exception_jmp_buf( __wine_jmp_buf *jmp );
+NTSYSAPI int __attribute__ ((__nothrow__,__returns_twice__)) __wine_setjmpex( __wine_jmp_buf *buf,
+                                                                              EXCEPTION_REGISTRATION_RECORD *frame );
+NTSYSAPI void DECLSPEC_NORETURN __wine_longjmp( __wine_jmp_buf *buf, int retval );
+NTSYSAPI void ntdll_set_exception_jmp_buf( __wine_jmp_buf *jmp );
 
 #define __TRY \
     do { __wine_jmp_buf __jmp; \
@@ -81,7 +83,9 @@ extern void ntdll_set_exception_jmp_buf( __wine_jmp_buf *jmp );
          } \
     } while (0);
 
-NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len );
+NTSYSAPI BOOLEAN KeAddSystemServiceTable( ULONG_PTR *funcs, ULONG_PTR *counters, ULONG limit,
+                                          BYTE *arguments, ULONG index );
+NTSYSAPI NTSTATUS KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len );
 
 /* wide char string functions */
 
@@ -267,9 +271,10 @@ static inline ULONG ntdll_wcstoul( const WCHAR *s, WCHAR **end, int base )
 
 #else /* WINE_UNIX_LIB */
 
-extern unixlib_handle_t __wine_unixlib_handle DECLSPEC_HIDDEN;
-extern NTSTATUS (WINAPI *__wine_unix_call_dispatcher)( unixlib_handle_t, unsigned int, void * ) DECLSPEC_HIDDEN;
-extern NTSTATUS WINAPI __wine_init_unix_call(void) DECLSPEC_HIDDEN;
+NTSYSAPI NTSTATUS WINAPI __wine_unix_call( unixlib_handle_t handle, unsigned int code, void *args );
+extern unixlib_handle_t __wine_unixlib_handle;
+extern NTSTATUS (WINAPI *__wine_unix_call_dispatcher)( unixlib_handle_t, unsigned int, void * );
+extern NTSTATUS WINAPI __wine_init_unix_call(void);
 
 #define WINE_UNIX_CALL(code,args) __wine_unix_call_dispatcher( __wine_unixlib_handle, (code), (args) )
 

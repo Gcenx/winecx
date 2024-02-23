@@ -84,10 +84,7 @@ static ULONG WINAPI script_track_Release(IDirectMusicTrack8 *iface)
 
     TRACE("(%p) ref=%ld\n", This, ref);
 
-    if (!ref) {
-        HeapFree(GetProcessHeap(), 0, This);
-        DMSCRIPT_UnlockModule();
-    }
+    if (!ref) free(This);
 
     return ref;
 }
@@ -327,10 +324,7 @@ HRESULT DMUSIC_CreateDirectMusicScriptTrack(REFIID riid, void **ret_iface, IUnkn
     if (pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
-    track = HeapAlloc (GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*track));
-    if (!track)
-        return E_OUTOFMEMORY;
-
+    if (!(track = calloc(1, sizeof(*track)))) return E_OUTOFMEMORY;
     track->IDirectMusicTrack8_iface.lpVtbl = &dmtrack8_vtbl;
     track->IPersistStream_iface.lpVtbl = &persist_vtbl;
     track->desc.dwSize = sizeof(track->desc);
@@ -338,7 +332,6 @@ HRESULT DMUSIC_CreateDirectMusicScriptTrack(REFIID riid, void **ret_iface, IUnkn
     track->desc.guidClass = CLSID_DirectMusicScriptTrack;
     track->ref = 1;
 
-    DMSCRIPT_LockModule();
     hr = IDirectMusicTrack8_QueryInterface(&track->IDirectMusicTrack8_iface, riid, ret_iface);
     IDirectMusicTrack8_Release(&track->IDirectMusicTrack8_iface);
 

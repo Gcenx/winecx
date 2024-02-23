@@ -26,7 +26,6 @@
 
 #include <assert.h>
 #include <stdio.h>
-#include <signal.h>
 #include <errno.h>
 #include <string.h>
 #include <stdarg.h>
@@ -159,15 +158,6 @@ static void set_subsystem( const char *subsystem, DLLSPEC *spec )
     free( str );
 }
 
-/* set the syscall table id */
-static void set_syscall_table( const char *id, DLLSPEC *spec )
-{
-    int val = atoi( id );
-
-    if (val < 0 || val > 3) fatal_error( "Invalid syscall table id '%s', must be 0-3\n", id );
-    spec->syscall_table = val;
-}
-
 /* set the target CPU and platform */
 static void set_target( const char *name )
 {
@@ -182,6 +172,7 @@ static void set_target( const char *name )
 static void cleanup(void)
 {
     if (output_file_name) unlink( output_file_name );
+    if (!save_temps) remove_temp_files();
 }
 
 /* clean things up when aborting on a signal */
@@ -229,7 +220,6 @@ static const char usage_str[] =
 "       --safeseh             Mark object files as SEH compatible\n"
 "       --save-temps          Do not delete the generated intermediate files\n"
 "       --subsystem=SUBSYS    Set the subsystem (one of native, windows, console, wince)\n"
-"       --syscall-table=ID    Set the syscall table id (between 0 and 3)\n"
 "   -u, --undefined=SYMBOL    Add an undefined reference to SYMBOL when linking\n"
 "   -v, --verbose             Display the programs invoked\n"
 "       --version             Print the version and exit\n"
@@ -269,7 +259,6 @@ enum long_options_values
     LONG_OPT_SAVE_TEMPS,
     LONG_OPT_STATICLIB,
     LONG_OPT_SUBSYSTEM,
-    LONG_OPT_SYSCALL_TABLE,
     LONG_OPT_VERSION,
     LONG_OPT_WITHOUT_DLLTOOL,
 };
@@ -301,7 +290,6 @@ static const struct long_option long_options[] =
     { "safeseh",             0, LONG_OPT_SAFE_SEH },
     { "save-temps",          0, LONG_OPT_SAVE_TEMPS },
     { "subsystem",           1, LONG_OPT_SUBSYSTEM },
-    { "syscall-table",       1, LONG_OPT_SYSCALL_TABLE },
     { "version",             0, LONG_OPT_VERSION },
     { "without-dlltool",     0, LONG_OPT_WITHOUT_DLLTOOL },
     /* aliases for short options */
@@ -532,9 +520,6 @@ static void option_callback( int optc, char *optarg )
     case LONG_OPT_SUBSYSTEM:
         set_subsystem( optarg, main_spec );
         break;
-    case LONG_OPT_SYSCALL_TABLE:
-        set_syscall_table( optarg, main_spec );
-        break;
     case LONG_OPT_VERSION:
         printf( "winebuild version " PACKAGE_VERSION "\n" );
         exit(0);
@@ -618,12 +603,7 @@ int main(int argc, char **argv)
     struct strarray files;
     DLLSPEC *spec = main_spec = alloc_dll_spec();
 
-#ifdef SIGHUP
-    signal( SIGHUP, exit_on_signal );
-#endif
-    signal( SIGTERM, exit_on_signal );
-    signal( SIGINT, exit_on_signal );
-
+    init_signals( exit_on_signal );
     target = init_argv0_target( argv[0] );
     if (target.platform == PLATFORM_CYGWIN) target.platform = PLATFORM_MINGW;
     if (is_pe()) unwind_tables = 1;
@@ -631,7 +611,6 @@ int main(int argc, char **argv)
     files = parse_options( argc, argv, short_options, long_options, 0, option_callback );
 
     atexit( cleanup );  /* make sure we remove the output file on exit */
-    if (!save_temps) atexit( cleanup_tmp_files );
 
     if (spec->file_name && !strchr( spec->file_name, '.' ))
         strcat( spec->file_name, exec_mode == MODE_EXE ? ".exe" : ".dll" );
@@ -646,6 +625,16 @@ int main(int argc, char **argv)
             spec->characteristics |= IMAGE_FILE_DLL;
         /* fall through */
     case MODE_EXE:
+        if (get_ptr_size() == 4)
+        {
+            spec->characteristics |= IMAGE_FILE_32BIT_MACHINE;
+        }
+        else
+        {
+            spec->characteristics |= IMAGE_FILE_LARGE_ADDRESS_AWARE;
+            spec->dll_characteristics |= IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA;
+        }
+
         files = load_resources( files, spec );
         if (spec_file_name && !parse_input_file( spec )) break;
         if (!spec->init_func) spec->init_func = xstrdup( get_default_entry_point( spec ));

@@ -88,7 +88,7 @@ HRESULT WINAPI ISF_NetworkPlaces_Constructor (IUnknown * pUnkOuter, REFIID riid,
     if (pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
-    sf = heap_alloc_zero (sizeof (*sf));
+    sf = calloc (1, sizeof (*sf));
     if (!sf)
         return E_OUTOFMEMORY;
 
@@ -164,7 +164,7 @@ static ULONG WINAPI ISF_NetworkPlaces_fnRelease (IShellFolder2 * iface)
     if (!refCount) {
         TRACE ("-- destroying IShellFolder(%p)\n", This);
         SHFree (This->pidlRoot);
-        heap_free (This);
+        free (This);
     }
     return refCount;
 }
@@ -424,14 +424,14 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetUIObjectOf (IShellFolder2 * iface,
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         pObj = (LPUNKNOWN) IExtractIconA_Constructor (pidl);
-        SHFree (pidl);
+        ILFree(pidl);
         hr = S_OK;
     }
     else if (IsEqualIID (riid, &IID_IExtractIconW) && (cidl == 1))
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         pObj = (LPUNKNOWN) IExtractIconW_Constructor (pidl);
-        SHFree (pidl);
+        ILFree(pidl);
         hr = S_OK;
     }
     else if (IsEqualIID (riid, &IID_IDropTarget) && (cidl >= 1))

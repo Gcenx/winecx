@@ -21,6 +21,7 @@
 #include <mshtmdid.h>
 
 import "ocidl.idl";
+import "mshtml.idl";
 
 [
     version(1.0),
@@ -81,6 +82,23 @@ interface IWineMSHTMLConsole : IDispatch
     oleautomation,
     dual,
     hidden,
+    uuid(6ac5491e-1758-4b82-98a2-83e31a7c8871)
+]
+interface IWineMSHTMLMutationObserver : IDispatch
+{
+    [id(1)]
+    HRESULT disconnect();
+    [id(2)]
+    HRESULT observe([in] IHTMLDOMNode *target, [in] IDispatch *options);
+    [id(3)]
+    HRESULT takeRecords([retval, out] IDispatch **records);
+}
+
+[
+    odl,
+    oleautomation,
+    dual,
+    hidden,
     uuid(fd55b4b6-2813-4fb4-829d-380099474ab0)
 ]
 interface IWineMSHTMLMediaQueryList : IDispatch
@@ -95,6 +113,7 @@ interface IWineMSHTMLMediaQueryList : IDispatch
     HRESULT removeListener([in] VARIANT *listener);
 }
 
+const long DISPID_IWINEHTMLWINDOWPRIVATE_MUTATIONOBSERVER = 55;
 [
     odl,
     oleautomation,
@@ -114,6 +133,8 @@ interface IWineHTMLWindowPrivate : IDispatch
     HRESULT matchMedia([in] BSTR media_query, [retval, out] IDispatch **media_query_list);
     [id(54)]
     HRESULT postMessage([in] VARIANT msg, [in] BSTR targetOrigin, [in, optional] VARIANT transfer);
+    [propget, id(DISPID_IWINEHTMLWINDOWPRIVATE_MUTATIONOBSERVER)]
+    HRESULT MutationObserver([retval, out] IDispatch **observer_ctor);
 }
 
 [
@@ -159,6 +180,14 @@ interface IWineDOMTokenList : IDispatch
     [id(2)]
     HRESULT remove([in] BSTR token);
     [id(3)]
+    HRESULT toggle([in] BSTR token, [retval, out] VARIANT_BOOL *p);
+    [id(4)]
+    HRESULT contains([in] BSTR token, [retval, out] VARIANT_BOOL *p);
+    [propget, id(5)]
+    HRESULT length([retval, out] LONG *p);
+    [id(6)]
+    HRESULT item([in] LONG index, [retval, out] VARIANT *p);
+    [id(7)]
     HRESULT toString([retval, out] BSTR *String);
 }
 

@@ -453,6 +453,22 @@ int CDECL __iscsymf(int c)
 }
 
 /*********************************************************************
+ *		__iswcsym (MSVCRT.@)
+ */
+int CDECL __iswcsym(wint_t c)
+{
+  return (iswalnum(c) || c == '_');
+}
+
+/*********************************************************************
+ *		__iswcsymf (MSVCRT.@)
+ */
+int CDECL __iswcsymf(wint_t c)
+{
+  return (iswalpha(c) || c == '_');
+}
+
+/*********************************************************************
  *		_toupper_l (MSVCRT.@)
  */
 int CDECL _toupper_l(int c, _locale_t locale)

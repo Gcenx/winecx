@@ -1,10 +1,10 @@
 EXTRADEFS = -D_CRTIMP=
 MODULE    = msvcrt.dll
 IMPORTLIB = msvcrt
-IMPORTS   = ntdll
+IMPORTS   = $(MUSL_PE_LIBS) ntdll
 DELAYIMPORTS = advapi32 user32
 
-C_SRCS = \
+SOURCES = \
 	concurrency.c \
 	console.c \
 	cpp.c \
@@ -21,11 +21,13 @@ C_SRCS = \
 	except.c \
 	except_arm.c \
 	except_arm64.c \
+	except_arm64ec.c \
 	except_i386.c \
 	except_x86_64.c \
 	exception_ptr.c \
 	exit.c \
 	file.c \
+	handler4.c \
 	heap.c \
 	iob.c \
 	locale.c \
@@ -37,6 +39,7 @@ C_SRCS = \
 	misc.c \
 	onexit.c \
 	process.c \
+	rsrc.rc \
 	scanf.c \
 	sincos.c \
 	string.c \
@@ -44,6 +47,3 @@ C_SRCS = \
 	time.c \
 	undname.c \
 	wcs.c
-
-RC_SRCS = \
-	rsrc.rc

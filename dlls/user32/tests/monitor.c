@@ -34,7 +34,6 @@
 #include "ddk/d3dkmthk.h"
 #include "setupapi.h"
 #include "ntddvdeo.h"
-#include "wine/heap.h"
 #include <stdio.h>
 
 DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_GPU_LUID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 1);
@@ -496,7 +495,7 @@ static void test_ChangeDisplaySettingsEx(void)
     /* Save the original mode for all devices so that they can be restored at the end of tests */
     device_count = 0;
     device_size = 2;
-    devices = heap_calloc(device_size, sizeof(*devices));
+    devices = calloc(device_size, sizeof(*devices));
     ok(devices != NULL, "Failed to allocate memory.\n");
 
     primary = 0;
@@ -519,7 +518,7 @@ static void test_ChangeDisplaySettingsEx(void)
         if (device_count >= device_size)
         {
             device_size *= 2;
-            devices = heap_realloc(devices, device_size * sizeof(*devices));
+            devices = realloc(devices, device_size * sizeof(*devices));
             ok(devices != NULL, "Failed to reallocate memory.\n");
         }
 
@@ -1165,7 +1164,7 @@ static void test_ChangeDisplaySettingsEx(void)
     for (device = 0; device < device_count; ++device)
         expect_dm(&devices[device].original_mode, devices[device].name, 0);
 
-    heap_free(devices);
+    free(devices);
 }
 
 static void test_monitors(void)
@@ -1683,6 +1682,52 @@ static void check_device_path(const WCHAR *device_path, const LUID *adapter_id, 
     SetupDiDestroyDeviceInfoList(set);
 }
 
+static void check_preferred_mode(const DISPLAYCONFIG_TARGET_PREFERRED_MODE *mode, const WCHAR *gdi_device_name)
+{
+    DISPLAYCONFIG_TARGET_PREFERRED_MODE mode2;
+    DEVMODEW dm, dm2;
+    LONG lret;
+    BOOL bret;
+
+    dm.dmSize = sizeof(dm);
+    bret = EnumDisplaySettingsW(gdi_device_name, ENUM_CURRENT_SETTINGS, &dm);
+    ok(bret, "got error %lu.\n", GetLastError());
+
+    if (dm.dmPelsWidth == 1024 && dm.dmPelsHeight == 768)
+    {
+        skip("Current display mode is already 1024x768, skipping test.\n");
+        return;
+    }
+    if (mode->width == 1024 && mode->height == 768)
+    {
+        skip("Preferred display mode is 1024x768, skipping test.\n");
+        return;
+    }
+
+    memset(&dm2, 0, sizeof(dm2));
+    dm2.dmSize = sizeof(dm2);
+    dm2.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+    dm2.dmPelsWidth = 1024;
+    dm2.dmPelsHeight = 768;
+    lret = ChangeDisplaySettingsExW(gdi_device_name, &dm2, NULL, 0, 0);
+    if (lret != DISP_CHANGE_SUCCESSFUL)
+    {
+        skip("Can't change display settings, skipping test.\n");
+        return;
+    }
+
+    memset(&mode2, 0, sizeof(mode2));
+    mode2.header = mode->header;
+
+    lret = pDisplayConfigGetDeviceInfo(&mode2.header);
+    ok(!lret, "got %ld\n", lret);
+    ok(mode2.width == mode->width, "got %u, expected %u.\n", mode2.width, mode->width);
+    ok(mode2.height == mode->height, "got %u, expected %u.\n", mode2.height, mode->height);
+
+    lret = ChangeDisplaySettingsExW(gdi_device_name, &dm, NULL, 0, 0);
+    ok(lret == DISP_CHANGE_SUCCESSFUL, "got %ld.\n", lret);
+}
+
 static void test_QueryDisplayConfig_result(UINT32 flags,
         UINT32 paths, const DISPLAYCONFIG_PATH_INFO *pi, UINT32 modes, const DISPLAYCONFIG_MODE_INFO *mi)
 {
@@ -1722,7 +1767,6 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
         ok(!ret, "Expected 0, got %ld\n", ret);
         check_device_path(target_name.monitorDevicePath, &target_name.header.adapterId, target_name.header.id);
 
-        todo_wine {
         preferred_mode.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE;
         preferred_mode.header.size = sizeof(preferred_mode);
         preferred_mode.header.adapterId = pi[i].targetInfo.adapterId;
@@ -1732,7 +1776,7 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
         ok(!ret, "Expected 0, got %ld\n", ret);
         ok(preferred_mode.width > 0 && preferred_mode.height > 0, "Expected non-zero height/width, got %ux%u\n",
                 preferred_mode.width, preferred_mode.height);
-        }
+        check_preferred_mode(&preferred_mode, source_name.viewGdiDeviceName);
 
         todo_wine {
         adapter_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME;
@@ -1747,7 +1791,7 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
         /* Check corresponding modes */
         if (pi[i].sourceInfo.modeInfoIdx == DISPLAYCONFIG_PATH_MODE_IDX_INVALID)
         {
-            skip("Path doesn't contain source modeInfoIdx");
+            skip("Path doesn't contain source modeInfoIdx\n");
             continue;
         }
         ok(pi[i].sourceInfo.modeInfoIdx < modes, "Expected index <%d, got %d\n", modes, pi[i].sourceInfo.modeInfoIdx);
@@ -1770,7 +1814,7 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
 
         if (pi[i].targetInfo.modeInfoIdx == DISPLAYCONFIG_PATH_MODE_IDX_INVALID)
         {
-            skip("Path doesn't contain target modeInfoIdx");
+            skip("Path doesn't contain target modeInfoIdx\n");
             continue;
         }
         ok(pi[i].targetInfo.modeInfoIdx < modes, "Expected index <%d, got %d\n", modes, pi[i].targetInfo.modeInfoIdx);
@@ -2020,19 +2064,21 @@ static void test_DisplayConfigSetDeviceInfo(void)
     HKEY key;
     LONG ret;
 
-#define CHECK_FUNC(func)                       \
-    if (!p##func)                              \
-    {                                          \
-        skip("%s() is unavailable.\n", #func); \
-        return;                                \
+#define CHECK_FUNC(func)                           \
+    if (!p##func)                                  \
+    {                                              \
+        win_skip("%s() is unavailable.\n", #func); \
+        ret = TRUE;                                \
     }
 
+    ret = FALSE;
     CHECK_FUNC(D3DKMTCloseAdapter)
     CHECK_FUNC(D3DKMTOpenAdapterFromGdiDisplayName)
     CHECK_FUNC(DisplayConfigGetDeviceInfo)
-    CHECK_FUNC(DisplayConfigSetDeviceInfo)
+    todo_wine CHECK_FUNC(DisplayConfigSetDeviceInfo)
     CHECK_FUNC(GetDpiForMonitorInternal)
     CHECK_FUNC(SetThreadDpiAwarenessContext)
+    if (ret) return;
 
 #undef CHECK_FUNC
 
@@ -2181,6 +2227,9 @@ static void test_handles(void)
 #define check_display_dc(a, b, c) _check_display_dc(__LINE__, a, b, c)
 static void _check_display_dc(INT line, HDC hdc, const DEVMODEA *dm, BOOL allow_todo)
 {
+    unsigned char buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])] = {0};
+    BITMAPINFO *bmi = (BITMAPINFO *)buffer;
+    DIBSECTION dib;
     BITMAP bitmap;
     HBITMAP hbmp;
     INT value;
@@ -2219,6 +2268,17 @@ static void _check_display_dc(INT line, HDC hdc, const DEVMODEA *dm, BOOL allow_
 
     hbmp = GetCurrentObject(hdc, OBJ_BITMAP);
     ok_(__FILE__, line)(!!hbmp, "GetCurrentObject failed, error %#lx.\n", GetLastError());
+
+    /* Expect hbmp to be a bitmap, not a DIB when GetObjectA() succeeds */
+    value = GetObjectA(hbmp, sizeof(dib), &dib);
+    ok(!value || value == sizeof(BITMAP), "GetObjectA failed, value %d.\n", value);
+
+    /* Expect GetDIBits() to succeed */
+    bmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    value = GetDIBits(hdc, hbmp, 0, 0, NULL, (LPBITMAPINFO)bmi, DIB_RGB_COLORS);
+    ok(value, "GetDIBits failed, error %#lx.\n", GetLastError());
+    ok(bmi->bmiHeader.biCompression == BI_BITFIELDS, "Got unexpected biCompression %lu.\n", bmi->bmiHeader.biCompression);
+
     ret = GetObjectA(hbmp, sizeof(bitmap), &bitmap);
     /* GetObjectA fails on Win7 and older */
     if (ret)
@@ -2230,7 +2290,6 @@ static void _check_display_dc(INT line, HDC hdc, const DEVMODEA *dm, BOOL allow_
         todo_wine
         ok_(__FILE__, line)(bitmap.bmHeight == GetSystemMetrics(SM_CYVIRTUALSCREEN),
                 "Expected bmHeight %d, got %d.\n", GetSystemMetrics(SM_CYVIRTUALSCREEN), bitmap.bmHeight);
-        todo_wine
         ok_(__FILE__, line)(bitmap.bmBitsPixel == 32, "Expected bmBitsPixel %d, got %d.\n", 32,
                 bitmap.bmBitsPixel);
         ok_(__FILE__, line)(bitmap.bmWidthBytes == get_bitmap_stride(bitmap.bmWidth, bitmap.bmBitsPixel),

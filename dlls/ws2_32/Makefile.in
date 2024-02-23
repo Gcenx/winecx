@@ -3,12 +3,12 @@ MODULE    = ws2_32.dll
 UNIXLIB   = ws2_32.so
 IMPORTLIB = ws2_32
 DELAYIMPORTS = dnsapi advapi32 iphlpapi user32
+UNIX_LIBS    = $(PTHREAD_LIBS)
 
-C_SRCS = \
+SOURCES = \
 	async.c \
 	inaddr.c \
 	protocol.c \
 	socket.c \
-	unixlib.c
-
-RC_SRCS = version.rc
+	unixlib.c \
+	version.rc

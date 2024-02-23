@@ -26,8 +26,6 @@
 #include <string.h>
 #include <limits.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -75,7 +73,7 @@ static inline char *strdupWtoA( const WCHAR *str )
 
 static const char magic_loopback_addr[] = {127, 12, 34, 56};
 
-const char *debugstr_sockaddr( const struct sockaddr *addr ) DECLSPEC_HIDDEN;
+const char *debugstr_sockaddr( const struct sockaddr *addr );
 
 struct per_thread_data
 {
@@ -92,7 +90,7 @@ struct per_thread_data
 
 extern int num_startup;
 
-struct per_thread_data *get_per_thread_data(void) DECLSPEC_HIDDEN;
+struct per_thread_data *get_per_thread_data(void);
 
 struct getaddrinfo_params
 {
@@ -143,6 +141,7 @@ enum ws_unix_funcs
     ws_unix_gethostbyname,
     ws_unix_gethostname,
     ws_unix_getnameinfo,
+    ws_unix_funcs_count,
 };
 
 #endif

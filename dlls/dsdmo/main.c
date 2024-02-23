@@ -21,6 +21,7 @@
 #include "mmreg.h"
 #include "mmsystem.h"
 #include "uuids.h"
+#include "strmif.h"
 #include "initguid.h"
 #include "medparam.h"
 #include "dsound.h"
@@ -398,8 +399,19 @@ static ULONG WINAPI effect_inplace_Release(IMediaObjectInPlace *iface)
 static HRESULT WINAPI effect_inplace_Process(IMediaObjectInPlace *iface, ULONG size,
         BYTE *data, REFERENCE_TIME start, DWORD flags)
 {
-    FIXME("iface %p, size %lu, data %p, start %s, flags %#lx, stub!\n",
-            iface, size, data, wine_dbgstr_longlong(start), flags);
+    static unsigned int once;
+
+    if (!once++)
+    {
+        FIXME("iface %p, size %lu, data %p, start %s, flags %#lx, stub!\n",
+                iface, size, data, wine_dbgstr_longlong(start), flags);
+    }
+    else
+    {
+        WARN("iface %p, size %lu, data %p, start %s, flags %#lx, stub!\n",
+               iface, size, data, wine_dbgstr_longlong(start), flags);
+    }
+
     return E_NOTIMPL;
 }
 
@@ -1139,6 +1151,382 @@ static HRESULT compressor_create(IUnknown *outer, IUnknown **out)
     return S_OK;
 }
 
+struct dmochorusfx
+{
+    struct effect effect;
+    IDirectSoundFXChorus IDirectSoundFXChorus_iface;
+};
+
+static inline struct dmochorusfx *impl_from_IDirectSoundFXChorus(IDirectSoundFXChorus *iface)
+{
+    return CONTAINING_RECORD(iface, struct dmochorusfx, IDirectSoundFXChorus_iface);
+}
+
+static HRESULT WINAPI chorusfx_QueryInterface(IDirectSoundFXChorus *iface, REFIID iid, void **out)
+{
+    struct dmochorusfx *effect = impl_from_IDirectSoundFXChorus(iface);
+    return IUnknown_QueryInterface(effect->effect.outer_unk, iid, out);
+}
+
+static ULONG WINAPI chorusfx_AddRef(IDirectSoundFXChorus *iface)
+{
+    struct dmochorusfx *effect = impl_from_IDirectSoundFXChorus(iface);
+    return IUnknown_AddRef(effect->effect.outer_unk);
+}
+
+static ULONG WINAPI chorusfx_Release(IDirectSoundFXChorus *iface)
+{
+    struct dmochorusfx *effect = impl_from_IDirectSoundFXChorus(iface);
+    return IUnknown_Release(effect->effect.outer_unk);
+}
+
+static HRESULT WINAPI chorusfx_SetAllParameters(IDirectSoundFXChorus *iface, const DSFXChorus *compressor)
+{
+    struct dmochorusfx *This = impl_from_IDirectSoundFXChorus(iface);
+    FIXME("(%p) %p\n", This, compressor);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI chorusfx_GetAllParameters(IDirectSoundFXChorus *iface, DSFXChorus *compressor)
+{
+    struct dmochorusfx *This = impl_from_IDirectSoundFXChorus(iface);
+    FIXME("(%p) %p\n", This, compressor);
+    return E_NOTIMPL;
+}
+
+static const struct IDirectSoundFXChorusVtbl chorus_vtbl =
+{
+    chorusfx_QueryInterface,
+    chorusfx_AddRef,
+    chorusfx_Release,
+    chorusfx_SetAllParameters,
+    chorusfx_GetAllParameters
+};
+
+static struct dmochorusfx *implchorus_from_effect(struct effect *iface)
+{
+    return CONTAINING_RECORD(iface, struct dmochorusfx, effect);
+}
+
+static void *chorus_query_interface(struct effect *iface, REFIID iid)
+{
+    struct dmochorusfx *effect = implchorus_from_effect(iface);
+
+    if (IsEqualGUID(iid, &IID_IDirectSoundFXChorus))
+        return &effect->IDirectSoundFXChorus_iface;
+    return NULL;
+}
+
+static void chorus_destroy(struct effect *iface)
+{
+    struct dmochorusfx *effect = implchorus_from_effect(iface);
+
+    free(effect);
+}
+
+static const struct effect_ops chorus_ops =
+{
+    .destroy = chorus_destroy,
+    .query_interface = chorus_query_interface,
+};
+
+static HRESULT chorus_create(IUnknown *outer, IUnknown **out)
+{
+    struct dmochorusfx *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    effect_init(&object->effect, outer, &chorus_ops);
+    object->IDirectSoundFXChorus_iface.lpVtbl = &chorus_vtbl;
+
+    TRACE("Created chorus effect %p.\n", object);
+    *out = &object->effect.IUnknown_inner;
+    return S_OK;
+}
+
+struct dmo_flangerfx
+{
+    struct effect effect;
+    IDirectSoundFXFlanger IDirectSoundFXFlanger_iface;
+};
+
+static inline struct dmo_flangerfx *impl_from_IDirectSoundFXFlanger(IDirectSoundFXFlanger *iface)
+{
+    return CONTAINING_RECORD(iface, struct dmo_flangerfx, IDirectSoundFXFlanger_iface);
+}
+
+static HRESULT WINAPI flangerfx_QueryInterface(IDirectSoundFXFlanger *iface, REFIID iid, void **out)
+{
+    struct dmo_flangerfx *effect = impl_from_IDirectSoundFXFlanger(iface);
+    return IUnknown_QueryInterface(effect->effect.outer_unk, iid, out);
+}
+
+static ULONG WINAPI flangerfx_AddRef(IDirectSoundFXFlanger *iface)
+{
+    struct dmo_flangerfx *effect = impl_from_IDirectSoundFXFlanger(iface);
+    return IUnknown_AddRef(effect->effect.outer_unk);
+}
+
+static ULONG WINAPI flangerfx_Release(IDirectSoundFXFlanger *iface)
+{
+    struct dmo_flangerfx *effect = impl_from_IDirectSoundFXFlanger(iface);
+    return IUnknown_Release(effect->effect.outer_unk);
+}
+
+static HRESULT WINAPI flangerfx_SetAllParameters(IDirectSoundFXFlanger *iface, const DSFXFlanger *flanger)
+{
+    struct dmo_flangerfx *This = impl_from_IDirectSoundFXFlanger(iface);
+    FIXME("(%p) %p\n", This, flanger);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI flangerfx_GetAllParameters(IDirectSoundFXFlanger *iface, DSFXFlanger *flanger)
+{
+    struct dmo_flangerfx *This = impl_from_IDirectSoundFXFlanger(iface);
+    FIXME("(%p) %p\n", This, flanger);
+    return E_NOTIMPL;
+}
+
+static const struct IDirectSoundFXFlangerVtbl flanger_vtbl =
+{
+    flangerfx_QueryInterface,
+    flangerfx_AddRef,
+    flangerfx_Release,
+    flangerfx_SetAllParameters,
+    flangerfx_GetAllParameters
+};
+
+static struct dmo_flangerfx *impl_flanger_from_effect(struct effect *iface)
+{
+    return CONTAINING_RECORD(iface, struct dmo_flangerfx, effect);
+}
+
+static void *flanger_query_interface(struct effect *iface, REFIID iid)
+{
+    struct dmo_flangerfx *effect = impl_flanger_from_effect(iface);
+
+    if (IsEqualGUID(iid, &IID_IDirectSoundFXFlanger))
+        return &effect->IDirectSoundFXFlanger_iface;
+    return NULL;
+}
+
+static void flanger_destroy(struct effect *iface)
+{
+    struct dmo_flangerfx *effect = impl_flanger_from_effect(iface);
+
+    free(effect);
+}
+
+static const struct effect_ops flanger_ops =
+{
+    .destroy = flanger_destroy,
+    .query_interface = flanger_query_interface,
+};
+
+static HRESULT flanger_create(IUnknown *outer, IUnknown **out)
+{
+    struct dmo_flangerfx *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    effect_init(&object->effect, outer, &flanger_ops);
+    object->IDirectSoundFXFlanger_iface.lpVtbl = &flanger_vtbl;
+
+    TRACE("Created flanger effect %p.\n", object);
+    *out = &object->effect.IUnknown_inner;
+    return S_OK;
+}
+
+struct distortion
+{
+    struct effect effect;
+    IDirectSoundFXDistortion IDirectSoundFXDistortion_iface;
+};
+
+static inline struct distortion *impl_from_IDirectSoundFXDistortion(IDirectSoundFXDistortion *iface)
+{
+    return CONTAINING_RECORD(iface, struct distortion, IDirectSoundFXDistortion_iface);
+}
+
+static HRESULT WINAPI distortion_QueryInterface(IDirectSoundFXDistortion *iface, REFIID iid, void **out)
+{
+    struct distortion *effect = impl_from_IDirectSoundFXDistortion(iface);
+    return IUnknown_QueryInterface(effect->effect.outer_unk, iid, out);
+}
+
+static ULONG WINAPI distortion_AddRef(IDirectSoundFXDistortion *iface)
+{
+    struct distortion *effect = impl_from_IDirectSoundFXDistortion(iface);
+    return IUnknown_AddRef(effect->effect.outer_unk);
+}
+
+static ULONG WINAPI distortion_Release(IDirectSoundFXDistortion *iface)
+{
+    struct distortion *effect = impl_from_IDirectSoundFXDistortion(iface);
+    return IUnknown_Release(effect->effect.outer_unk);
+}
+
+static HRESULT WINAPI distortion_SetAllParameters(IDirectSoundFXDistortion *iface, const DSFXDistortion *params)
+{
+    struct distortion *This = impl_from_IDirectSoundFXDistortion(iface);
+    FIXME("(%p) %p\n", This, params);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI distortion_GetAllParameters(IDirectSoundFXDistortion *iface, DSFXDistortion *params)
+{
+    struct distortion *This = impl_from_IDirectSoundFXDistortion(iface);
+    FIXME("(%p) %p\n", This, params);
+    return E_NOTIMPL;
+}
+
+static const struct IDirectSoundFXDistortionVtbl distortion_vtbl =
+{
+    distortion_QueryInterface,
+    distortion_AddRef,
+    distortion_Release,
+    distortion_SetAllParameters,
+    distortion_GetAllParameters
+};
+
+static struct distortion *impl_distortion_from_effect(struct effect *iface)
+{
+    return CONTAINING_RECORD(iface, struct distortion, effect);
+}
+
+static void *distortion_query_interface(struct effect *iface, REFIID iid)
+{
+    struct distortion *effect = impl_distortion_from_effect(iface);
+
+    if (IsEqualGUID(iid, &IID_IDirectSoundFXDistortion))
+        return &effect->IDirectSoundFXDistortion_iface;
+    return NULL;
+}
+
+static void distortion_destroy(struct effect *iface)
+{
+    struct distortion *effect = impl_distortion_from_effect(iface);
+
+    free(effect);
+}
+
+static const struct effect_ops distortion_ops =
+{
+    .destroy = distortion_destroy,
+    .query_interface = distortion_query_interface,
+};
+
+static HRESULT distortion_create(IUnknown *outer, IUnknown **out)
+{
+    struct distortion *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    effect_init(&object->effect, outer, &distortion_ops);
+    object->IDirectSoundFXDistortion_iface.lpVtbl = &distortion_vtbl;
+
+    TRACE("Created distortion effect %p.\n", object);
+    *out = &object->effect.IUnknown_inner;
+    return S_OK;
+}
+
+struct gargle
+{
+    struct effect effect;
+    IDirectSoundFXGargle IDirectSoundFXGargle_iface;
+};
+
+static inline struct gargle *impl_from_IDirectSoundFXGargle(IDirectSoundFXGargle *iface)
+{
+    return CONTAINING_RECORD(iface, struct gargle, IDirectSoundFXGargle_iface);
+}
+
+static HRESULT WINAPI gargle_QueryInterface(IDirectSoundFXGargle *iface, REFIID iid, void **out)
+{
+    struct gargle *effect = impl_from_IDirectSoundFXGargle(iface);
+    return IUnknown_QueryInterface(effect->effect.outer_unk, iid, out);
+}
+
+static ULONG WINAPI gargle_AddRef(IDirectSoundFXGargle *iface)
+{
+    struct gargle *effect = impl_from_IDirectSoundFXGargle(iface);
+    return IUnknown_AddRef(effect->effect.outer_unk);
+}
+
+static ULONG WINAPI gargle_Release(IDirectSoundFXGargle *iface)
+{
+    struct gargle *effect = impl_from_IDirectSoundFXGargle(iface);
+    return IUnknown_Release(effect->effect.outer_unk);
+}
+
+static HRESULT WINAPI gargle_SetAllParameters(IDirectSoundFXGargle *iface, const DSFXGargle *params)
+{
+    struct gargle *This = impl_from_IDirectSoundFXGargle(iface);
+    FIXME("(%p) %p\n", This, params);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI gargle_GetAllParameters(IDirectSoundFXGargle *iface, DSFXGargle *params)
+{
+    struct gargle *This = impl_from_IDirectSoundFXGargle(iface);
+    FIXME("(%p) %p\n", This, params);
+    return E_NOTIMPL;
+}
+
+static const struct IDirectSoundFXGargleVtbl gargle_vtbl =
+{
+    gargle_QueryInterface,
+    gargle_AddRef,
+    gargle_Release,
+    gargle_SetAllParameters,
+    gargle_GetAllParameters
+};
+
+static struct gargle *impl_gargle_from_effect(struct effect *iface)
+{
+    return CONTAINING_RECORD(iface, struct gargle, effect);
+}
+
+static void *gargle_query_interface(struct effect *iface, REFIID iid)
+{
+    struct gargle *effect = impl_gargle_from_effect(iface);
+
+    if (IsEqualGUID(iid, &IID_IDirectSoundFXGargle))
+        return &effect->IDirectSoundFXGargle_iface;
+    return NULL;
+}
+
+static void gargle_destroy(struct effect *iface)
+{
+    struct gargle *effect = impl_gargle_from_effect(iface);
+
+    free(effect);
+}
+
+static const struct effect_ops gargle_ops =
+{
+    .destroy = gargle_destroy,
+    .query_interface = gargle_query_interface,
+};
+
+static HRESULT gargle_create(IUnknown *outer, IUnknown **out)
+{
+    struct gargle *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    effect_init(&object->effect, outer, &gargle_ops);
+    object->IDirectSoundFXGargle_iface.lpVtbl = &gargle_vtbl;
+
+    TRACE("Created gargle effect %p.\n", object);
+    *out = &object->effect.IUnknown_inner;
+    return S_OK;
+}
+
 struct class_factory
 {
     IClassFactory IClassFactory_iface;
@@ -1225,6 +1613,10 @@ class_factories[] =
     {&GUID_DSFX_WAVES_REVERB,           {{&class_factory_vtbl}, waves_reverb_create}},
     {&GUID_DSFX_STANDARD_ECHO,          {{&class_factory_vtbl}, echo_create}},
     {&GUID_DSFX_STANDARD_COMPRESSOR,    {{&class_factory_vtbl}, compressor_create}},
+    {&GUID_DSFX_STANDARD_CHORUS,        {{&class_factory_vtbl}, chorus_create}},
+    {&GUID_DSFX_STANDARD_FLANGER,       {{&class_factory_vtbl}, flanger_create}},
+    {&GUID_DSFX_STANDARD_DISTORTION,    {{&class_factory_vtbl}, distortion_create}},
+    {&GUID_DSFX_STANDARD_GARGLE,        {{&class_factory_vtbl}, gargle_create}},
 };
 
 HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)

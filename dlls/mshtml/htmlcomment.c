@@ -27,6 +27,7 @@
 #include "ole2.h"
 
 #include "mshtml_private.h"
+#include "htmlevent.h"
 
 #include "wine/debug.h"
 
@@ -145,30 +146,6 @@ static inline HTMLCommentElement *impl_from_HTMLDOMNode(HTMLDOMNode *iface)
     return CONTAINING_RECORD(iface, HTMLCommentElement, element.node);
 }
 
-static HRESULT HTMLCommentElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
-{
-    HTMLCommentElement *This = impl_from_HTMLDOMNode(iface);
-
-    *ppv =  NULL;
-
-    if(IsEqualGUID(&IID_IHTMLCommentElement, riid)) {
-        TRACE("(%p)->(IID_IHTMLCommentElement %p)\n", This, ppv);
-        *ppv = &This->IHTMLCommentElement_iface;
-    }else {
-        return HTMLElement_QI(&This->element.node, riid, ppv);
-    }
-
-    IUnknown_AddRef((IUnknown*)*ppv);
-    return S_OK;
-}
-
-static void HTMLCommentElement_destructor(HTMLDOMNode *iface)
-{
-    HTMLCommentElement *This = impl_from_HTMLDOMNode(iface);
-
-    HTMLElement_destructor(&This->element.node);
-}
-
 static HRESULT HTMLCommentElement_clone(HTMLDOMNode *iface, nsIDOMNode *nsnode, HTMLDOMNode **ret)
 {
     HTMLCommentElement *This = impl_from_HTMLDOMNode(iface);
@@ -183,15 +160,38 @@ static HRESULT HTMLCommentElement_clone(HTMLDOMNode *iface, nsIDOMNode *nsnode, 
     return S_OK;
 }
 
+static inline HTMLCommentElement *impl_from_DispatchEx(DispatchEx *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLCommentElement, element.node.event_target.dispex);
+}
+
+static void *HTMLCommentElement_query_interface(DispatchEx *dispex, REFIID riid)
+{
+    HTMLCommentElement *This = impl_from_DispatchEx(dispex);
+
+    if(IsEqualGUID(&IID_IHTMLCommentElement, riid))
+        return &This->IHTMLCommentElement_iface;
+
+    return HTMLElement_query_interface(&This->element.node.event_target.dispex, riid);
+}
+
 static const NodeImplVtbl HTMLCommentElementImplVtbl = {
-    &CLSID_HTMLCommentElement,
-    HTMLCommentElement_QI,
-    HTMLCommentElement_destructor,
-    HTMLElement_cpc,
-    HTMLCommentElement_clone,
-    HTMLElement_dispatch_nsevent_hook,
-    HTMLElement_handle_event,
-    HTMLElement_get_attr_col
+    .clsid                 = &CLSID_HTMLCommentElement,
+    .cpc_entries           = HTMLElement_cpc,
+    .clone                 = HTMLCommentElement_clone,
+    .get_attr_col          = HTMLElement_get_attr_col
+};
+
+static const event_target_vtbl_t HTMLCommentElement_event_target_vtbl = {
+    {
+        HTMLELEMENT_DISPEX_VTBL_ENTRIES,
+        .query_interface= HTMLCommentElement_query_interface,
+        .destructor     = HTMLElement_destructor,
+        .traverse       = HTMLElement_traverse,
+        .unlink         = HTMLElement_unlink
+    },
+    HTMLELEMENT_EVENT_TARGET_VTBL_ENTRIES,
+    .handle_event       = HTMLElement_handle_event
 };
 
 static const tid_t HTMLCommentElement_iface_tids[] = {
@@ -200,8 +200,8 @@ static const tid_t HTMLCommentElement_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLCommentElement_dispex = {
-    L"Comment",
-    NULL,
+    "Comment",
+    &HTMLCommentElement_event_target_vtbl.dispex_vtbl,
     DispHTMLCommentElement_tid,
     HTMLCommentElement_iface_tids,
     HTMLElement_init_dispex_info

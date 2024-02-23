@@ -136,7 +136,7 @@ _ACRTIMP int    __cdecl _fpclass(double);
 
 _ACRTIMP double __cdecl nextafter(double, double);
 
-#ifndef __i386__
+#if !defined(__i386__) || defined(_NO_CRT_MATH_INLINE)
 
 _ACRTIMP float __cdecl sinf(float);
 _ACRTIMP float __cdecl cosf(float);
@@ -206,13 +206,13 @@ static inline int   _fpclassf(float x)
 
 #endif
 
-#if !defined(__i386__) && !defined(__x86_64__) && (_MSVCR_VER == 0 || _MSVCR_VER >= 110)
+#if (!defined(__i386__) && !defined(__x86_64__) && (_MSVCR_VER == 0 || _MSVCR_VER >= 110)) || defined(_NO_CRT_MATH_INLINE)
 _ACRTIMP float __cdecl fabsf(float);
 #else
 static inline float fabsf(float x) { return fabs(x); }
 #endif
 
-#if !defined(__i386__) || _MSVCR_VER>=120
+#if !defined(__i386__) || _MSVCR_VER>=120 || defined(_NO_CRT_MATH_INLINE)
 
 _ACRTIMP float __cdecl _chgsignf(float);
 _ACRTIMP float __cdecl _copysignf(float, float);
@@ -341,6 +341,34 @@ static inline int __signbit(double x)
 #define isfinite(x) (!isinf(x) && !isnan(x))
 
 #endif
+
+#ifdef _UCRT
+
+ _ACRTIMP int __cdecl _dpcomp(double, double);
+ _ACRTIMP int __cdecl _fdpcomp(float, float);
+
+#define _FP_LT  1
+#define _FP_EQ  2
+#define _FP_GT  4
+
+#ifdef __GNUC__
+# define isgreater(x, y)      __builtin_isgreater(x, y)
+# define isgreaterequal(x, y) __builtin_isgreaterequal(x, y)
+# define isless(x, y)         __builtin_isless(x, y)
+# define islessequal(x, y)    __builtin_islessequal(x, y)
+# define islessgreater(x, y)  __builtin_islessgreater(x, y)
+# define isunordered(x, y)    __builtin_isunordered(x, y)
+#else
+# define __FP_COMPARE(x,y) (sizeof(x) == sizeof(float) && sizeof(y) == sizeof(float) ? _fdpcomp(x,y) : _dpcomp(x,y))
+# define isgreater(x, y)      ((__FP_COMPARE(x, y) & _FP_GT) != 0)
+# define isgreaterequal(x, y) ((__FP_COMPARE(x, y) & (_FP_GT|_FP_EQ)) != 0)
+# define isless(x, y)         ((__FP_COMPARE(x, y) & _FP_LT) != 0)
+# define islessequal(x, y)    ((__FP_COMPARE(x, y) & (_FP_LT|_FP_EQ)) != 0)
+# define islessgreater(x, y)  ((__FP_COMPARE(x, y) & (_FP_LT|_FP_GT)) != 0)
+# define isunordered(x, y)    (!__FP_COMPARE(x, y))
+#endif
+
+#endif /* _UCRT */
 
 #ifdef __cplusplus
 }

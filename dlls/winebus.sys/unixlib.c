@@ -72,7 +72,9 @@ BOOL is_dualshock4_gamepad(WORD vid, WORD pid)
 
 BOOL is_dualsense_gamepad(WORD vid, WORD pid)
 {
-    if (vid == 0x054c && pid == 0x0ce6) return TRUE;
+    if (vid != 0x054c) return FALSE;
+    if (pid == 0x0ce6) return TRUE; /* DualSense */
+    if (pid == 0x0df2) return TRUE; /* DualSense Edge */
     return FALSE;
 }
 
@@ -354,6 +356,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     unix_device_set_feature_report,
 };
 
+C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count);
+
 void bus_event_cleanup(struct bus_event *event)
 {
     struct unix_device *iface = (struct unix_device *)(UINT_PTR)event->device;
@@ -584,5 +588,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_unix_device_get_feature_report,
     wow64_unix_device_set_feature_report,
 };
+
+C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count);
 
 #endif  /* _WIN64 */

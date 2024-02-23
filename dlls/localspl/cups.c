@@ -52,6 +52,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(localspl);
 
+/* cups.h before version 1.7.0 doesn't have HTTP_STATUS_CONTINUE */
+#define HTTP_STATUS_CONTINUE 100
+
 #ifdef SONAME_LIBCUPS
 
 static void *libcups_handle;
@@ -233,12 +236,15 @@ static BOOL lpr_start_doc(doc_t *doc, const WCHAR *printer_name)
     static const WCHAR quote[] = { '\'',0 };
     int printer_len = wcslen(printer_name);
     WCHAR *cmd;
+    BOOL ret;
 
     cmd = malloc(printer_len * sizeof(WCHAR) + sizeof(lpr) + sizeof(quote));
     memcpy(cmd, lpr, sizeof(lpr));
     memcpy(cmd + ARRAY_SIZE(lpr), printer_name, printer_len * sizeof(WCHAR));
     memcpy(cmd + ARRAY_SIZE(lpr) + printer_len, quote, sizeof(quote));
-    return pipe_start_doc(doc, cmd);
+    ret = pipe_start_doc(doc, cmd);
+    free(cmd);
+    return ret;
 }
 
 #ifdef __APPLE__
@@ -730,6 +736,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     end_doc,
 };
 
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+
 #ifdef _WIN64
 
 typedef ULONG PTR32;
@@ -781,5 +789,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_write_doc,
     end_doc,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
 
 #endif  /* _WIN64 */

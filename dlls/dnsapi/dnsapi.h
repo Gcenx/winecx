@@ -97,7 +97,7 @@ static inline char *strdup_ua( const char *src )
     return dst;
 }
 
-extern const char *debugstr_type( unsigned short ) DECLSPEC_HIDDEN;
+extern const char *debugstr_type( unsigned short );
 
 struct get_searchlist_params
 {
@@ -127,6 +127,7 @@ enum unix_funcs
     unix_get_serverlist,
     unix_set_serverlist,
     unix_query,
+    unix_funcs_count
 };
 
 #define RESOLV_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )

@@ -33,8 +33,10 @@
 #include "ntdll_misc.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
+#include "ntsyscalls.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(relay);
 WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
 struct x86_thread_data
@@ -69,6 +71,40 @@ typedef struct
 extern DWORD EXC_CallHandler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RECORD *frame,
                               CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher,
                               PEXCEPTION_HANDLER handler, PEXCEPTION_HANDLER nested_handler );
+
+
+#ifdef __WINE_PE_BUILD
+
+enum syscall_ids
+{
+#define SYSCALL_ENTRY(id,name,args) __id_##name = id,
+ALL_SYSCALLS32
+#undef SYSCALL_ENTRY
+};
+
+/*******************************************************************
+ *         NtQueryInformationProcess
+ */
+void NtQueryInformationProcess_wrapper(void)
+{
+    asm( ".globl " __ASM_STDCALL("NtQueryInformationProcess", 20) "\n"
+         __ASM_STDCALL("NtQueryInformationProcess", 20) ":\n\t"
+         "movl %0,%%eax\n\t"
+         "call *%%fs:0xc0\n\t"
+         "ret $20"  :: "i" (__id_NtQueryInformationProcess) );
+}
+#define NtQueryInformationProcess syscall_NtQueryInformationProcess
+
+#endif /* __WINE_PE_BUILD */
+
+/*******************************************************************
+ *         syscalls
+ */
+#define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name, args )
+ALL_SYSCALLS32
+DEFINE_SYSCALL_HELPER32()
+#undef SYSCALL_ENTRY
+
 
 /*******************************************************************
  *         is_valid_frame
@@ -192,7 +228,7 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
     }
     else if (rec->ExceptionCode == EXCEPTION_WINE_NAME_THREAD && rec->ExceptionInformation[0] == 0x1000)
     {
-        if ((DWORD)rec->ExceptionInformation[2] == -1)
+        if ((DWORD)rec->ExceptionInformation[2] == -1 || (DWORD)rec->ExceptionInformation[2] == GetCurrentThreadId())
             WARN_(threadname)( "Thread renamed to %s\n", debugstr_a((char *)rec->ExceptionInformation[1]) );
         else
             WARN_(threadname)( "Thread ID %04lx renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
@@ -243,12 +279,14 @@ __ASM_STDCALL_FUNC( KiUserExceptionDispatcher, 8,
 /*******************************************************************
  *		KiUserApcDispatcher (NTDLL.@)
  */
-void WINAPI KiUserApcDispatcher( CONTEXT *context, ULONG_PTR ctx, ULONG_PTR arg1, ULONG_PTR arg2,
-                                 PNTAPCFUNC func )
-{
-    func( ctx, arg1, arg2 );
-    NtContinue( context, TRUE );
-}
+__ASM_STDCALL_FUNC( KiUserApcDispatcher, 20,
+                    "leal 0x14(%esp),%ebx\n\t"  /* context */
+                    "pop %eax\n\t"              /* func */
+                    "call *%eax\n\t"
+                    "pushl -4(%ebx)\n\t"        /* alertable */
+                    "pushl %ebx\n\t"            /* context */
+                    "call " __ASM_STDCALL("NtContinue", 8) "\n\t"
+                    "int3" )
 
 
 /*******************************************************************
@@ -370,8 +408,8 @@ void CDECL RtlRestoreContext( CONTEXT *context, EXCEPTION_RECORD *rec )
 /*******************************************************************
  *		RtlUnwind (NTDLL.@)
  */
-void WINAPI DECLSPEC_HIDDEN __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID targetIp,
-                                              PEXCEPTION_RECORD pRecord, PVOID retval, CONTEXT *context )
+void WINAPI __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID targetIp,
+                              PEXCEPTION_RECORD pRecord, PVOID retval, CONTEXT *context )
 {
     EXCEPTION_RECORD record;
     EXCEPTION_REGISTRATION_RECORD *frame, *dispatch;
@@ -535,8 +573,46 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
 
 
 /***********************************************************************
+ *           RtlUserThreadStart (NTDLL.@)
+ */
+__ASM_STDCALL_FUNC( RtlUserThreadStart, 8,
+                   "movl %ebx,8(%esp)\n\t"  /* arg */
+                   "movl %eax,4(%esp)\n\t"  /* entry */
+                   "jmp " __ASM_NAME("call_thread_func") )
+
+/* wrapper to call BaseThreadInitThunk */
+extern void DECLSPEC_NORETURN call_thread_func_wrapper( void *thunk, PRTL_THREAD_START_ROUTINE entry, void *arg );
+__ASM_GLOBAL_FUNC( call_thread_func_wrapper,
+                  "pushl %ebp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                  __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                  "movl %esp,%ebp\n\t"
+                  __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                   "subl $4,%esp\n\t"
+                   "andl $~0xf,%esp\n\t"
+                   "xorl %ecx,%ecx\n\t"
+                   "movl 12(%ebp),%edx\n\t"
+                   "movl 16(%ebp),%eax\n\t"
+                   "movl %eax,(%esp)\n\t"
+                   "call *8(%ebp)" )
+
+void call_thread_func( PRTL_THREAD_START_ROUTINE entry, void *arg )
+{
+    __TRY
+    {
+        call_thread_func_wrapper( pBaseThreadInitThunk, entry, arg );
+    }
+    __EXCEPT(call_unhandled_exception_filter)
+    {
+        NtTerminateProcess( GetCurrentProcess(), GetExceptionCode() );
+    }
+    __ENDTRY
+}
+
+/***********************************************************************
  *           signal_start_thread
  */
+extern void CDECL DECLSPEC_NORETURN signal_start_thread( CONTEXT *ctx );
 __ASM_GLOBAL_FUNC( signal_start_thread,
                    "movl 4(%esp),%esi\n\t"   /* context */
                    "leal -12(%esi),%edi\n\t"
@@ -553,6 +629,17 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
                    "movl $1,4(%esp)\n\t"
                    "movl %esi,(%esp)\n\t"
                    "call " __ASM_STDCALL("NtContinue", 8) )
+
+/******************************************************************
+ *		LdrInitializeThunk (NTDLL.@)
+ */
+void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unk2, ULONG_PTR unk3, ULONG_PTR unk4 )
+{
+    loader_init( context, (void **)&context->Eax );
+    TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", (void *)context->Eax, (void *)context->Ebx );
+    signal_start_thread( context );
+}
+
 
 /**********************************************************************
  *		DbgBreakPoint   (NTDLL.@)

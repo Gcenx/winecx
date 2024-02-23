@@ -94,6 +94,12 @@ static void test_select( IWbemServices *services )
         L"SELECT * FROM Win32_BIOS WHERE NULL = NAME",
         L"SELECT * FROM Win32_LogicalDiskToPartition",
         L"SELECT * FROM Win32_DiskDriveToDiskPartition",
+        L"SELECT \x80 FROM \x80",
+        L"SELECT \xC6 FROM \xC6",
+        L"SELECT \xFF FROM \xFF",
+        L"SELECT \x200C FROM \x200C",
+        L"SELECT \xFF21 FROM \xFF21",
+        L"SELECT \xFFFD FROM \xFFFD",
     };
     HRESULT hr;
     IEnumWbemClassObject *result;
@@ -2122,6 +2128,7 @@ static void test_Win32_SoundDevice( IWbemServices *services )
         hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
         if (hr != S_OK) break;
 
+        check_property( obj, L"Caption", VT_BSTR, CIM_STRING );
         check_property( obj, L"DeviceID", VT_BSTR, CIM_STRING );
         check_property( obj, L"Manufacturer", VT_BSTR, CIM_STRING );
         check_property( obj, L"Name", VT_BSTR, CIM_STRING );

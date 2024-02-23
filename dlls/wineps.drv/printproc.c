@@ -23,6 +23,7 @@
 
 #include <windows.h>
 #include <ntgdi.h>
+#include <winppi.h>
 #include <winspool.h>
 #include <ddk/winsplp.h>
 #include <usp10.h>
@@ -40,12 +41,13 @@ struct pp_data
 {
     DWORD magic;
     HANDLE hport;
+    WCHAR *port;
     WCHAR *doc_name;
     WCHAR *out_file;
 
     print_ctx *ctx;
 
-    struct brush_pattern *patterns;
+    struct ps_brush_pattern *patterns;
     BOOL path;
     INT break_extra;
     INT break_rem;
@@ -210,7 +212,7 @@ static inline void order_rect(RECT *rect)
     }
 }
 
-static BOOL intersect_vis_rectangles(struct bitblt_coords *dst, struct bitblt_coords *src)
+static BOOL intersect_vis_rectangles(struct ps_bitblt_coords *dst, struct ps_bitblt_coords *src)
 {
     RECT rect;
 
@@ -299,8 +301,8 @@ static void clip_visrect(HDC hdc, RECT *dst, const RECT *src)
     DeleteObject(hrgn);
 }
 
-static void get_vis_rectangles(HDC hdc, struct bitblt_coords *dst,
-        const XFORM *xform, DWORD width, DWORD height, struct bitblt_coords *src)
+static BOOL get_vis_rectangles(HDC hdc, struct ps_bitblt_coords *dst,
+        const XFORM *xform, DWORD width, DWORD height, struct ps_bitblt_coords *src)
 {
     RECT rect;
 
@@ -321,7 +323,8 @@ static void get_vis_rectangles(HDC hdc, struct bitblt_coords *dst,
     get_bounding_rect(&rect, dst->x, dst->y, dst->width, dst->height);
     clip_visrect(hdc, &dst->visrect, &rect);
 
-    if (!src) return;
+    if (IsRectEmpty(&dst->visrect)) return FALSE;
+    if (!src) return TRUE;
 
     rect.left   = src->log_x;
     rect.top    = src->log_y;
@@ -339,7 +342,7 @@ static void get_vis_rectangles(HDC hdc, struct bitblt_coords *dst,
     if (rect.bottom > height) rect.bottom = height;
     src->visrect = rect;
 
-    intersect_vis_rectangles(dst, src);
+    return intersect_vis_rectangles(dst, src);
 }
 
 static int stretch_blt(print_ctx *ctx, const EMRSTRETCHBLT *blt,
@@ -347,8 +350,8 @@ static int stretch_blt(print_ctx *ctx, const EMRSTRETCHBLT *blt,
 {
     char dst_buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
     BITMAPINFO *dst_info = (BITMAPINFO *)dst_buffer;
-    struct bitblt_coords src, dst;
-    struct gdi_image_bits bits;
+    struct ps_bitblt_coords src, dst;
+    struct ps_image_bits bits;
     DWORD err;
 
     dst.log_x = blt->xDest;
@@ -361,7 +364,8 @@ static int stretch_blt(print_ctx *ctx, const EMRSTRETCHBLT *blt,
 
     if (!blt->cbBmiSrc)
     {
-        get_vis_rectangles(ctx->hdc, &dst, NULL, 0, 0, NULL);
+        if (!get_vis_rectangles(ctx->hdc, &dst, NULL, 0, 0, NULL))
+            return TRUE;
         return PSDRV_PatBlt(ctx, &dst, blt->dwRop);
     }
 
@@ -371,8 +375,9 @@ static int stretch_blt(print_ctx *ctx, const EMRSTRETCHBLT *blt,
     src.log_height = blt->cySrc;
     src.layout = 0;
 
-    get_vis_rectangles(ctx->hdc, &dst, &blt->xformSrc,
-            bi->bmiHeader.biWidth, abs(bi->bmiHeader.biHeight), &src);
+    if (!get_vis_rectangles(ctx->hdc, &dst, &blt->xformSrc,
+                bi->bmiHeader.biWidth, abs(bi->bmiHeader.biHeight), &src))
+        return TRUE;
 
     memcpy(dst_info, bi, blt->cbBmiSrc);
     memset(&bits, 0, sizeof(bits));
@@ -385,7 +390,7 @@ static int stretch_blt(print_ctx *ctx, const EMRSTRETCHBLT *blt,
 
         bits.is_copy = TRUE;
         bitmap = CreateDIBSection(hdc, dst_info, DIB_RGB_COLORS, &bits.ptr, NULL, 0);
-        SetDIBits(hdc, bitmap, 0, bi->bmiHeader.biHeight, src_bits, bi, blt->iUsageSrc);
+        SetDIBits(hdc, bitmap, 0, abs(bi->bmiHeader.biHeight), src_bits, bi, blt->iUsageSrc);
 
         err = PSDRV_PutImage(ctx, 0, dst_info, &bits, &src, &dst, blt->dwRop);
         DeleteObject(bitmap);
@@ -968,8 +973,8 @@ static BOOL gradient_fill(print_ctx *ctx, const TRIVERTEX *vert_array, DWORD nve
 {
     char buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
     BITMAPINFO *info = (BITMAPINFO *)buffer;
-    struct bitblt_coords src, dst;
-    struct gdi_image_bits bits;
+    struct ps_bitblt_coords src, dst;
+    struct ps_image_bits bits;
     HBITMAP bmp, old_bmp;
     BOOL ret = FALSE;
     TRIVERTEX *pts;
@@ -1084,7 +1089,7 @@ static BOOL gradient_fill(print_ctx *ctx, const TRIVERTEX *vert_array, DWORD nve
 }
 
 static HGDIOBJ get_object_handle(struct pp_data *data, HANDLETABLE *handletable,
-        DWORD i, struct brush_pattern **pattern)
+        DWORD i, struct ps_brush_pattern **pattern)
 {
     if (i & 0x80000000)
     {
@@ -1097,7 +1102,7 @@ static HGDIOBJ get_object_handle(struct pp_data *data, HANDLETABLE *handletable,
 
 static BOOL select_hbrush(struct pp_data *data, HANDLETABLE *htable, int handle_count, HBRUSH brush)
 {
-    struct brush_pattern *pattern = NULL;
+    struct ps_brush_pattern *pattern = NULL;
     int i;
 
     for (i = 0; i < handle_count; i++)
@@ -1125,7 +1130,7 @@ static inline INT INTERNAL_YWSTODS(HDC hdc, INT height)
     return pt[1].y - pt[0].y;
 }
 
-extern const unsigned short bidi_direction_table[] DECLSPEC_HIDDEN;
+extern const unsigned short bidi_direction_table[];
 
 /*------------------------------------------------------------------------
     Bidirectional Character Types
@@ -2090,7 +2095,7 @@ done:
 
 static BOOL fill_rgn(struct pp_data *data, HANDLETABLE *htable, int handle_count, DWORD brush, HRGN rgn)
 {
-    struct brush_pattern *pattern;
+    struct ps_brush_pattern *pattern;
     HBRUSH hbrush;
     int ret;
 
@@ -2245,7 +2250,7 @@ static int WINAPI hmf_proc(HDC hdc, HANDLETABLE *htable,
     }
     case EMR_SAVEDC:
     {
-        int ret = PlayEnhMetaFileRecord(hdc, htable, rec, handle_count);
+        int ret = PlayEnhMetaFileRecord(data->ctx->hdc, htable, rec, handle_count);
 
         if (!data->saved_dc_size)
         {
@@ -2297,7 +2302,7 @@ static int WINAPI hmf_proc(HDC hdc, HANDLETABLE *htable,
     case EMR_SELECTOBJECT:
     {
         const EMRSELECTOBJECT *so = (const EMRSELECTOBJECT *)rec;
-        struct brush_pattern *pattern;
+        struct ps_brush_pattern *pattern;
         UINT aa_flags;
         HGDIOBJ obj;
 
@@ -2309,6 +2314,7 @@ static int WINAPI hmf_proc(HDC hdc, HANDLETABLE *htable,
         case OBJ_PEN: return PSDRV_SelectPen(data->ctx, obj, NULL) != NULL;
         case OBJ_BRUSH: return PSDRV_SelectBrush(data->ctx, obj, pattern) != NULL;
         case OBJ_FONT: return PSDRV_SelectFont(data->ctx, obj, &aa_flags) != NULL;
+        case OBJ_EXTPEN: return PSDRV_SelectPen(data->ctx, obj, NULL) != NULL;
         default:
             FIXME("unhandled object type %ld\n", GetObjectType(obj));
             return 1;
@@ -2738,8 +2744,8 @@ static int WINAPI hmf_proc(HDC hdc, HANDLETABLE *htable,
         if (!pts) return 0;
         for (i = 0; i < p->cpts; i++)
         {
-            pts[i].x = p->apts[i].x;
-            pts[i].y = p->apts[i].y;
+            pts[i].x = ((const POINTS *)p->apts)[i].x;
+            pts[i].y = ((const POINTS *)p->apts)[i].y;
         }
         i = poly_draw(data->ctx, pts, (BYTE *)(p->apts + p->cpts), p->cpts) &&
             MoveToEx(data->ctx->hdc, pts[p->cpts - 1].x, pts[p->cpts - 1].y, NULL);
@@ -2770,15 +2776,9 @@ static int WINAPI hmf_proc(HDC hdc, HANDLETABLE *htable,
     }
     case EMR_EXTESCAPE:
     {
-        const struct EMREXTESCAPE
-        {
-            EMR emr;
-            DWORD escape;
-            DWORD size;
-            BYTE data[1];
-        } *p = (const struct EMREXTESCAPE *)rec;
+        const EMREXTESCAPE *p = (const EMREXTESCAPE *)rec;
 
-        PSDRV_ExtEscape(data->ctx, p->escape, p->size, p->data, 0, NULL);
+        PSDRV_ExtEscape(data->ctx, p->iEscape, p->cbEscData, p->EscData, 0, NULL);
         return 1;
     }
     case EMR_GRADIENTFILL:
@@ -2843,6 +2843,7 @@ static int WINAPI hmf_proc(HDC hdc, HANDLETABLE *htable,
     case EMR_SELECTCLIPPATH:
     case EMR_EXTSELECTCLIPRGN:
     case EMR_EXTCREATEFONTINDIRECTW:
+    case EMR_EXTCREATEPEN:
     case EMR_SETLAYOUT:
         return PlayEnhMetaFileRecord(data->ctx->hdc, htable, rec, handle_count);
     default:
@@ -2978,6 +2979,7 @@ HANDLE WINAPI OpenPrintProcessor(WCHAR *port, PRINTPROCESSOROPENDATA *open_data)
         return NULL;
     data->magic = PP_MAGIC;
     data->hport = hport;
+    data->port = wcsdup(port);
     data->doc_name = wcsdup(open_data->pDocumentName);
     data->out_file = wcsdup(open_data->pOutputFile);
 
@@ -3001,6 +3003,7 @@ HANDLE WINAPI OpenPrintProcessor(WCHAR *port, PRINTPROCESSOROPENDATA *open_data)
 BOOL WINAPI PrintDocumentOnPrintProcessor(HANDLE pp, WCHAR *doc_name)
 {
     struct pp_data *data = get_handle_data(pp);
+    DEVMODEW *devmode = NULL;
     emfspool_header header;
     LARGE_INTEGER pos, cur;
     record_hdr record;
@@ -3013,6 +3016,21 @@ BOOL WINAPI PrintDocumentOnPrintProcessor(HANDLE pp, WCHAR *doc_name)
 
     if (!data)
         return FALSE;
+
+    spool_data = GdiGetSpoolFileHandle(data->port,
+            &data->ctx->Devmode->dmPublic, doc_name);
+    GdiGetDevmodeForPage(spool_data, 1, &devmode, NULL);
+    if (devmode && devmode->dmFields & DM_COPIES)
+    {
+        data->ctx->Devmode->dmPublic.dmFields |= DM_COPIES;
+        data->ctx->Devmode->dmPublic.dmCopies = devmode->dmCopies;
+    }
+    if (devmode && devmode->dmFields & DM_COLLATE)
+    {
+        data->ctx->Devmode->dmPublic.dmFields |= DM_COLLATE;
+        data->ctx->Devmode->dmPublic.dmCollate = devmode->dmCollate;
+    }
+    GdiDeleteSpoolFileHandle(spool_data);
 
     if (!OpenPrinterW(doc_name, &spool_data, NULL))
         return FALSE;
@@ -3140,6 +3158,7 @@ BOOL WINAPI PrintDocumentOnPrintProcessor(HANDLE pp, WCHAR *doc_name)
 cleanup:
     if (data->ctx->job.PageNo)
         PSDRV_WriteFooter(data->ctx);
+    flush_spool(data->ctx);
 
     HeapFree(GetProcessHeap(), 0, data->ctx->job.doc_name);
     ClosePrinter(spool_data);
@@ -3163,6 +3182,7 @@ BOOL WINAPI ClosePrintProcessor(HANDLE pp)
         return FALSE;
 
     ClosePrinter(data->hport);
+    free(data->port);
     free(data->doc_name);
     free(data->out_file);
     DeleteDC(data->ctx->hdc);

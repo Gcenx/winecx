@@ -43,7 +43,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(uxtheme);
 
 static const WCHAR szThemeManager[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager";
 
-DECLSPEC_HIDDEN ATOM atDialogThemeEnabled;
+ATOM atDialogThemeEnabled;
 
 static DWORD dwThemeAppProperties = STAP_ALLOW_NONCLIENT | STAP_ALLOW_CONTROLS;
 static ATOM atWindowTheme;
@@ -641,10 +641,6 @@ static HTHEME open_theme_data(HWND hwnd, LPCWSTR pszClassList, DWORD flags, UINT
 
         if (pszUseClassList)
             hTheme = MSSTYLES_OpenThemeClass(pszAppName, pszUseClassList, dpi);
-
-        /* Fall back to default class if the specified subclass is not found */
-        if (!hTheme)
-            hTheme = MSSTYLES_OpenThemeClass(NULL, pszUseClassList, dpi);
     }
     if(IsWindow(hwnd))
         SetPropW(hwnd, (LPCWSTR)MAKEINTATOM(atWindowTheme), hTheme);
@@ -1255,4 +1251,77 @@ BOOL WINAPI ThemeHooksRemove(void)
 {
     UnregisterUserApiHook();
     return TRUE;
+}
+
+/**********************************************************************
+ *      RefreshImmersiveColorPolicyState                  (UXTHEME.104)
+ *
+ */
+void WINAPI RefreshImmersiveColorPolicyState(void)
+{
+    FIXME("stub\n");
+}
+
+/**********************************************************************
+ *      ShouldSystemUseDarkMode                           (UXTHEME.138)
+ *
+ * RETURNS
+ *     Whether or not the system should use dark mode.
+ */
+BOOL WINAPI ShouldSystemUseDarkMode(void)
+{
+    DWORD light_theme = TRUE, light_theme_size = sizeof(light_theme);
+
+    RegGetValueW(HKEY_CURRENT_USER,
+                 L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                 L"SystemUsesLightTheme", RRF_RT_REG_DWORD, NULL, &light_theme, &light_theme_size);
+
+    return !light_theme;
+}
+
+/**********************************************************************
+ *      ShouldAppsUseDarkMode                           (UXTHEME.132)
+ *
+ * RETURNS
+ *     Whether or not apps should use dark mode.
+ */
+BOOL WINAPI ShouldAppsUseDarkMode(void)
+{
+    DWORD light_theme = TRUE, light_theme_size = sizeof(light_theme);
+
+    RegGetValueW(HKEY_CURRENT_USER,
+                 L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                 L"AppsUseLightTheme", RRF_RT_REG_DWORD, NULL, &light_theme, &light_theme_size);
+
+    return !light_theme;
+}
+
+/**********************************************************************
+ *      AllowDarkModeForWindow                          (UXTHEME.133)
+ *
+ */
+BOOL WINAPI AllowDarkModeForWindow(HWND hwnd, BOOL allow)
+{
+    FIXME("%p %d: stub\n", hwnd, allow);
+    return FALSE;
+}
+
+/**********************************************************************
+ *      SetPreferredAppMode                             (UXTHEME.135)
+ *
+ */
+int WINAPI SetPreferredAppMode(int app_mode)
+{
+    FIXME("%d: stub\n", app_mode);
+    return 0;
+}
+
+/**********************************************************************
+ *      IsDarkModeAllowedForWindow                        (UXTHEME.137)
+ *
+ */
+BOOL WINAPI IsDarkModeAllowedForWindow(HWND hwnd)
+{
+    FIXME("%p: stub\n", hwnd);
+    return FALSE;
 }

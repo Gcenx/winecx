@@ -978,16 +978,13 @@ static const struct data_model* get_data_model(DWORD64 modaddr)
     else if (ADDRSIZE == 4) model = ilp32_data_model;
     else
     {
-        IMAGEHLP_MODULEW64 mi;
-        DWORD opt = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
+        struct dhext_module_information wmi;
 
-        mi.SizeOfStruct = sizeof(mi);
-        if (SymGetModuleInfoW64(dbg_curr_process->handle, modaddr, &mi) &&
-            (wcsstr(mi.ModuleName, L".so") || wcsstr(mi.ModuleName, L"<")))
+        if (wine_get_module_information(dbg_curr_process->handle, modaddr, &wmi, sizeof(wmi)) &&
+            wmi.type != DMT_PE)
             model = lp64_data_model;
         else
             model = llp64_data_model;
-        SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
     }
     return model;
 }
@@ -1205,16 +1202,16 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
     return TRUE;
 }
 
-BOOL types_unload_module(DWORD_PTR linear)
+BOOL types_unload_module(struct dbg_process* pcs, DWORD_PTR linear)
 {
     unsigned i;
-    if (!dbg_curr_process) return FALSE;
-    for (i = 0; i < dbg_curr_process->num_synthetized_types; i++)
+    if (!pcs) return FALSE;
+    for (i = 0; i < pcs->num_synthetized_types; i++)
     {
-        if (dbg_curr_process->synthetized_types[i].module == linear)
+        if (pcs->synthetized_types[i].module == linear)
         {
-            dbg_curr_process->synthetized_types[i].module = 0;
-            dbg_curr_process->synthetized_types[i].id = dbg_itype_none;
+            pcs->synthetized_types[i].module = 0;
+            pcs->synthetized_types[i].id = dbg_itype_none;
         }
     }
     return TRUE;

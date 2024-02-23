@@ -40,11 +40,11 @@ msgstr ""
 msgid "Permissions for %1"
 msgstr "Својства за %s"
 
-#: dlls/appwiz.cpl/appwiz.rc:58
+#: dlls/appwiz.cpl/appwiz.rc:59
 msgid "Install/Uninstall"
 msgstr "Инсталирај/уклони"
 
-#: dlls/appwiz.cpl/appwiz.rc:61
+#: dlls/appwiz.cpl/appwiz.rc:62
 msgid ""
 "To install a new program from a floppy disk, CD-ROM drive, or your hard "
 "drive, click Install."
@@ -52,11 +52,11 @@ msgstr ""
 "Да бисте инсталирали нови програм са дискете, диска или тврдог диска, "
 "кликните на дугме „Инсталирај...“."
 
-#: dlls/appwiz.cpl/appwiz.rc:62
+#: dlls/appwiz.cpl/appwiz.rc:63
 msgid "&Install..."
 msgstr "&Инсталирај..."
 
-#: dlls/appwiz.cpl/appwiz.rc:65
+#: dlls/appwiz.cpl/appwiz.rc:66
 msgid ""
 "The following software can be automatically removed. To remove a program or "
 "to modify its installed components, select it from the list and click Modify/"
@@ -65,28 +65,28 @@ msgstr ""
 "Програм се може аутоматски уклонити. Да уклоните програм или да измените "
 "инсталационе делове, изаберите са списка и кликните на дугме „Измени/уклони“."
 
-#: dlls/appwiz.cpl/appwiz.rc:67
+#: dlls/appwiz.cpl/appwiz.rc:68
 #, fuzzy
 msgid "&Support Information"
 msgstr "Подршка"
 
-#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:136
+#: dlls/appwiz.cpl/appwiz.rc:69 programs/regedit/regedit.rc:136
 #: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "&Измени..."
 
-#: dlls/appwiz.cpl/appwiz.rc:69 dlls/appwiz.cpl/appwiz.rc:45
+#: dlls/appwiz.cpl/appwiz.rc:70 dlls/appwiz.cpl/appwiz.rc:45
 #: dlls/cryptui/cryptui.rc:351 dlls/msacm32/msacm32.rc:40
-#: programs/winecfg/winecfg.rc:199 programs/winecfg/winecfg.rc:236
+#: programs/winecfg/winecfg.rc:205 programs/winecfg/winecfg.rc:242
 #: programs/wordpad/wordpad.rc:256
 msgid "&Remove"
 msgstr "&Уклони"
 
-#: dlls/appwiz.cpl/appwiz.rc:75
+#: dlls/appwiz.cpl/appwiz.rc:76
 msgid "Support Information"
 msgstr "Подршка"
 
-#: dlls/appwiz.cpl/appwiz.rc:78 dlls/avifil32/avifil32.rc:54
+#: dlls/appwiz.cpl/appwiz.rc:79 dlls/avifil32/avifil32.rc:54
 #: dlls/comctl32/comctl32.rc:71 dlls/comctl32/comctl32.rc:55
 #: dlls/comdlg32/comdlg32.rc:233 dlls/comdlg32/comdlg32.rc:263
 #: dlls/comdlg32/comdlg32.rc:307 dlls/comdlg32/comdlg32.rc:390
@@ -102,68 +102,68 @@ msgstr "Подршка"
 #: dlls/shell32/shell32.rc:274 dlls/shell32/shell32.rc:298
 #: dlls/shell32/shell32.rc:320 dlls/shell32/shell32.rc:339
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
-#: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
-#: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/net/net.rc:47 programs/notepad/notepad.rc:124
-#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
-#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
-#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
-#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
-#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:301
-#: programs/regedit/regedit.rc:312 programs/regedit/regedit.rc:325
-#: programs/regedit/regedit.rc:341 programs/regedit/regedit.rc:354
-#: programs/regedit/regedit.rc:367 programs/taskmgr/taskmgr.rc:442
-#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
-#: programs/winecfg/winecfg.rc:223 programs/winefile/winefile.rc:127
-#: programs/winefile/winefile.rc:150 programs/winefile/winefile.rc:180
-#: programs/winemine/winemine.rc:73 programs/winemine/winemine.rc:84
-#: programs/winemine/winemine.rc:98 programs/wordpad/wordpad.rc:215
-#: programs/wordpad/wordpad.rc:226 programs/wordpad/wordpad.rc:244
-#: programs/wordpad/wordpad.rc:257
+#: dlls/user32/user32.rc:94 dlls/user32/user32.rc:109 dlls/user32/user32.rc:73
+#: dlls/wininet/wininet.rc:62 dlls/wininet/wininet.rc:82
+#: dlls/winspool.drv/winspool.rc:42 programs/net/net.rc:48
+#: programs/notepad/notepad.rc:124 programs/oleview/oleview.rc:161
+#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
+#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
+#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
+#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
+#: programs/regedit/regedit.rc:301 programs/regedit/regedit.rc:312
+#: programs/regedit/regedit.rc:325 programs/regedit/regedit.rc:341
+#: programs/regedit/regedit.rc:354 programs/regedit/regedit.rc:367
+#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
+#: programs/winecfg/winecfg.rc:219 programs/winecfg/winecfg.rc:229
+#: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
+#: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
+#: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
+#: programs/wordpad/wordpad.rc:215 programs/wordpad/wordpad.rc:226
+#: programs/wordpad/wordpad.rc:244 programs/wordpad/wordpad.rc:257
 msgid "OK"
 msgstr "У реду"
 
-#: dlls/appwiz.cpl/appwiz.rc:79
+#: dlls/appwiz.cpl/appwiz.rc:80
 msgid "The following information can be used to get technical support for %s:"
 msgstr "Следећи подаци се могу користити за добијање техничке подршке за %s:"
 
-#: dlls/appwiz.cpl/appwiz.rc:80
+#: dlls/appwiz.cpl/appwiz.rc:81
 msgid "Publisher:"
 msgstr "Издавач:"
 
-#: dlls/appwiz.cpl/appwiz.rc:81 programs/winefile/winefile.rc:165
+#: dlls/appwiz.cpl/appwiz.rc:82 programs/winefile/winefile.rc:165
 msgid "Version:"
 msgstr "Издање:"
 
-#: dlls/appwiz.cpl/appwiz.rc:82
+#: dlls/appwiz.cpl/appwiz.rc:83
 msgid "Contact:"
 msgstr "Контакт:"
 
-#: dlls/appwiz.cpl/appwiz.rc:83
+#: dlls/appwiz.cpl/appwiz.rc:84
 msgid "Support Information:"
 msgstr "Подршка:"
 
-#: dlls/appwiz.cpl/appwiz.rc:84
+#: dlls/appwiz.cpl/appwiz.rc:85
 msgid "Support Telephone:"
 msgstr "Телефон за подршку:"
 
-#: dlls/appwiz.cpl/appwiz.rc:85
+#: dlls/appwiz.cpl/appwiz.rc:86
 msgid "Readme:"
 msgstr "Прочитај ме:"
 
-#: dlls/appwiz.cpl/appwiz.rc:86
+#: dlls/appwiz.cpl/appwiz.rc:87
 msgid "Product Updates:"
 msgstr "Доградње:"
 
-#: dlls/appwiz.cpl/appwiz.rc:87
+#: dlls/appwiz.cpl/appwiz.rc:88
 msgid "Comments:"
 msgstr "Коментари:"
 
-#: dlls/appwiz.cpl/appwiz.rc:100
+#: dlls/appwiz.cpl/appwiz.rc:101
 msgid "Wine Gecko Installer"
 msgstr "Wine Gecko инсталациони програм"
 
-#: dlls/appwiz.cpl/appwiz.rc:103
+#: dlls/appwiz.cpl/appwiz.rc:104
 #, fuzzy
 msgid ""
 "Wine could not find a Gecko package which is needed for applications "
@@ -181,11 +181,11 @@ msgstr ""
 "Напомена: препоручујемо Вам да користите расподељене пакете. Погледајте "
 "https://wiki.winehq.org/Gecko за више информација."
 
-#: dlls/appwiz.cpl/appwiz.rc:109 dlls/appwiz.cpl/appwiz.rc:124
+#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
 msgid "&Install"
 msgstr "&Инсталирај"
 
-#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
+#: dlls/appwiz.cpl/appwiz.rc:111 dlls/appwiz.cpl/appwiz.rc:126
 #: dlls/avifil32/avifil32.rc:55 dlls/browseui/browseui.rc:45
 #: dlls/comctl32/comctl32.rc:72 dlls/comctl32/comctl32.rc:87
 #: dlls/comctl32/comctl32.rc:56 dlls/comdlg32/comdlg32.rc:172
@@ -207,34 +207,34 @@ msgstr "&Инсталирај"
 #: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:275
 #: dlls/shell32/shell32.rc:299 dlls/shell32/shell32.rc:310
 #: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
-#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
-#: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:125
-#: programs/notepad/notepad.rc:138 programs/oleview/oleview.rc:162
-#: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
-#: programs/progman/progman.rc:125 programs/progman/progman.rc:143
-#: programs/progman/progman.rc:159 programs/progman/progman.rc:181
-#: programs/progman/progman.rc:200 programs/progman/progman.rc:217
-#: programs/regedit/regedit.rc:302 programs/regedit/regedit.rc:313
-#: programs/regedit/regedit.rc:326 programs/regedit/regedit.rc:342
-#: programs/regedit/regedit.rc:355 programs/regedit/regedit.rc:368
-#: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
-#: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
-#: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
-#: programs/winefile/winefile.rc:151 programs/winefile/winefile.rc:181
-#: programs/winemine/winemine.rc:99 programs/wordpad/wordpad.rc:216
-#: programs/wordpad/wordpad.rc:227 programs/wordpad/wordpad.rc:245
-#: programs/wordpad/wordpad.rc:258
+#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:95 dlls/user32/user32.rc:110
+#: dlls/user32/user32.rc:74 dlls/wininet/wininet.rc:63
+#: dlls/wininet/wininet.rc:83 dlls/winspool.drv/winspool.rc:43
+#: programs/notepad/notepad.rc:125 programs/notepad/notepad.rc:138
+#: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
+#: programs/progman/progman.rc:107 programs/progman/progman.rc:125
+#: programs/progman/progman.rc:143 programs/progman/progman.rc:159
+#: programs/progman/progman.rc:181 programs/progman/progman.rc:200
+#: programs/progman/progman.rc:217 programs/regedit/regedit.rc:302
+#: programs/regedit/regedit.rc:313 programs/regedit/regedit.rc:326
+#: programs/regedit/regedit.rc:342 programs/regedit/regedit.rc:355
+#: programs/regedit/regedit.rc:368 programs/taskmgr/taskmgr.rc:443
+#: programs/taskmgr/taskmgr.rc:518 programs/wineboot/wineboot.rc:34
+#: programs/winecfg/winecfg.rc:220 programs/winecfg/winecfg.rc:230
+#: programs/winefile/winefile.rc:128 programs/winefile/winefile.rc:151
+#: programs/winefile/winefile.rc:181 programs/winemine/winemine.rc:99
+#: programs/wordpad/wordpad.rc:216 programs/wordpad/wordpad.rc:227
+#: programs/wordpad/wordpad.rc:245 programs/wordpad/wordpad.rc:258
 msgid "Cancel"
 msgstr "Откажи"
 
-#: dlls/appwiz.cpl/appwiz.rc:115
+#: dlls/appwiz.cpl/appwiz.rc:116
 #, fuzzy
 #| msgid "Wine Gecko Installer"
 msgid "Wine Mono Installer"
 msgstr "Wine Gecko инсталациони програм"
 
-#: dlls/appwiz.cpl/appwiz.rc:118
+#: dlls/appwiz.cpl/appwiz.rc:119
 #, fuzzy
 msgid ""
 "Wine could not find a wine-mono package which is needed for .NET "
@@ -319,18 +319,22 @@ msgstr "Све датотеке (*.*)"
 msgid "&Modify/Remove"
 msgstr "&Измени/уклони..."
 
-#: dlls/appwiz.cpl/appwiz.rc:51
+#: dlls/appwiz.cpl/appwiz.rc:52
 msgid "Downloading..."
 msgstr "Преузимање..."
 
-#: dlls/appwiz.cpl/appwiz.rc:52
+#: dlls/appwiz.cpl/appwiz.rc:53
 msgid "Installing..."
 msgstr "Инсталирање..."
 
-#: dlls/appwiz.cpl/appwiz.rc:53
+#: dlls/appwiz.cpl/appwiz.rc:54
 msgid ""
 "Unexpected checksum of downloaded file. Aborting installation of corrupted "
 "file."
+msgstr ""
+
+#: dlls/appwiz.cpl/appwiz.rc:47
+msgid "Please wait until the current uninstall/modify process is complete."
 msgstr ""
 
 #: dlls/avifil32/avifil32.rc:42
@@ -420,7 +424,8 @@ msgid "&Apply"
 msgstr "&Примени"
 
 #: dlls/comctl32/comctl32.rc:74 dlls/comctl32/comctl32.rc:88
-#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:88
+#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:99
+#: dlls/user32/user32.rc:81
 msgid "Help"
 msgstr "Помоћ"
 
@@ -446,9 +451,9 @@ msgstr "Прилагоди алатницу"
 
 #: dlls/comctl32/comctl32.rc:100 dlls/comctl32/comctl32.rc:57
 #: dlls/cryptui/cryptui.rc:356 dlls/ieframe/ieframe.rc:43
-#: programs/oleview/oleview.rc:83 programs/oleview/oleview.rc:187
-#: programs/oleview/oleview.rc:200 programs/oleview/oleview.rc:212
-#: programs/taskmgr/taskmgr.rc:139
+#: dlls/user32/user32.rc:80 programs/oleview/oleview.rc:83
+#: programs/oleview/oleview.rc:187 programs/oleview/oleview.rc:200
+#: programs/oleview/oleview.rc:212 programs/taskmgr/taskmgr.rc:139
 msgid "&Close"
 msgstr "&Затвори"
 
@@ -511,16 +516,17 @@ msgid "None"
 msgstr "Ништа"
 
 #: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:307
-#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:79
+#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:90 dlls/user32/user32.rc:78
 msgid "&Yes"
 msgstr "&Да"
 
 #: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:309
-#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:80
+#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:91 dlls/user32/user32.rc:79
 msgid "&No"
 msgstr "&Не"
 
-#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:82
+#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:93
+#: dlls/user32/user32.rc:76
 msgid "&Retry"
 msgstr "Покушај &поново"
 
@@ -538,7 +544,7 @@ msgstr "Детаљи"
 
 #: dlls/comctl32/comctl32.rc:31 dlls/cryptui/cryptui.rc:235
 #: programs/regedit/regedit.rc:291 programs/taskmgr/taskmgr.rc:434
-#: programs/winedbg/winedbg.rc:61 programs/winedbg/winedbg.rc:76
+#: programs/winedbg/winedbg.rc:59 programs/winedbg/winedbg.rc:71
 #: programs/wordpad/wordpad.rc:180
 msgid "Close"
 msgstr "Затвори"
@@ -700,7 +706,7 @@ msgid "Font St&yle:"
 msgstr "&Стил фонта:"
 
 #: dlls/comdlg32/comdlg32.rc:260 dlls/comdlg32/comdlg32.rc:439
-#: programs/winecfg/winecfg.rc:292
+#: programs/winecfg/winecfg.rc:300
 msgid "&Size:"
 msgstr "&Величина:"
 
@@ -716,7 +722,7 @@ msgstr "&Прецртај"
 msgid "&Underline"
 msgstr "&Подвуци"
 
-#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:290
+#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:298
 msgid "&Color:"
 msgstr "&Боја:"
 
@@ -896,7 +902,7 @@ msgstr "Број &примерака:"
 msgid "C&ollate"
 msgstr "&Сложи"
 
-#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:298
+#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:306
 msgid "Si&ze:"
 msgstr "&Величина:"
 
@@ -2419,7 +2425,7 @@ msgid "&File name:"
 msgstr "&Датотека"
 
 #: dlls/cryptui/cryptui.rc:301 dlls/cryptui/cryptui.rc:323
-#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:311
+#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:319
 #, fuzzy
 msgid "B&rowse..."
 msgstr ""
@@ -3762,11 +3768,22 @@ msgstr ""
 msgid "High"
 msgstr ""
 
+#: dlls/ir50_32/ir50_32.rc:28
+#, fuzzy
+msgid "Indeo5"
+msgstr "&Попис"
+
+#: dlls/ir50_32/ir50_32.rc:29
+#, fuzzy
+#| msgid "Wine Video 1 video codec"
+msgid "Indeo Video Interactive version 5 video codec"
+msgstr "Wine Video 1 видео кодек"
+
 #: dlls/joy.cpl/joy.rc:37
 msgid "Joysticks"
 msgstr ""
 
-#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:212
+#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:218
 #, fuzzy
 msgid "&Disable"
 msgstr "табела"
@@ -4012,15 +4029,15 @@ msgstr ""
 msgid "Expected '@'"
 msgstr "Очекивано ';'"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:84
 msgid "Microsoft JScript compilation error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:85
 msgid "Microsoft JScript runtime error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:84 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:86 dlls/vbscript/vbscript.rc:64
 #, fuzzy
 msgid "Unknown runtime error"
 msgstr "Непознат извор"
@@ -4083,79 +4100,90 @@ msgid "Syntax error in regular expression"
 msgstr "Синтаксна грешка у регуларном изразу"
 
 #: dlls/jscript/jscript.rc:66
+#, fuzzy
+msgid "Unexpected quantifier"
+msgstr "Грешка у синтакси.\n"
+
+#: dlls/jscript/jscript.rc:67
 msgid "Exception thrown and not caught"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "URI to be encoded contains invalid characters"
 msgstr "URI садржи неисправне знакове"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 #, fuzzy
 msgid "URI to be decoded is incorrect"
 msgstr "URI садржи неисправне знакове"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 #, fuzzy
 msgid "Number of fraction digits is out of range"
 msgstr "Потпис је ван домета.\n"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 #, fuzzy
 #| msgid "Subscript out of range"
 msgid "Precision is out of range"
 msgstr "Потпис је ван домета"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Array length must be a finite positive integer"
 msgstr "Низ дужине мора бити коначан позитиван цео број"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Array object expected"
 msgstr "Очекивани низ објекта"
 
-#: dlls/jscript/jscript.rc:73
+#: dlls/jscript/jscript.rc:74
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:74
+#: dlls/jscript/jscript.rc:75
 msgid "Cyclic __proto__ value"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:75
+#: dlls/jscript/jscript.rc:76
 msgid "Cannot create property for a non-extensible object"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:77
 msgid "Cannot define property '|': object is not extensible"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:78
 msgid "Cannot redefine non-configurable property '|'"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot modify non-writable property '|'"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:80
 #, fuzzy
 #| msgid "'[object]' is not a date object"
 msgid "'this' is not a | object"
 msgstr "„[object]“ није временски објекат"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:81
+#, fuzzy
+#| msgid "'[object]' is not a date object"
+msgid "'key' is not an object"
+msgstr "„[object]“ није временски објекат"
+
+#: dlls/jscript/jscript.rc:82
 msgid "Property cannot have both accessors and a value"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:133
+#: include/wine/wine_common_ver.rc:138
 msgid "Wine kernel DLL"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:138 dlls/winemac.drv/winemac.rc:32
-#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
+#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
 
@@ -8481,7 +8509,7 @@ msgstr "Цела мрежа"
 msgid "Sound Selection"
 msgstr "Избор звука"
 
-#: dlls/msacm32/msacm32.rc:39 programs/winedbg/winedbg.rc:77
+#: dlls/msacm32/msacm32.rc:39 programs/winedbg/winedbg.rc:72
 msgid "&Save As..."
 msgstr "&Сачувај као..."
 
@@ -8501,7 +8529,7 @@ msgstr "Хипервеза"
 msgid "Hyperlink Information"
 msgstr "Подаци о хипервези"
 
-#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:243
+#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:249
 msgid "&Type:"
 msgstr "&Врста:"
 
@@ -10001,8 +10029,8 @@ msgctxt "unit: bits"
 msgid "b"
 msgstr "b"
 
-#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:49
-#: programs/winecfg/winecfg.rc:182
+#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:52
+#: programs/winecfg/winecfg.rc:188
 msgctxt "unit: dots/inch"
 msgid "dpi"
 msgstr "тпи"
@@ -10534,7 +10562,7 @@ msgstr "&Отвори:"
 
 #: dlls/shell32/shell32.rc:341 programs/progman/progman.rc:182
 #: programs/progman/progman.rc:201 programs/progman/progman.rc:218
-#: programs/winecfg/winecfg.rc:241 programs/winefile/winefile.rc:129
+#: programs/winecfg/winecfg.rc:247 programs/winefile/winefile.rc:129
 msgid "&Browse..."
 msgstr "&Разгледај..."
 
@@ -10632,7 +10660,7 @@ msgstr "Оригинална локација"
 msgid "Date deleted"
 msgstr "Датум брисања"
 
-#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:100
+#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:106
 #: programs/winefile/winefile.rc:99
 #, fuzzy
 msgctxt "display name"
@@ -13271,23 +13299,23 @@ msgstr "&Затвори\tCtrl+F4"
 msgid "Nex&t\tCtrl+F6"
 msgstr ""
 
-#: dlls/user32/user32.rc:81
+#: dlls/user32/user32.rc:92 dlls/user32/user32.rc:75
 msgid "&Abort"
 msgstr "&Прекини"
 
-#: dlls/user32/user32.rc:85
+#: dlls/user32/user32.rc:96 dlls/user32/user32.rc:77
 msgid "&Ignore"
 msgstr "&Занемари"
 
-#: dlls/user32/user32.rc:86
+#: dlls/user32/user32.rc:97 dlls/user32/user32.rc:82
 msgid "&Try Again"
 msgstr "Пок&ушај поново"
 
-#: dlls/user32/user32.rc:87
+#: dlls/user32/user32.rc:98 dlls/user32/user32.rc:83
 msgid "&Continue"
 msgstr "&Настави"
 
-#: dlls/user32/user32.rc:94
+#: dlls/user32/user32.rc:105
 msgid "Select Window"
 msgstr "Избор"
 
@@ -13485,6 +13513,12 @@ msgstr ""
 msgid "Duplex:"
 msgstr ""
 
+#: dlls/wineps.drv/wineps.rc:45
+#, fuzzy
+#| msgid "&Tray:"
+msgid "Paper &Tray:"
+msgstr "&Фиока:"
+
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
 msgstr "Домен"
@@ -13493,7 +13527,7 @@ msgstr "Домен"
 msgid "Authentication Required"
 msgstr "Потврда идентитета"
 
-#: dlls/wininet/wininet.rc:72
+#: dlls/wininet/wininet.rc:72 programs/klist/klist.rc:35
 msgid "Server"
 msgstr "Сервер"
 
@@ -14429,7 +14463,7 @@ msgid "Digi&tal"
 msgstr "&Дигитални"
 
 #: programs/clock/clock.rc:35 programs/notepad/notepad.rc:53
-#: programs/winecfg/winecfg.rc:305 programs/winefile/winefile.rc:63
+#: programs/winecfg/winecfg.rc:313 programs/winefile/winefile.rc:63
 #: programs/wordpad/wordpad.rc:84
 msgid "&Font..."
 msgstr "&Фонт..."
@@ -15253,6 +15287,36 @@ msgstr "„Старт“ мени"
 msgid "&Run..."
 msgstr ""
 
+#: programs/explorer/explorer.rc:36
+#, fuzzy
+msgid "E&xit desktop"
+msgstr "&Прозор"
+
+#: programs/explorer/explorer.rc:37
+#, fuzzy
+msgid ""
+"Are you sure you want to close all programs and exit the virtual desktop?"
+msgstr "Желите ли да избришете ових %1 ставки?"
+
+#: programs/findstr/findstr.rc:28
+#, fuzzy
+#| msgid "LAN Connection"
+msgid "Usage: findstr /options string\n"
+msgstr "LAN веза"
+
+#: programs/findstr/findstr.rc:29
+#, fuzzy
+msgid "FINDSTR: Bad command line\n"
+msgstr "Неисправна синтакса.\n"
+
+#: programs/findstr/findstr.rc:30
+msgid "FINDSTR: Cannot open %s\n"
+msgstr ""
+
+#: programs/findstr/findstr.rc:31
+msgid "FINDSTR: /%c ignored\n"
+msgstr ""
+
 #: programs/fsutil/fsutil.mc:28
 msgid ""
 "- Supported Commands -\n"
@@ -15368,6 +15432,49 @@ msgstr "IP адреса"
 msgid "Primary DNS suffix"
 msgstr ""
 
+#: programs/klist/klist.rc:28
+msgid "Usage: klist <tickets | tgt | purge | get [service principal name]>\n"
+msgstr ""
+
+#: programs/klist/klist.rc:29
+#, fuzzy
+msgid "Unknown error\n"
+msgstr "Непознат извор"
+
+#: programs/klist/klist.rc:30
+#, fuzzy
+#| msgid "Start Menu"
+msgid "Start Time"
+msgstr "„Старт“ мени"
+
+#: programs/klist/klist.rc:31
+#, fuzzy
+#| msgid "&Standard bar"
+msgid "End Time"
+msgstr "&Стандардна трака"
+
+#: programs/klist/klist.rc:32
+msgid "Renew Time"
+msgstr ""
+
+#: programs/klist/klist.rc:33
+msgid "Ticket Flags"
+msgstr ""
+
+#: programs/klist/klist.rc:34
+msgid "Cached Tickets"
+msgstr ""
+
+#: programs/klist/klist.rc:36
+msgid "KerbTicket Encryption Type"
+msgstr ""
+
+#: programs/klist/klist.rc:37
+#, fuzzy
+#| msgid "LAN Connection"
+msgid "Current LogonId is"
+msgstr "LAN веза"
+
 #: programs/msinfo32/msinfo32.rc:28
 #, fuzzy
 msgid "System Information"
@@ -15446,48 +15553,52 @@ msgstr ""
 msgid "The %1 service failed to stop.\n"
 msgstr "Неисправни акредитиви"
 
-#: programs/net/net.rc:44
+#: programs/net/net.rc:45
 msgid "There are no entries in the list.\n"
 msgstr ""
 
-#: programs/net/net.rc:45
+#: programs/net/net.rc:46
 msgid ""
 "\n"
 "Status  Local   Remote\n"
 "---------------------------------------------------------------\n"
 msgstr ""
 
-#: programs/net/net.rc:46
+#: programs/net/net.rc:47
 msgid "%1      %2      %3      Open resources: %4!u!\n"
 msgstr ""
 
-#: programs/net/net.rc:48
+#: programs/net/net.rc:49
 #, fuzzy
 msgid "Paused"
 msgstr "Паузирано; "
 
-#: programs/net/net.rc:49
+#: programs/net/net.rc:50
 #, fuzzy
 msgid "Disconnected"
 msgstr "Датотека није пронађена"
 
-#: programs/net/net.rc:50
+#: programs/net/net.rc:51
 #, fuzzy
 msgid "A network error occurred"
 msgstr "Дошло је до грешке у штампачу."
 
-#: programs/net/net.rc:51
+#: programs/net/net.rc:52
 #, fuzzy
 msgid "Connection is being made"
 msgstr "LAN веза"
 
-#: programs/net/net.rc:52
+#: programs/net/net.rc:53
 #, fuzzy
 msgid "Reconnecting"
 msgstr "Повезивање на %s"
 
 #: programs/net/net.rc:43
 msgid "The following services are running:\n"
+msgstr ""
+
+#: programs/net/net.rc:44
+msgid "A command was used with conflicting switches.\n"
 msgstr ""
 
 #: programs/netstat/netstat.rc:30
@@ -17567,7 +17678,7 @@ msgstr ""
 msgid "regsvr32: Successfully uninstalled DLL '%1'\n"
 msgstr ""
 
-#: programs/start/start.rc:57
+#: programs/start/start.rc:56
 msgid ""
 "Start a program, or open a document in the program normally used for files\n"
 "with that suffix.\n"
@@ -17590,23 +17701,24 @@ msgid ""
 "/belownormal   Start the program in the belownormal priority class.\n"
 "/node n        Start the program on the specified NUMA node.\n"
 "/affinity mask Start the program with the specified affinity mask.\n"
-"/wait          Wait for the started program to finish, then exit with its\n"
-"exit code.\n"
-"/unix          Use a Unix filename and start the file like Windows\n"
+"/machine arch  Force using a specific architecture (x86,arm,amd64,arm64).\n"
+"/wait          Wait for the program to finish, then exit with its exit "
+"code.\n"
+"/unix          Use a Unix filename and start the file like Windows "
 "Explorer.\n"
 "/exec          Exec the specified file (for internal Wine usage).\n"
 "/ProgIDOpen    Open a document using the specified progID.\n"
 "/?             Display this help and exit.\n"
 msgstr ""
 
-#: programs/start/start.rc:59
+#: programs/start/start.rc:58
 msgid ""
 "Application could not be started, or no application associated with the "
 "specified file.\n"
 "ShellExecuteEx failed"
 msgstr ""
 
-#: programs/start/start.rc:61
+#: programs/start/start.rc:60
 msgid "Could not translate the specified Unix filename to a DOS filename."
 msgstr ""
 
@@ -17672,6 +17784,67 @@ msgstr ""
 #: programs/taskkill/taskkill.rc:43
 msgid "Error: Process self-termination is not permitted.\n"
 msgstr ""
+
+#: programs/taskkill/taskkill.rc:44
+msgid ""
+"The process with PID %1!u! (child process of PID %2!u!) has been "
+"terminated.\n"
+msgstr ""
+
+#: programs/taskkill/taskkill.rc:45
+msgid ""
+"Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
+msgstr ""
+
+#: include/wine/wine_common_ver.rc:138
+#, fuzzy
+#| msgid "page tab list"
+msgid "Wine tasklist"
+msgstr "списак листова"
+
+#: programs/tasklist/tasklist.rc:29
+msgid "Usage: tasklist [/?]\n"
+msgstr ""
+
+#: programs/tasklist/tasklist.rc:30 programs/taskmgr/taskmgr.rc:272
+#, fuzzy
+msgid "Image Name"
+msgstr "Слика"
+
+#: programs/tasklist/tasklist.rc:31 programs/taskmgr/taskmgr.rc:273
+msgid "PID"
+msgstr ""
+
+#: programs/tasklist/tasklist.rc:32
+#, fuzzy
+msgid "Session Name"
+msgstr "Корисник је отказан.\n"
+
+#: programs/tasklist/tasklist.rc:33
+#, fuzzy
+#| msgid "Version"
+msgid "Session#"
+msgstr "Издање"
+
+#: programs/tasklist/tasklist.rc:34 programs/taskmgr/taskmgr.rc:276
+msgid "Mem Usage"
+msgstr ""
+
+#: programs/tasklist/tasklist.rc:35
+#, fuzzy
+#| msgid "OK"
+msgid "K"
+msgstr "У реду"
+
+#: programs/tasklist/tasklist.rc:36
+#, fuzzy
+msgid "ERROR: Invalid syntax\n"
+msgstr "Неисправна синтакса.\n"
+
+#: programs/tasklist/tasklist.rc:37
+#, fuzzy
+msgid "ERROR: The search filter cannot be recognized.\n"
+msgstr "Датотека „%s“ није пронађена."
 
 #: programs/taskmgr/taskmgr.rc:37 programs/taskmgr/taskmgr.rc:108
 msgid "&New Task (Run...)"
@@ -18352,25 +18525,12 @@ msgstr ""
 msgid "Mem Usage: %1!u!kB / %2!u!kB"
 msgstr ""
 
-#: programs/taskmgr/taskmgr.rc:272
-#, fuzzy
-msgid "Image Name"
-msgstr "Слика"
-
-#: programs/taskmgr/taskmgr.rc:273
-msgid "PID"
-msgstr ""
-
 #: programs/taskmgr/taskmgr.rc:274
 msgid "CPU"
 msgstr ""
 
 #: programs/taskmgr/taskmgr.rc:275
 msgid "CPU Time"
-msgstr ""
-
-#: programs/taskmgr/taskmgr.rc:276
-msgid "Mem Usage"
 msgstr ""
 
 #: programs/taskmgr/taskmgr.rc:277
@@ -18587,7 +18747,7 @@ msgstr ""
 msgid "The Wine configuration in %s is being updated, please wait..."
 msgstr "Wine поставке у %s се ажурирају. Молимо, сачекајте..."
 
-#: programs/winecfg/winecfg.rc:140
+#: programs/winecfg/winecfg.rc:146
 msgid ""
 "This program is free software; you can redistribute it and/or modify it "
 "under the terms of the GNU Lesser General Public License as published by the "
@@ -18595,172 +18755,172 @@ msgid ""
 "option) any later version."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:142
+#: programs/winecfg/winecfg.rc:148
 #, fuzzy
 msgid "Windows registration information"
 msgstr "Подаци"
 
-#: programs/winecfg/winecfg.rc:143
+#: programs/winecfg/winecfg.rc:149
 #, fuzzy
 msgid "&Owner:"
 msgstr "Власник"
 
-#: programs/winecfg/winecfg.rc:145
+#: programs/winecfg/winecfg.rc:151
 #, fuzzy
 msgid "Organi&zation:"
 msgstr "анимација"
 
-#: programs/winecfg/winecfg.rc:153
+#: programs/winecfg/winecfg.rc:159
 #, fuzzy
 msgid "Application settings"
 msgstr "Програми"
 
-#: programs/winecfg/winecfg.rc:154
+#: programs/winecfg/winecfg.rc:160
 msgid ""
 "Wine can mimic different Windows versions for each application. This tab is "
 "linked to the Libraries and Graphics tabs to allow you to change system-wide "
 "or per-application settings in those tabs as well."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:158
+#: programs/winecfg/winecfg.rc:164
 #, fuzzy
 msgid "Add appli&cation..."
 msgstr "програм"
 
-#: programs/winecfg/winecfg.rc:159
+#: programs/winecfg/winecfg.rc:165
 #, fuzzy
 msgid "&Remove application"
 msgstr "програм"
 
-#: programs/winecfg/winecfg.rc:160
+#: programs/winecfg/winecfg.rc:166
 #, fuzzy
 msgid "&Windows Version:"
 msgstr "&Прозор"
 
-#: programs/winecfg/winecfg.rc:168
+#: programs/winecfg/winecfg.rc:174
 #, fuzzy
 msgid "Window settings"
 msgstr "&Прозор"
 
-#: programs/winecfg/winecfg.rc:169
+#: programs/winecfg/winecfg.rc:175
 msgid "Automatically capture the &mouse in full-screen windows"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:170
+#: programs/winecfg/winecfg.rc:176
 msgid "Allow the window manager to &decorate the windows"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:171
+#: programs/winecfg/winecfg.rc:177
 msgid "Allow the &window manager to control the windows"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:172
+#: programs/winecfg/winecfg.rc:178
 msgid "&Emulate a virtual desktop"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:174
+#: programs/winecfg/winecfg.rc:180
 #, fuzzy
 msgid "Desktop &size:"
 msgstr "Радна површина"
 
-#: programs/winecfg/winecfg.rc:179
+#: programs/winecfg/winecfg.rc:185
 msgid "Screen resolution"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:183
+#: programs/winecfg/winecfg.rc:189
 msgid "This is a sample text using 10 point Tahoma"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:190
+#: programs/winecfg/winecfg.rc:196
 #, fuzzy
 msgid "DLL overrides"
 msgstr "&Уређивање"
 
-#: programs/winecfg/winecfg.rc:191
+#: programs/winecfg/winecfg.rc:197
 msgid ""
 "Dynamic Link Libraries can be specified individually to be either builtin "
 "(provided by Wine) or native (taken from Windows or provided by the "
 "application)."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:193
+#: programs/winecfg/winecfg.rc:199
 msgid "&New override for library:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:195
+#: programs/winecfg/winecfg.rc:201
 msgid "A&dd"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:196
+#: programs/winecfg/winecfg.rc:202
 msgid "Existing &overrides:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:198
+#: programs/winecfg/winecfg.rc:204
 #, fuzzy
 msgid "&Edit..."
 msgstr "&Уређивање"
 
-#: programs/winecfg/winecfg.rc:204
+#: programs/winecfg/winecfg.rc:210
 #, fuzzy
 msgid "Edit Override"
 msgstr "&Уређивање"
 
-#: programs/winecfg/winecfg.rc:207
+#: programs/winecfg/winecfg.rc:213
 #, fuzzy
 msgid "Load order"
 msgstr "граница"
 
-#: programs/winecfg/winecfg.rc:208
+#: programs/winecfg/winecfg.rc:214
 #, fuzzy
 msgid "&Builtin (Wine)"
 msgstr "&О Бележници"
 
-#: programs/winecfg/winecfg.rc:209
+#: programs/winecfg/winecfg.rc:215
 #, fuzzy
 msgid "&Native (Windows)"
 msgstr "&Прозор"
 
-#: programs/winecfg/winecfg.rc:210
+#: programs/winecfg/winecfg.rc:216
 msgid "Buil&tin then Native"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:211
+#: programs/winecfg/winecfg.rc:217
 msgid "Nati&ve then Builtin"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:219
+#: programs/winecfg/winecfg.rc:225
 #, fuzzy
 msgid "Select Drive Letter"
 msgstr "Изабери &све"
 
-#: programs/winecfg/winecfg.rc:231
+#: programs/winecfg/winecfg.rc:237
 #, fuzzy
 msgid "Drive configuration"
 msgstr "Подаци"
 
-#: programs/winecfg/winecfg.rc:232
+#: programs/winecfg/winecfg.rc:238
 msgid ""
 "Failed to connect to the mount manager; the drive configuration cannot be "
 "edited."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:235
+#: programs/winecfg/winecfg.rc:241
 msgid "A&dd..."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:239
+#: programs/winecfg/winecfg.rc:245
 msgid "&Path:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:246 programs/winecfg/winecfg.rc:37
+#: programs/winecfg/winecfg.rc:252 programs/winecfg/winecfg.rc:37
 msgid "Show Advan&ced"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:247
+#: programs/winecfg/winecfg.rc:253
 msgid "De&vice:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:249
+#: programs/winecfg/winecfg.rc:255
 #, fuzzy
 msgid "Bro&wse..."
 msgstr ""
@@ -18769,95 +18929,99 @@ msgstr ""
 "#-#-#-#-#  sr_RS@cyrillic.po (Wine)  #-#-#-#-#\n"
 "Разгледај"
 
-#: programs/winecfg/winecfg.rc:251
+#: programs/winecfg/winecfg.rc:257
 msgid "&Label:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:253
+#: programs/winecfg/winecfg.rc:259
 msgid "S&erial:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:256
+#: programs/winecfg/winecfg.rc:262
 #, fuzzy
 msgid "&Show dot files"
 msgstr "&Детаљи"
 
-#: programs/winecfg/winecfg.rc:263
+#: programs/winecfg/winecfg.rc:269
 msgid "Driver diagnostics"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:265
+#: programs/winecfg/winecfg.rc:271
 #, fuzzy
 msgid "Defaults"
 msgstr "Подразумевано"
 
-#: programs/winecfg/winecfg.rc:266
+#: programs/winecfg/winecfg.rc:272
 #, fuzzy
 msgid "Output device:"
 msgstr "&Назив одредишне датотеке:"
 
-#: programs/winecfg/winecfg.rc:267
+#: programs/winecfg/winecfg.rc:273
 msgid "Voice output device:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:268
+#: programs/winecfg/winecfg.rc:274
 msgid "Input device:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:269
+#: programs/winecfg/winecfg.rc:275
 msgid "Voice input device:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:274
+#: programs/winecfg/winecfg.rc:280
 #, fuzzy
 msgid "&Test Sound"
 msgstr "звук"
 
-#: programs/winecfg/winecfg.rc:275 programs/winecfg/winecfg.rc:89
+#: programs/winecfg/winecfg.rc:281 programs/winecfg/winecfg.rc:89
 #, fuzzy
 msgid "Speaker configuration"
 msgstr "Подаци"
 
-#: programs/winecfg/winecfg.rc:278
+#: programs/winecfg/winecfg.rc:284
 msgid "Speakers:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:286
+#: programs/winecfg/winecfg.rc:292
 msgid "Appearance"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:287
+#: programs/winecfg/winecfg.rc:293
 msgid "&Theme:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:289
+#: programs/winecfg/winecfg.rc:295
+msgid "&WinRT theme:"
+msgstr ""
+
+#: programs/winecfg/winecfg.rc:297
 #, fuzzy
 msgid "&Install theme..."
 msgstr "Инсталирање..."
 
-#: programs/winecfg/winecfg.rc:294
+#: programs/winecfg/winecfg.rc:302
 msgid "It&em:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:296
+#: programs/winecfg/winecfg.rc:304
 #, fuzzy
 msgid "C&olor:"
 msgstr "&Колона"
 
-#: programs/winecfg/winecfg.rc:302
+#: programs/winecfg/winecfg.rc:310
 msgid "MIME types"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:303
-msgid "Manage file &associations"
+#: programs/winecfg/winecfg.rc:311
+msgid "Manage file and protocol &associations"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:306
+#: programs/winecfg/winecfg.rc:314
 #, fuzzy
 msgid "Folders"
 msgstr "Нова фасцикла"
 
-#: programs/winecfg/winecfg.rc:309
+#: programs/winecfg/winecfg.rc:317
 #, fuzzy
 msgid "&Link to:"
 msgstr "Везе"
@@ -18966,6 +19130,15 @@ msgstr ""
 msgid "Mono"
 msgstr ""
 
+#: programs/winecfg/winecfg.rc:98
+#, fuzzy
+msgid "Light"
+msgstr "Десна ивица"
+
+#: programs/winecfg/winecfg.rc:99
+msgid "Dark"
+msgstr ""
+
 #: programs/winecfg/winecfg.rc:53
 msgid ""
 "Changing the load order of this library is not recommended.\n"
@@ -19072,141 +19245,141 @@ msgid ""
 "Remember to click 'Add' in the Drives tab to create one!\n"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:98
+#: programs/winecfg/winecfg.rc:104
 #, fuzzy
 msgid "Controls Background"
 msgstr "&Умножи позадину"
 
-#: programs/winecfg/winecfg.rc:99
+#: programs/winecfg/winecfg.rc:105
 #, fuzzy
 msgid "Controls Text"
 msgstr "Контрола"
 
-#: programs/winecfg/winecfg.rc:101
+#: programs/winecfg/winecfg.rc:107
 #, fuzzy
 msgid "Menu Background"
 msgstr "&Умножи позадину"
 
-#: programs/winecfg/winecfg.rc:102
+#: programs/winecfg/winecfg.rc:108
 msgid "Menu Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:103
+#: programs/winecfg/winecfg.rc:109
 #, fuzzy
 msgid "Scrollbar"
 msgstr "трака за померање"
 
-#: programs/winecfg/winecfg.rc:104
+#: programs/winecfg/winecfg.rc:110
 #, fuzzy
 msgid "Selection Background"
 msgstr "Постави као позадину"
 
-#: programs/winecfg/winecfg.rc:105
+#: programs/winecfg/winecfg.rc:111
 #, fuzzy
 msgid "Selection Text"
 msgstr "Изабери &све"
 
-#: programs/winecfg/winecfg.rc:106
+#: programs/winecfg/winecfg.rc:112
 #, fuzzy
 msgid "Tooltip Background"
 msgstr "&Умножи позадину"
 
-#: programs/winecfg/winecfg.rc:107
+#: programs/winecfg/winecfg.rc:113
 msgid "Tooltip Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:108
+#: programs/winecfg/winecfg.rc:114
 #, fuzzy
 msgid "Window Background"
 msgstr "&Умножи позадину"
 
-#: programs/winecfg/winecfg.rc:109
+#: programs/winecfg/winecfg.rc:115
 #, fuzzy
 msgid "Window Text"
 msgstr "&Прозор"
 
-#: programs/winecfg/winecfg.rc:110
+#: programs/winecfg/winecfg.rc:116
 #, fuzzy
 msgid "Active Title Bar"
 msgstr "насловна линија"
 
-#: programs/winecfg/winecfg.rc:111
+#: programs/winecfg/winecfg.rc:117
 msgid "Active Title Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:112
+#: programs/winecfg/winecfg.rc:118
 msgid "Inactive Title Bar"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:113
+#: programs/winecfg/winecfg.rc:119
 msgid "Inactive Title Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:114
+#: programs/winecfg/winecfg.rc:120
 msgid "Message Box Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:115
+#: programs/winecfg/winecfg.rc:121
 #, fuzzy
 msgid "Application Workspace"
 msgstr "Програми"
 
-#: programs/winecfg/winecfg.rc:116
+#: programs/winecfg/winecfg.rc:122
 #, fuzzy
 msgid "Window Frame"
 msgstr "&Прозор"
 
-#: programs/winecfg/winecfg.rc:117
+#: programs/winecfg/winecfg.rc:123
 msgid "Active Border"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:118
+#: programs/winecfg/winecfg.rc:124
 msgid "Inactive Border"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:119
+#: programs/winecfg/winecfg.rc:125
 #, fuzzy
 msgid "Controls Shadow"
 msgstr "Управљачки панел"
 
-#: programs/winecfg/winecfg.rc:120
+#: programs/winecfg/winecfg.rc:126
 msgid "Gray Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:121
+#: programs/winecfg/winecfg.rc:127
 msgid "Controls Highlight"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:122
+#: programs/winecfg/winecfg.rc:128
 msgid "Controls Dark Shadow"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:123
+#: programs/winecfg/winecfg.rc:129
 #, fuzzy
 msgid "Controls Light"
 msgstr "Контрола"
 
-#: programs/winecfg/winecfg.rc:124
+#: programs/winecfg/winecfg.rc:130
 msgid "Controls Alternate Background"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:125
+#: programs/winecfg/winecfg.rc:131
 msgid "Hot Tracked Item"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:126
+#: programs/winecfg/winecfg.rc:132
 msgid "Active Title Bar Gradient"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:127
+#: programs/winecfg/winecfg.rc:133
 msgid "Inactive Title Bar Gradient"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:128
+#: programs/winecfg/winecfg.rc:134
 msgid "Menu Highlight"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:129
+#: programs/winecfg/winecfg.rc:135
 #, fuzzy
 msgid "Menu Bar"
 msgstr "линија менија"
@@ -19229,13 +19402,13 @@ msgstr ""
 "Програм %s је наишао на озбиљан проблем и мора бити затворен. Извињавамо се "
 "због непријатности."
 
-#: programs/winedbg/winedbg.rc:59
+#: programs/winedbg/winedbg.rc:57
 #, fuzzy
 msgid ""
 "This can be caused by a problem in the program or a deficiency in Wine. You "
-"may want to check <a href=\"http://www.codeweavers.com/compatibility/"
-"\">http://www.codeweavers.com/compatibility/</a> for tips about running this "
-"application."
+"may want to check <a href=\"https://www.codeweavers.com/compatibility/"
+"\">https://www.codeweavers.com/compatibility/</a> for tips about running "
+"this application."
 msgstr ""
 "Узрок овоме може бити проблем у програму или недостатак у Wine-у. Проверите "
 "https://appdb.winehq.org за савете о покретању овог програма.\n"
@@ -19243,21 +19416,21 @@ msgstr ""
 "Ако овај проблем није присутан под Windows-ом и још увек није пријављен, "
 "пријавите га на https://bugs.winehq.org."
 
-#: programs/winedbg/winedbg.rc:62
+#: programs/winedbg/winedbg.rc:60
 #, fuzzy
 msgid "Show &Details"
 msgstr "&Детаљи"
 
-#: programs/winedbg/winedbg.rc:67
+#: programs/winedbg/winedbg.rc:65
 #, fuzzy
 msgid "Program Error Details"
 msgstr "Програмска грешка"
 
-#: programs/winedbg/winedbg.rc:74
+#: programs/winedbg/winedbg.rc:69
 msgid ""
 "If this problem is not present under Windows and has not been reported yet, "
 "you can save the detailed information to a file using the \"Save As\" "
-"button, then <a href=\"http://www.codeweavers.com/support/tickets/enter/"
+"button, then <a href=\"https://www.codeweavers.com/support/tickets/enter/"
 "\">file a bug report</a> and attach that file to the report."
 msgstr ""
 

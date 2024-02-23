@@ -295,7 +295,7 @@ static jsval_t transform_json_object(struct transform_json_object_ctx *proc_ctx,
         if(!obj) {
             FIXME("non-JS obj in JSON object: %p\n", get_object(args[1]));
             proc_ctx->hres = E_NOTIMPL;
-            return jsval_undefined();
+            goto ret;
         }else if(is_class(obj, JSCLASS_ARRAY)) {
             unsigned i, length = array_get_length(obj);
             WCHAR buf[14], *buf_end;
@@ -306,13 +306,13 @@ static jsval_t transform_json_object(struct transform_json_object_ctx *proc_ctx,
                 str = idx_to_str(i, buf_end);
                 if(!(jsstr = jsstr_alloc(str))) {
                     proc_ctx->hres = E_OUTOFMEMORY;
-                    return jsval_undefined();
+                    goto ret;
                 }
                 res = transform_json_object(proc_ctx, obj, jsstr);
                 jsstr_release(jsstr);
                 if(is_undefined(res)) {
                     if(FAILED(proc_ctx->hres))
-                        return jsval_undefined();
+                        goto ret;
                     if(FAILED(jsdisp_get_id(obj, str, 0, &id)))
                         continue;
                     proc_ctx->hres = disp_delete((IDispatch*)&obj->IDispatchEx_iface, id, &b);
@@ -321,7 +321,7 @@ static jsval_t transform_json_object(struct transform_json_object_ctx *proc_ctx,
                     jsval_release(res);
                 }
                 if(FAILED(proc_ctx->hres))
-                    return jsval_undefined();
+                    goto ret;
             }
         }else {
             id = DISPID_STARTENUM;
@@ -330,7 +330,7 @@ static jsval_t transform_json_object(struct transform_json_object_ctx *proc_ctx,
                 if(proc_ctx->hres == S_FALSE)
                     break;
                 if(FAILED(proc_ctx->hres) || FAILED(proc_ctx->hres = jsdisp_get_prop_name(obj, id, &jsstr)))
-                    return jsval_undefined();
+                    goto ret;
                 res = transform_json_object(proc_ctx, obj, jsstr);
                 if(is_undefined(res)) {
                     if(SUCCEEDED(proc_ctx->hres))
@@ -344,7 +344,7 @@ static jsval_t transform_json_object(struct transform_json_object_ctx *proc_ctx,
                 }
                 jsstr_release(jsstr);
                 if(FAILED(proc_ctx->hres))
-                    return jsval_undefined();
+                    goto ret;
             }
         }
     }
@@ -352,6 +352,8 @@ static jsval_t transform_json_object(struct transform_json_object_ctx *proc_ctx,
     args[0] = jsval_string(name);
     proc_ctx->hres = disp_call_value(proc_ctx->ctx, proc_ctx->reviver, jsval_obj(holder),
                                      DISPATCH_METHOD, ARRAY_SIZE(args), args, &res);
+ret:
+    jsval_release(args[1]);
     return FAILED(proc_ctx->hres) ? jsval_undefined() : res;
 }
 
@@ -396,13 +398,11 @@ static HRESULT JSON_parse(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned
 
         if(SUCCEEDED(hres)) {
             struct transform_json_object_ctx proc_ctx = { ctx, get_object(argv[1]), S_OK };
-            if(!(str = jsstr_alloc(L"")))
-                hres = E_OUTOFMEMORY;
-            else {
-                ret = transform_json_object(&proc_ctx, root, str);
-                jsstr_release(str);
-                hres = proc_ctx.hres;
-            }
+
+            str = jsstr_empty();
+            ret = transform_json_object(&proc_ctx, root, str);
+            jsstr_release(str);
+            hres = proc_ctx.hres;
         }
         jsdisp_release(root);
         if(FAILED(hres))
@@ -754,14 +754,13 @@ static HRESULT stringify(stringify_ctx_t *ctx, jsdisp_t *object, const WCHAR *na
         jsdisp_t *obj;
         DISPID id;
 
-        obj = iface_to_jsdisp(get_object(value));
+        obj = to_jsdisp(get_object(value));
         if(!obj) {
             jsval_release(value);
             return S_FALSE;
         }
 
         hres = jsdisp_get_id(obj, L"toJSON", 0, &id);
-        jsdisp_release(obj);
         if(hres == S_OK)
             FIXME("Use toJSON.\n");
     }

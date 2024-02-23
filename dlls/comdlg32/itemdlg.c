@@ -21,8 +21,6 @@
 #include <stdarg.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -40,6 +38,7 @@
 #define IDC_NAV_TOOLBAR      200
 #define IDC_NAVBACK          201
 #define IDC_NAVFORWARD       202
+#define IDC_NAVUP            203
 
 #include <initguid.h>
 /* This seems to be another version of IID_IFileDialogCustomize. If
@@ -145,6 +144,8 @@ typedef struct FileDialogImpl {
     DWORD opendropdown_selection;
 
     GUID client_guid;
+
+    HANDLE user_actctx;
 } FileDialogImpl;
 
 /**************************************************************************
@@ -152,9 +153,13 @@ typedef struct FileDialogImpl {
  */
 static HRESULT events_OnFileOk(FileDialogImpl *This)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     HRESULT hr = S_OK;
     TRACE("%p\n", This);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
@@ -164,6 +169,9 @@ static HRESULT events_OnFileOk(FileDialogImpl *This)
             break;
     }
 
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
+
     if(hr == E_NOTIMPL)
         hr = S_OK;
 
@@ -172,9 +180,13 @@ static HRESULT events_OnFileOk(FileDialogImpl *This)
 
 static HRESULT events_OnFolderChanging(FileDialogImpl *This, IShellItem *folder)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     HRESULT hr = S_OK;
     TRACE("%p (%p)\n", This, folder);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
@@ -184,6 +196,9 @@ static HRESULT events_OnFolderChanging(FileDialogImpl *This, IShellItem *folder)
             break;
     }
 
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
+
     if(hr == E_NOTIMPL)
         hr = S_OK;
 
@@ -192,46 +207,71 @@ static HRESULT events_OnFolderChanging(FileDialogImpl *This, IShellItem *folder)
 
 static void events_OnFolderChange(FileDialogImpl *This)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     TRACE("%p\n", This);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
         TRACE("Notifying %p\n", cursor);
         IFileDialogEvents_OnFolderChange(cursor->pfde, (IFileDialog*)&This->IFileDialog2_iface);
     }
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
 }
 
 static void events_OnSelectionChange(FileDialogImpl *This)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     TRACE("%p\n", This);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
         TRACE("Notifying %p\n", cursor);
         IFileDialogEvents_OnSelectionChange(cursor->pfde, (IFileDialog*)&This->IFileDialog2_iface);
     }
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
 }
 
 static void events_OnTypeChange(FileDialogImpl *This)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     TRACE("%p\n", This);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
         TRACE("Notifying %p\n", cursor);
         IFileDialogEvents_OnTypeChange(cursor->pfde, (IFileDialog*)&This->IFileDialog2_iface);
     }
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
 }
 
 static HRESULT events_OnOverwrite(FileDialogImpl *This, IShellItem *shellitem)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     HRESULT hr = S_OK;
     FDE_OVERWRITE_RESPONSE response = FDEOR_DEFAULT;
     TRACE("%p %p\n", This, shellitem);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
@@ -241,6 +281,9 @@ static HRESULT events_OnOverwrite(FileDialogImpl *This, IShellItem *shellitem)
         if(FAILED(hr) && hr != E_NOTIMPL)
             break;
     }
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
 
     if(hr == E_NOTIMPL)
         hr = S_OK;
@@ -274,8 +317,12 @@ static inline HRESULT get_cctrl_event(IFileDialogEvents *pfde, IFileDialogContro
 
 static HRESULT cctrl_event_OnButtonClicked(FileDialogImpl *This, DWORD ctl_id)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     TRACE("%p\n", This);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
@@ -288,13 +335,20 @@ static HRESULT cctrl_event_OnButtonClicked(FileDialogImpl *This, DWORD ctl_id)
         }
     }
 
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
+
     return S_OK;
 }
 
 static HRESULT cctrl_event_OnItemSelected(FileDialogImpl *This, DWORD ctl_id, DWORD item_id)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     TRACE("%p %li %li\n", This, ctl_id, item_id);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
@@ -307,13 +361,20 @@ static HRESULT cctrl_event_OnItemSelected(FileDialogImpl *This, DWORD ctl_id, DW
         }
     }
 
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
+
     return S_OK;
 }
 
 static HRESULT cctrl_event_OnCheckButtonToggled(FileDialogImpl *This, DWORD ctl_id, BOOL checked)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     TRACE("%p\n", This);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
@@ -326,14 +387,21 @@ static HRESULT cctrl_event_OnCheckButtonToggled(FileDialogImpl *This, DWORD ctl_
         }
     }
 
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
+
     return S_OK;
 }
 
 static HRESULT cctrl_event_OnControlActivating(FileDialogImpl *This,
                                                   DWORD ctl_id)
 {
+    ULONG_PTR ctx_cookie = 0;
     events_client *cursor;
     TRACE("%p\n", This);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(This->user_actctx, &ctx_cookie);
 
     LIST_FOR_EACH_ENTRY(cursor, &This->events_clients, events_client, entry)
     {
@@ -345,6 +413,9 @@ static HRESULT cctrl_event_OnControlActivating(FileDialogImpl *This,
             IFileDialogControlEvents_Release(pfdce);
         }
     }
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
 
     return S_OK;
 }
@@ -570,7 +641,7 @@ static HRESULT on_default_action(FileDialogImpl *This)
                 if(newext)
                 {
                     WCHAR *ext = PathFindExtensionW(canon_filename);
-                    if(lstrcmpW(ext, newext))
+                    if(lstrcmpiW(ext, newext))
                         lstrcatW(canon_filename, newext);
                 }
             }
@@ -599,7 +670,7 @@ static HRESULT on_default_action(FileDialogImpl *This)
             }
         }
 
-        pidla[i] = COMDLG32_SHSimpleIDListFromPathAW(canon_filename);
+        pidla[i] = SHSimpleIDListFromPath(canon_filename);
 
         if(psf_parent && !(open_action == ONOPEN_BROWSE))
             IShellFolder_Release(psf_parent);
@@ -1895,7 +1966,9 @@ static void init_toolbar(FileDialogImpl *This, HWND hwnd)
 {
     HWND htoolbar;
     TBADDBITMAP tbab;
-    TBBUTTON button[2];
+    TBBUTTON button[3];
+    int height;
+    int navUpImgIndex;
 
     htoolbar = CreateWindowExW(0, TOOLBARCLASSNAMEW, NULL, TBSTYLE_FLAT | WS_CHILD | WS_VISIBLE,
                                0, 0, 0, 0,
@@ -1904,6 +1977,9 @@ static void init_toolbar(FileDialogImpl *This, HWND hwnd)
     tbab.hInst = HINST_COMMCTRL;
     tbab.nID = IDB_HIST_LARGE_COLOR;
     SendMessageW(htoolbar, TB_ADDBITMAP, 0, (LPARAM)&tbab);
+    tbab.nID = IDB_VIEW_LARGE_COLOR;
+    navUpImgIndex = SendMessageW(htoolbar, TB_ADDBITMAP, 0, (LPARAM)&tbab);
+    navUpImgIndex += VIEW_PARENTFOLDER;
 
     button[0].iBitmap = HIST_BACK;
     button[0].idCommand = IDC_NAVBACK;
@@ -1919,8 +1995,16 @@ static void init_toolbar(FileDialogImpl *This, HWND hwnd)
     button[1].dwData = 0;
     button[1].iString = 0;
 
-    SendMessageW(htoolbar, TB_ADDBUTTONSW, 2, (LPARAM)button);
-    SendMessageW(htoolbar, TB_SETBUTTONSIZE, 0, MAKELPARAM(24,24));
+    button[2].iBitmap = navUpImgIndex;
+    button[2].idCommand = IDC_NAVUP;
+    button[2].fsState = TBSTATE_ENABLED;
+    button[2].fsStyle = BTNS_BUTTON;
+    button[2].dwData = 0;
+    button[2].iString = 0;
+
+    SendMessageW(htoolbar, TB_ADDBUTTONSW, 3, (LPARAM)button);
+    height = MulDiv(24, This->dpi_y, USER_DEFAULT_SCREEN_DPI);
+    SendMessageW(htoolbar, TB_SETBUTTONSIZE, 0, MAKELPARAM(height, height));
     SendMessageW(htoolbar, TB_AUTOSIZE, 0, 0);
 }
 
@@ -2209,6 +2293,13 @@ static LRESULT on_command_filetype(FileDialogImpl *This, WPARAM wparam, LPARAM l
     return FALSE;
 }
 
+static LRESULT on_browse_up(FileDialogImpl *This)
+{
+    TRACE("%p\n", This);
+    IExplorerBrowser_BrowseToIDList(This->peb, NULL, SBSP_PARENT);
+    return FALSE;
+}
+
 static LRESULT on_wm_command(FileDialogImpl *This, WPARAM wparam, LPARAM lparam)
 {
     switch(LOWORD(wparam))
@@ -2219,6 +2310,7 @@ static LRESULT on_wm_command(FileDialogImpl *This, WPARAM wparam, LPARAM lparam)
     case IDC_NAVBACK:         return on_browse_back(This);
     case IDC_NAVFORWARD:      return on_browse_forward(This);
     case IDC_FILETYPE:        return on_command_filetype(This, wparam, lparam);
+    case IDC_NAVUP:           return on_browse_up(This);
     default:                  TRACE("Unknown command.\n");
     }
     return FALSE;
@@ -2242,13 +2334,33 @@ static INT_PTR CALLBACK itemdlg_dlgproc(HWND hwnd, UINT umessage, WPARAM wparam,
 
 static HRESULT create_dialog(FileDialogImpl *This, HWND parent)
 {
+    ULONG_PTR ctx_cookie = 0;
     INT_PTR res;
+
+    if (This->dlg_hwnd)
+        return E_UNEXPECTED;
+
+    if (!GetCurrentActCtx(&This->user_actctx))
+        This->user_actctx = INVALID_HANDLE_VALUE;
+
+    if (COMDLG32_hActCtx != INVALID_HANDLE_VALUE)
+        ActivateActCtx(COMDLG32_hActCtx, &ctx_cookie);
 
     SetLastError(0);
     res = DialogBoxParamW(COMDLG32_hInstance,
                           MAKEINTRESOURCEW(NEWFILEOPENV3ORD),
                           parent, itemdlg_dlgproc, (LPARAM)This);
     This->dlg_hwnd = NULL;
+
+    if (COMDLG32_hActCtx != INVALID_HANDLE_VALUE)
+        DeactivateActCtx(0, ctx_cookie);
+
+    if (This->user_actctx != INVALID_HANDLE_VALUE)
+    {
+        ReleaseActCtx(This->user_actctx);
+        This->user_actctx = INVALID_HANDLE_VALUE;
+    }
+
     if(res == -1)
     {
         ERR("Failed to show dialog (LastError: %ld)\n", GetLastError());
@@ -4157,6 +4269,9 @@ static HRESULT WINAPI IFileDialogCustomize_fnRemoveControlItem(IFileDialogCustom
 
         item = get_item(ctrl, dwIDItem, CDCS_VISIBLE|CDCS_ENABLED, &position);
 
+        if (!item)
+            return E_INVALIDARG;
+
         if ((item->cdcstate & (CDCS_VISIBLE|CDCS_ENABLED)) == (CDCS_VISIBLE|CDCS_ENABLED))
         {
             if(SendMessageW(ctrl->hwnd, CB_DELETESTRING, position, 0) == CB_ERR)
@@ -4641,6 +4756,8 @@ static HRESULT FileDialog_constructor(IUnknown *pUnkOuter, REFIID riid, void **p
         IFileDialog2_Release(&fdimpl->IFileDialog2_iface);
         return E_FAIL;
     }
+
+    fdimpl->user_actctx = INVALID_HANDLE_VALUE;
 
     hr = IFileDialog2_QueryInterface(&fdimpl->IFileDialog2_iface, riid, ppv);
     IFileDialog2_Release(&fdimpl->IFileDialog2_iface);

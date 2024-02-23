@@ -271,13 +271,19 @@ static int parse_spec_arguments( ORDDEF *odp, DLLSPEC *spec, int optional )
             error( "Unknown argument type '%s'\n", token );
             return 0;
         }
-        if (is_win32) switch (arg)
+        switch (arg)
         {
         case ARG_WORD:
         case ARG_SWORD:
         case ARG_SEGPTR:
         case ARG_SEGSTR:
+            if (!is_win32) break;
             error( "Argument type '%s' only allowed for Win16\n", token );
+            return 0;
+        case ARG_FLOAT:
+        case ARG_DOUBLE:
+            if (!(odp->flags & FLAG_SYSCALL)) break;
+            error( "Argument type '%s' not allowed for syscall function\n", token );
             return 0;
         }
         odp->u.func.args[i] = arg;
@@ -315,9 +321,9 @@ static int parse_spec_arguments( ORDDEF *odp, DLLSPEC *spec, int optional )
     }
     if (odp->flags & FLAG_SYSCALL)
     {
-        if (odp->type != TYPE_STDCALL && odp->type != TYPE_CDECL)
+        if (odp->type != TYPE_STDCALL)
         {
-            error( "A syscall function must use either the stdcall or the cdecl convention\n" );
+            error( "A syscall function must use the stdcall convention\n" );
             return 0;
         }
     }
@@ -532,6 +538,10 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp, const char *tok
         }
         token = GetToken(0);
     } while (token && *token == '-');
+
+    /* x86-64 implies arm64ec */
+    if (odp->flags & FLAG_CPU(CPU_x86_64)) odp->flags |= FLAG_CPU(CPU_ARM64EC);
+    if (cpu_mask & FLAG_CPU(CPU_x86_64)) cpu_mask |= FLAG_CPU(CPU_ARM64EC);
 
     if (cpu_mask) odp->flags |= FLAG_CPU_MASK & ~cpu_mask;
     return token;

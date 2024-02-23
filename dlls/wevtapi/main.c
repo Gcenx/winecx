@@ -19,8 +19,6 @@
 
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winevt.h"
@@ -63,8 +61,8 @@ BOOL WINAPI EvtGetChannelConfigProperty(EVT_HANDLE ChannelConfig,
             return FALSE;
         }
 
-        PropertyValueBuffer->u.StringVal = (LPWSTR)(PropertyValueBuffer + 1);
-        wcscpy((LPWSTR)PropertyValueBuffer->u.StringVal, log_pathW);
+        PropertyValueBuffer->StringVal = (LPWSTR)(PropertyValueBuffer + 1);
+        wcscpy((LPWSTR)PropertyValueBuffer->StringVal, log_pathW);
         PropertyValueBuffer->Type = EvtVarTypeString;
         return TRUE;
 
@@ -142,4 +140,11 @@ BOOL WINAPI EvtExportLog(EVT_HANDLE session, const WCHAR *path, const WCHAR *que
     FIXME("(%p %s %s %s %#lx) stub!\n", session, debugstr_w(path), debugstr_w(query), debugstr_w(file), flags);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
+}
+
+EVT_HANDLE WINAPI EvtCreateBookmark(const WCHAR *bookmark_xml)
+{
+    FIXME("(%s) stub!\n", debugstr_w(bookmark_xml));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return NULL;
 }

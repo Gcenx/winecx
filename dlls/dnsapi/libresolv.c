@@ -192,11 +192,16 @@ static NTSTATUS resolv_get_serverlist( void *args )
         if (filter( buf[i].sin.sin_family, params->family )) continue;
         found++;
     }
-    if (!found) return DNS_ERROR_NO_DNS_SERVERS;
+    if (!found)
+    {
+        free( buf );
+        return DNS_ERROR_NO_DNS_SERVERS;
+    }
 
     needed = FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[found]);
     if (!addrs || *params->len < needed)
     {
+        free( buf );
         *params->len = needed;
         return !addrs ? ERROR_SUCCESS : ERROR_MORE_DATA;
     }
@@ -344,6 +349,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     resolv_query,
 };
 
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+
 #ifdef _WIN64
 
 typedef ULONG PTR32;
@@ -414,6 +421,8 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     resolv_set_serverlist,
     wow64_resolv_query,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
 
 #endif  /* _WIN64 */
 

@@ -2,9 +2,7 @@ MODULE = light.msstyles
 
 EXTRADLLFLAGS = -Wb,--data-only
 
-RC_SRCS = light.rc
-
-SVG_SRCS = \
+SOURCES = \
 	blue_button.svg \
 	blue_checkbox_13px.svg \
 	blue_checkbox_16px.svg \
@@ -204,10 +202,6 @@ SVG_SRCS = \
 	blue_navigation_menu_button_32px.svg \
 	blue_navigation_menu_button_39px.svg \
 	blue_navigation_menu_button_52px.svg \
-	blue_progress_chunk_horizontal.svg \
-	blue_progress_chunk_vertical.svg \
-	blue_progress_track_horizontal.svg \
-	blue_progress_track_vertical.svg \
 	blue_radiobutton_13px.svg \
 	blue_radiobutton_16px.svg \
 	blue_radiobutton_19px.svg \
@@ -486,4 +480,5 @@ SVG_SRCS = \
 	blue_window_small_close_button_glyph.svg \
 	blue_window_small_frame_bottom.svg \
 	blue_window_small_frame_left.svg \
-	blue_window_small_frame_right.svg
+	blue_window_small_frame_right.svg \
+	light.rc

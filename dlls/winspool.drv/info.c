@@ -30,9 +30,6 @@
 #include <ctype.h>
 #include <stddef.h>
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
-
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -647,14 +644,13 @@ static BOOL add_printer_driver( const WCHAR *name, const WCHAR *ppd_dir )
 {
     WCHAR *ppd = get_ppd_filename( ppd_dir, name );
     struct get_ppd_params ppd_params;
-    UNICODE_STRING nt_ppd;
+    UNICODE_STRING nt_ppd = { .Buffer = NULL };
     DRIVER_INFO_3W di3;
     unsigned int i;
     BOOL res = FALSE;
-    WCHAR raw[] = L"RAW", driver_nt[] = L"wineps.drv";
+    WCHAR raw[] = L"RAW", driver_nt[] = L"wineps.drv", driver_9x[] = L"wineps16.drv";
 
     if (!ppd) return FALSE;
-    RtlInitUnicodeString( &nt_ppd, NULL );
     if (!RtlDosPathNameToNtPathName_U( ppd, &nt_ppd, NULL, NULL )) goto end;
 
     ppd_params.printer = name;
@@ -677,7 +673,6 @@ static BOOL add_printer_driver( const WCHAR *name, const WCHAR *ppd_dir )
         di3.pEnvironment = (WCHAR *)all_printenv[i]->envname;
         if (all_printenv[i]->driverversion == 0)
         {
-            WCHAR driver_9x[] = L"wineps16.drv";
             /* We use wineps16.drv as driver for 16 bit */
             di3.pDriverPath = driver_9x;
             di3.pConfigFile = driver_9x;
@@ -903,7 +898,7 @@ static LPWSTR get_servername_from_name(LPCWSTR name)
     if (name == NULL) return NULL;
     if ((name[0] != '\\') || (name[1] != '\\')) return NULL;
 
-    server = wcsdup(&name[2]);     /* skip over both backslash */
+    server = wcsdup(&name[2]);     /* skip over both backslashes */
     if (server == NULL) return NULL;
 
     /* strip '\' and the printername */
@@ -1911,17 +1906,17 @@ BOOL WINAPI IsValidDevmodeW(PDEVMODEW dm, SIZE_T size)
     } map[] =
     {
 #define F_SIZE(field) FIELD_OFFSET(DEVMODEW, field) + sizeof(dm->field)
-        { DM_ORIENTATION, F_SIZE(u1.s1.dmOrientation) },
-        { DM_PAPERSIZE, F_SIZE(u1.s1.dmPaperSize) },
-        { DM_PAPERLENGTH, F_SIZE(u1.s1.dmPaperLength) },
-        { DM_PAPERWIDTH, F_SIZE(u1.s1.dmPaperWidth) },
-        { DM_SCALE, F_SIZE(u1.s1.dmScale) },
-        { DM_COPIES, F_SIZE(u1.s1.dmCopies) },
-        { DM_DEFAULTSOURCE, F_SIZE(u1.s1.dmDefaultSource) },
-        { DM_PRINTQUALITY, F_SIZE(u1.s1.dmPrintQuality) },
-        { DM_POSITION, F_SIZE(u1.s2.dmPosition) },
-        { DM_DISPLAYORIENTATION, F_SIZE(u1.s2.dmDisplayOrientation) },
-        { DM_DISPLAYFIXEDOUTPUT, F_SIZE(u1.s2.dmDisplayFixedOutput) },
+        { DM_ORIENTATION, F_SIZE(dmOrientation) },
+        { DM_PAPERSIZE, F_SIZE(dmPaperSize) },
+        { DM_PAPERLENGTH, F_SIZE(dmPaperLength) },
+        { DM_PAPERWIDTH, F_SIZE(dmPaperWidth) },
+        { DM_SCALE, F_SIZE(dmScale) },
+        { DM_COPIES, F_SIZE(dmCopies) },
+        { DM_DEFAULTSOURCE, F_SIZE(dmDefaultSource) },
+        { DM_PRINTQUALITY, F_SIZE(dmPrintQuality) },
+        { DM_POSITION, F_SIZE(dmPosition) },
+        { DM_DISPLAYORIENTATION, F_SIZE(dmDisplayOrientation) },
+        { DM_DISPLAYFIXEDOUTPUT, F_SIZE(dmDisplayFixedOutput) },
         { DM_COLOR, F_SIZE(dmColor) },
         { DM_DUPLEX, F_SIZE(dmDuplex) },
         { DM_YRESOLUTION, F_SIZE(dmYResolution) },
@@ -1932,8 +1927,8 @@ BOOL WINAPI IsValidDevmodeW(PDEVMODEW dm, SIZE_T size)
         { DM_BITSPERPEL, F_SIZE(dmBitsPerPel) },
         { DM_PELSWIDTH, F_SIZE(dmPelsWidth) },
         { DM_PELSHEIGHT, F_SIZE(dmPelsHeight) },
-        { DM_DISPLAYFLAGS, F_SIZE(u2.dmDisplayFlags) },
-        { DM_NUP, F_SIZE(u2.dmNup) },
+        { DM_DISPLAYFLAGS, F_SIZE(dmDisplayFlags) },
+        { DM_NUP, F_SIZE(dmNup) },
         { DM_DISPLAYFREQUENCY, F_SIZE(dmDisplayFrequency) },
         { DM_ICMMETHOD, F_SIZE(dmICMMethod) },
         { DM_ICMINTENT, F_SIZE(dmICMIntent) },
@@ -1944,12 +1939,14 @@ BOOL WINAPI IsValidDevmodeW(PDEVMODEW dm, SIZE_T size)
 #undef F_SIZE
     };
     int i;
+    const DWORD fields_off = FIELD_OFFSET(DEVMODEW, dmFields) + sizeof(dm->dmFields);
 
     if (!dm) return FALSE;
-    if (size < FIELD_OFFSET(DEVMODEW, dmFields) + sizeof(dm->dmFields)) return FALSE;
+    if (size < fields_off) return FALSE;
+    if (dm->dmSize < fields_off || size < dm->dmSize + dm->dmDriverExtra) return FALSE;
 
     for (i = 0; i < ARRAY_SIZE(map); i++)
-        if ((dm->dmFields & map[i].flag) && size < map[i].size)
+        if ((dm->dmFields & map[i].flag) && dm->dmSize < map[i].size)
             return FALSE;
 
     return TRUE;
@@ -2999,7 +2996,7 @@ BOOL WINAPI SetJobA(HANDLE hPrinter, DWORD JobId, DWORD Level,
                     LPBYTE pJob, DWORD Command)
 {
     BOOL ret;
-    LPBYTE JobW;
+    void *JobW;
     UNICODE_STRING usBuffer;
 
     TRACE("(%p, %ld, %ld, %p, %ld)\n",hPrinter, JobId, Level, pJob, Command);
@@ -3016,7 +3013,7 @@ BOOL WINAPI SetJobA(HANDLE hPrinter, DWORD JobId, DWORD Level,
         JOB_INFO_1W *info1W = malloc(sizeof(*info1W));
         JOB_INFO_1A *info1A = (JOB_INFO_1A*)pJob;
 
-        JobW = (LPBYTE)info1W;
+        JobW = info1W;
         info1W->pUserName = asciitounicode(&usBuffer, info1A->pUserName);
         info1W->pDocument = asciitounicode(&usBuffer, info1A->pDocument);
         info1W->pDatatype = asciitounicode(&usBuffer, info1A->pDatatype);
@@ -3032,7 +3029,7 @@ BOOL WINAPI SetJobA(HANDLE hPrinter, DWORD JobId, DWORD Level,
         JOB_INFO_2W *info2W = malloc(sizeof(*info2W));
         JOB_INFO_2A *info2A = (JOB_INFO_2A*)pJob;
 
-        JobW = (LPBYTE)info2W;
+        JobW = info2W;
         info2W->pUserName = asciitounicode(&usBuffer, info2A->pUserName);
         info2W->pDocument = asciitounicode(&usBuffer, info2A->pDocument);
         info2W->pNotifyName = asciitounicode(&usBuffer, info2A->pNotifyName);
@@ -3065,7 +3062,7 @@ BOOL WINAPI SetJobA(HANDLE hPrinter, DWORD JobId, DWORD Level,
     {
     case 1:
       {
-        JOB_INFO_1W *info1W = (JOB_INFO_1W*)JobW;
+        JOB_INFO_1W *info1W = JobW;
         free(info1W->pUserName);
         free(info1W->pDocument);
         free(info1W->pDatatype);
@@ -3074,7 +3071,7 @@ BOOL WINAPI SetJobA(HANDLE hPrinter, DWORD JobId, DWORD Level,
       }
     case 2:
       {
-        JOB_INFO_2W *info2W = (JOB_INFO_2W*)JobW;
+        JOB_INFO_2W *info2W = JobW;
         free(info2W->pUserName);
         free(info2W->pDocument);
         free(info2W->pNotifyName);
@@ -3303,10 +3300,19 @@ BOOL WINAPI ResetPrinterA(HANDLE hPrinter, LPPRINTER_DEFAULTSA pDefault)
 /*****************************************************************************
  *          ResetPrinterW  [WINSPOOL.@]
  */
-BOOL WINAPI ResetPrinterW(HANDLE hPrinter, LPPRINTER_DEFAULTSW pDefault)
+BOOL WINAPI ResetPrinterW(HANDLE printer, PRINTER_DEFAULTSW *def)
 {
-    FIXME("(%p, %p): stub\n", hPrinter, pDefault);
-    return FALSE;
+    HANDLE handle  = get_backend_handle(printer);
+
+    TRACE("(%p, %p)\n", printer, def);
+
+    if (!handle)
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    return backend->fpResetPrinter(handle, def);
 }
 
 /*****************************************************************************

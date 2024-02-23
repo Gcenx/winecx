@@ -1,10 +1,10 @@
 /* Unicode Arabic shaping */
-/* generated from https://www.unicode.org/Public/15.0.0/ucd/UCD.zip:ArabicShaping.txt */
+/* generated from https://www.unicode.org/Public/15.1.0/ucd/UCD.zip:ArabicShaping.txt */
 /* DO NOT EDIT!! */
 
 #include "windef.h"
 
-const unsigned short DECLSPEC_HIDDEN arabic_shaping_table[3547] =
+const unsigned short arabic_shaping_table[3547] =
 {
     /* level 1 offsets */
     0x0110, 0x0120, 0x0130, 0x0140, 0x0141, 0x0141, 0x0141, 0x0141,

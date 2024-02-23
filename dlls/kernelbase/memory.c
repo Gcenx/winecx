@@ -26,8 +26,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -42,9 +40,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(heap);
 WINE_DECLARE_DEBUG_CHANNEL(virtual);
 WINE_DECLARE_DEBUG_CHANNEL(globalmem);
-
-
-BOOLEAN WINAPI RtlSetUserValueHeap( HANDLE handle, ULONG flags, void *ptr, void *user_value );
 
 
 /***********************************************************************
@@ -86,29 +81,81 @@ SIZE_T WINAPI GetLargePageMinimum(void)
 }
 
 
+static void fill_system_info( SYSTEM_INFO *si, const SYSTEM_BASIC_INFORMATION *basic_info,
+                              const SYSTEM_CPU_INFORMATION *cpu_info )
+{
+    si->wProcessorArchitecture      = cpu_info->ProcessorArchitecture;
+    si->wReserved                   = 0;
+    si->dwPageSize                  = basic_info->PageSize;
+    si->lpMinimumApplicationAddress = basic_info->LowestUserAddress;
+    si->lpMaximumApplicationAddress = basic_info->HighestUserAddress;
+    si->dwActiveProcessorMask       = basic_info->ActiveProcessorsAffinityMask;
+    si->dwNumberOfProcessors        = basic_info->NumberOfProcessors;
+    si->dwAllocationGranularity     = basic_info->AllocationGranularity;
+    si->wProcessorLevel             = cpu_info->ProcessorLevel;
+    si->wProcessorRevision          = cpu_info->ProcessorRevision;
+
+    switch (cpu_info->ProcessorArchitecture)
+    {
+    case PROCESSOR_ARCHITECTURE_INTEL:
+        switch (cpu_info->ProcessorLevel)
+        {
+        case 3:  si->dwProcessorType = PROCESSOR_INTEL_386;     break;
+        case 4:  si->dwProcessorType = PROCESSOR_INTEL_486;     break;
+        case 5:
+        case 6:  si->dwProcessorType = PROCESSOR_INTEL_PENTIUM; break;
+        default: si->dwProcessorType = PROCESSOR_INTEL_PENTIUM; break;
+        }
+        break;
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        si->dwProcessorType = PROCESSOR_AMD_X8664;
+        break;
+    case PROCESSOR_ARCHITECTURE_ARM:
+        switch (cpu_info->ProcessorLevel)
+        {
+        case 4:  si->dwProcessorType = PROCESSOR_ARM_7TDMI;     break;
+        default: si->dwProcessorType = PROCESSOR_ARM920;
+        }
+        break;
+    case PROCESSOR_ARCHITECTURE_ARM64:
+        si->dwProcessorType = 0;
+        break;
+    default:
+        FIXME( "Unknown processor architecture %x\n", cpu_info->ProcessorArchitecture );
+        si->dwProcessorType = 0;
+        break;
+    }
+}
+
+
 /***********************************************************************
  *          GetNativeSystemInfo   (kernelbase.@)
  */
 void WINAPI DECLSPEC_HOTPATCH GetNativeSystemInfo( SYSTEM_INFO *si )
 {
-    USHORT current_machine, native_machine;
+    SYSTEM_BASIC_INFORMATION basic_info;
+    SYSTEM_CPU_INFORMATION cpu_info;
 
-    GetSystemInfo( si );
-    RtlWow64GetProcessMachines( GetCurrentProcess(), &current_machine, &native_machine );
-    if (!current_machine) return;
-    switch (native_machine)
+    if (is_wow64)
     {
-    case IMAGE_FILE_MACHINE_AMD64:
-        si->u.s.wProcessorArchitecture = PROCESSOR_ARCHITECTURE_AMD64;
-        si->dwProcessorType = PROCESSOR_AMD_X8664;
-        break;
-    case IMAGE_FILE_MACHINE_ARM64:
-        si->u.s.wProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM64;
-        si->dwProcessorType = 0;
-        break;
-    default:
-        FIXME( "Add the proper information for %x in wow64 mode\n", native_machine );
+        USHORT current_machine, native_machine;
+
+        RtlWow64GetProcessMachines( 0, &current_machine, &native_machine );
+        if (native_machine != IMAGE_FILE_MACHINE_AMD64)
+        {
+            GetSystemInfo( si );
+            si->wProcessorArchitecture = PROCESSOR_ARCHITECTURE_AMD64;
+            return;
+        }
     }
+
+    if (!set_ntstatus( RtlGetNativeSystemInformation( SystemBasicInformation,
+                                                      &basic_info, sizeof(basic_info), NULL )) ||
+        !set_ntstatus( RtlGetNativeSystemInformation( SystemCpuInformation,
+                                                      &cpu_info, sizeof(cpu_info), NULL )))
+        return;
+
+    fill_system_info( si, &basic_info, &cpu_info );
 }
 
 
@@ -126,59 +173,7 @@ void WINAPI DECLSPEC_HOTPATCH GetSystemInfo( SYSTEM_INFO *si )
                                                  &cpu_info, sizeof(cpu_info), NULL )))
         return;
 
-    si->u.s.wProcessorArchitecture  = cpu_info.ProcessorArchitecture;
-    si->u.s.wReserved               = 0;
-    si->dwPageSize                  = basic_info.PageSize;
-    si->lpMinimumApplicationAddress = basic_info.LowestUserAddress;
-    si->lpMaximumApplicationAddress = basic_info.HighestUserAddress;
-    si->dwActiveProcessorMask       = basic_info.ActiveProcessorsAffinityMask;
-    si->dwNumberOfProcessors        = basic_info.NumberOfProcessors;
-    si->dwAllocationGranularity     = basic_info.AllocationGranularity;
-    si->wProcessorLevel             = cpu_info.ProcessorLevel;
-    si->wProcessorRevision          = cpu_info.ProcessorRevision;
-
-    switch (cpu_info.ProcessorArchitecture)
-    {
-    case PROCESSOR_ARCHITECTURE_INTEL:
-        switch (cpu_info.ProcessorLevel)
-        {
-        case 3:  si->dwProcessorType = PROCESSOR_INTEL_386;     break;
-        case 4:  si->dwProcessorType = PROCESSOR_INTEL_486;     break;
-        case 5:
-        case 6:  si->dwProcessorType = PROCESSOR_INTEL_PENTIUM; break;
-        default: si->dwProcessorType = PROCESSOR_INTEL_PENTIUM; break;
-        }
-        break;
-    case PROCESSOR_ARCHITECTURE_PPC:
-        switch (cpu_info.ProcessorLevel)
-        {
-        case 1:  si->dwProcessorType = PROCESSOR_PPC_601;       break;
-        case 3:
-        case 6:  si->dwProcessorType = PROCESSOR_PPC_603;       break;
-        case 4:  si->dwProcessorType = PROCESSOR_PPC_604;       break;
-        case 9:  si->dwProcessorType = PROCESSOR_PPC_604;       break;
-        case 20: si->dwProcessorType = PROCESSOR_PPC_620;       break;
-        default: si->dwProcessorType = 0;
-        }
-        break;
-    case PROCESSOR_ARCHITECTURE_AMD64:
-        si->dwProcessorType = PROCESSOR_AMD_X8664;
-        break;
-    case PROCESSOR_ARCHITECTURE_ARM:
-        switch (cpu_info.ProcessorLevel)
-        {
-        case 4:  si->dwProcessorType = PROCESSOR_ARM_7TDMI;     break;
-        default: si->dwProcessorType = PROCESSOR_ARM920;
-        }
-        break;
-    case PROCESSOR_ARCHITECTURE_ARM64:
-        si->dwProcessorType = 0;
-        break;
-    default:
-        FIXME( "Unknown processor architecture %x\n", cpu_info.ProcessorArchitecture );
-        si->dwProcessorType = 0;
-        break;
-    }
+    fill_system_info( si, &basic_info, &cpu_info );
 }
 
 
@@ -267,6 +262,8 @@ LPVOID WINAPI DECLSPEC_HOTPATCH MapViewOfFile3( HANDLE handle, HANDLE process, P
 {
     LARGE_INTEGER off;
     void *addr;
+
+    if (!process) process = GetCurrentProcess();
 
     addr = baseaddr;
     off.QuadPart = offset;
@@ -460,6 +457,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH VirtualFree( void *addr, SIZE_T size, DWORD type )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH VirtualFreeEx( HANDLE process, void *addr, SIZE_T size, DWORD type )
 {
+    if (type == MEM_RELEASE && size)
+    {
+        WARN( "Trying to release memory with specified size.\n" );
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
     return set_ntstatus( NtFreeVirtualMemory( process, &addr, &size, type ));
 }
 
@@ -710,7 +713,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH HeapWalk( HANDLE heap, PROCESS_HEAP_ENTRY *entry )
         rtl_entry.wFlags |= RTL_HEAP_ENTRY_REGION;
     if (entry->wFlags & PROCESS_HEAP_UNCOMMITTED_RANGE)
         rtl_entry.wFlags |= RTL_HEAP_ENTRY_UNCOMMITTED;
-    memcpy( &rtl_entry.Region, &entry->u.Region, sizeof(entry->u.Region) );
+    memcpy( &rtl_entry.Region, &entry->Region, sizeof(entry->Region) );
 
     if (!(status = RtlWalkHeap( heap, &rtl_entry )))
     {
@@ -728,7 +731,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH HeapWalk( HANDLE heap, PROCESS_HEAP_ENTRY *entry )
         else
             entry->wFlags = 0;
 
-        memcpy( &entry->u.Region, &rtl_entry.Region, sizeof(entry->u.Region) );
+        memcpy( &entry->Region, &rtl_entry.Region, sizeof(entry->Region) );
     }
 
     return set_ntstatus( status );
@@ -1244,12 +1247,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH GlobalMemoryStatusEx( MEMORYSTATUSEX *status )
     if (status->ullTotalPhys)
         status->dwMemoryLoad = (status->ullTotalPhys - status->ullAvailPhys) / (status->ullTotalPhys / 100);
 
-    TRACE_(virtual)( "MemoryLoad %ld, TotalPhys %s, AvailPhys %s, TotalPageFile %s,"
-                     "AvailPageFile %s, TotalVirtual %s, AvailVirtual %s\n",
-                    status->dwMemoryLoad, wine_dbgstr_longlong(status->ullTotalPhys),
-                    wine_dbgstr_longlong(status->ullAvailPhys), wine_dbgstr_longlong(status->ullTotalPageFile),
-                    wine_dbgstr_longlong(status->ullAvailPageFile), wine_dbgstr_longlong(status->ullTotalVirtual),
-                    wine_dbgstr_longlong(status->ullAvailVirtual) );
+    TRACE_(virtual)( "MemoryLoad %lu, TotalPhys %I64u, AvailPhys %I64u, TotalPageFile %I64u, "
+                     "AvailPageFile %I64u, TotalVirtual %I64u, AvailVirtual %I64u\n",
+                     status->dwMemoryLoad, status->ullTotalPhys, status->ullAvailPhys, status->ullTotalPageFile,
+                     status->ullAvailPageFile, status->ullTotalVirtual, status->ullAvailVirtual );
 
     cached_status = *status;
     return TRUE;
@@ -1450,17 +1451,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH QueryVirtualMemoryInformation( HANDLE process, con
  ***********************************************************************/
 
 
-#if defined(__i386__) || defined(__x86_64__)
-/***********************************************************************
- *             GetEnabledXStateFeatures   (kernelbase.@)
- */
-DWORD64 WINAPI GetEnabledXStateFeatures(void)
-{
-    TRACE( "\n" );
-    return RtlGetEnabledExtendedFeatures( ~(ULONG64)0 );
-}
-
-
 /***********************************************************************
  *             InitializeContext2         (kernelbase.@)
  */
@@ -1516,10 +1506,19 @@ BOOL WINAPI CopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src )
 {
     return set_ntstatus( RtlCopyContext( dst, context_flags, src ));
 }
-#endif
 
 
 #if defined(__x86_64__)
+
+/***********************************************************************
+ *             GetEnabledXStateFeatures   (kernelbase.@)
+ */
+DWORD64 WINAPI GetEnabledXStateFeatures(void)
+{
+    TRACE( "\n" );
+    return RtlGetEnabledExtendedFeatures( ~(ULONG64)0 );
+}
+
 /***********************************************************************
  *           LocateXStateFeature   (kernelbase.@)
  */
@@ -1537,13 +1536,13 @@ void * WINAPI LocateXStateFeature( CONTEXT *context, DWORD feature_id, DWORD *le
         if (length)
             *length = sizeof(M128A) * 16;
 
-        return &context->u.FltSave.XmmRegisters;
+        return &context->FltSave.XmmRegisters;
     }
 
     if (length)
         *length = offsetof(XSAVE_FORMAT, XmmRegisters);
 
-    return &context->u.FltSave;
+    return &context->FltSave;
 }
 
 /***********************************************************************
@@ -1580,7 +1579,18 @@ BOOL WINAPI GetXStateFeaturesMask( CONTEXT *context, DWORD64 *feature_mask )
 
     return TRUE;
 }
+
 #elif defined(__i386__)
+
+/***********************************************************************
+ *             GetEnabledXStateFeatures   (kernelbase.@)
+ */
+DWORD64 WINAPI GetEnabledXStateFeatures(void)
+{
+    TRACE( "\n" );
+    return RtlGetEnabledExtendedFeatures( ~(ULONG64)0 );
+}
+
 /***********************************************************************
  *           LocateXStateFeature   (kernelbase.@)
  */
@@ -1657,13 +1667,6 @@ UINT WINAPI EnumSystemFirmwareTables( DWORD provider, void *buffer, DWORD size )
     return 0;
 }
 
-static BOOL is_osppsvc(void)
-{
-    static const WCHAR osppsvc[] = {'o','s','p','p','s','v','c','.','e','x','e',0};
-    WCHAR path[MAX_PATH];
-    DWORD len = ARRAY_SIZE(osppsvc) - 1, len2 = GetModuleFileNameW( NULL, path, MAX_PATH );
-    return (len <= len2 && !lstrcmpiW( path + len2 - len, osppsvc ));
-}
 
 /***********************************************************************
  *             GetSystemFirmwareTable   (kernelbase.@)
@@ -1674,24 +1677,6 @@ UINT WINAPI GetSystemFirmwareTable( DWORD provider, DWORD id, void *buffer, DWOR
     ULONG buffer_size = offsetof( SYSTEM_FIRMWARE_TABLE_INFORMATION, TableBuffer ) + size;
 
     TRACE( "(0x%08lx, 0x%08lx, %p, %ld)\n", provider, id, buffer, size );
-
-    if (is_osppsvc()) /* CrossOver hack for bug 16403 */
-    {
-        HANDLE handle = CreateFileA( "c:\\", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
-        if (handle != INVALID_HANDLE_VALUE)
-        {
-            FILETIME bottle = {0}, release18 = {779059200, 30696675}; /* October 16, 2018 */
-
-            GetFileTime( handle, &bottle, NULL, NULL );
-            CloseHandle( handle );
-            if (CompareFileTime( &bottle, &release18 ) < 0) /* revert to stub if bottle was created before 18 release */
-            {
-                FIXME ("(%lu, %lu, %p, %lu) stub\n", provider, id, buffer, size );
-                SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-                return 0;
-            }
-        }
-    }
 
     if (!(info = RtlAllocateHeap( GetProcessHeap(), 0, buffer_size )))
     {

@@ -18,6 +18,7 @@
 
 #include <windef.h>
 #include <winnt.h>
+#include <winstring.h>
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
@@ -26,4 +27,13 @@ HRESULT WINAPI SetSocketMediaStreamingMode(BOOL value)
 {
     FIXME("value %d stub!\n", value);
     return S_OK;
+}
+
+HRESULT WINAPI DllGetActivationFactory(HSTRING classid, void **factory)
+{
+    FIXME("class %s, factory %p.\n", debugstr_hstring(classid), factory);
+
+    *factory = NULL;
+
+    return CLASS_E_CLASSNOTAVAILABLE;
 }

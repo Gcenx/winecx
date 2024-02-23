@@ -26,7 +26,7 @@
 
 #include "wine/debug.h"
 
-HRESULT create_sync_reader(IUnknown *outer, void **out);
+HRESULT WINAPI winegstreamer_create_wm_sync_reader(IUnknown *outer, void **out);
 
 static inline const char *debugstr_time(LONGLONG time)
 {

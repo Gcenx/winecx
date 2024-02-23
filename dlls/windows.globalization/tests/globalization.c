@@ -29,15 +29,27 @@
 #define WIDL_using_Windows_Foundation
 #define WIDL_using_Windows_Foundation_Collections
 #include "windows.foundation.h"
+#define WIDL_using_Windows_Globalization
+#include "windows.globalization.h"
 #define WIDL_using_Windows_System_UserProfile
 #include "windows.system.userprofile.h"
 
 #include "wine/test.h"
 
-
 /* kernel32.dll */
 static INT (WINAPI *pGetUserDefaultGeoName)(LPWSTR, int);
 
+#define check_interface( obj, iid ) check_interface_( __LINE__, obj, iid )
+static void check_interface_( unsigned int line, void *obj, const IID *iid )
+{
+    IUnknown *iface = obj;
+    IUnknown *unk;
+    HRESULT hr;
+
+    hr = IUnknown_QueryInterface( iface, iid, (void **)&unk );
+    ok_(__FILE__, line)( hr == S_OK, "got hr %#lx.\n", hr );
+    IUnknown_Release( unk );
+}
 
 static void test_GlobalizationPreferences(void)
 {
@@ -58,9 +70,6 @@ static void test_GlobalizationPreferences(void)
 
     GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH);
 
-    hr = RoInitialize(RO_INIT_MULTITHREADED);
-    ok(hr == S_OK, "RoInitialize failed, hr %#lx\n", hr);
-
     hr = WindowsCreateString(class_name, wcslen(class_name), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx\n", hr);
 
@@ -70,7 +79,6 @@ static void test_GlobalizationPreferences(void)
     {
         win_skip("%s runtimeclass not registered, skipping tests.\n", wine_dbgstr_w(class_name));
         WindowsDeleteString(str);
-        RoUninitialize();
         return;
     }
 
@@ -223,16 +231,173 @@ static void test_GlobalizationPreferences(void)
     IActivationFactory_Release(factory);
 
     WindowsDeleteString(str);
+}
 
-    RoUninitialize();
+static void test_Language(void)
+{
+    static const WCHAR *class_name = L"Windows.Globalization.Language";
+
+    IAgileObject *agile_object, *tmp_agile_object;
+    IInspectable *inspectable, *tmp_inspectable;
+    WCHAR buffer[LOCALE_NAME_MAX_LENGTH];
+    ILanguageFactory *language_factory;
+    IActivationFactory *factory;
+    ILanguage *language;
+    HSTRING tag, str;
+    const WCHAR *buf;
+    HRESULT hr;
+
+    hr = WindowsCreateString(class_name, wcslen(class_name), &str);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = RoGetActivationFactory(str, &IID_IActivationFactory, (void **)&factory);
+    ok(hr == S_OK || broken(hr == REGDB_E_CLASSNOTREG), "Unexpected hr %#lx.\n", hr);
+    WindowsDeleteString(str);
+    if (hr == REGDB_E_CLASSNOTREG)
+    {
+        win_skip("%s runtimeclass not registered, skipping tests.\n", wine_dbgstr_w(class_name));
+        return;
+    }
+
+    hr = IActivationFactory_QueryInterface(factory, &IID_IInspectable, (void **)&inspectable);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IActivationFactory_QueryInterface(factory, &IID_IAgileObject, (void **)&agile_object);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IActivationFactory_QueryInterface(factory, &IID_ILanguageFactory, (void **)&language_factory);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = ILanguageFactory_QueryInterface(language_factory, &IID_IInspectable, (void **)&tmp_inspectable);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(tmp_inspectable == inspectable, "Unexpected interface pointer %p, expected %p.\n", tmp_inspectable, inspectable);
+    IInspectable_Release(tmp_inspectable);
+
+    hr = ILanguageFactory_QueryInterface(language_factory, &IID_IAgileObject, (void **)&tmp_agile_object);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(tmp_agile_object == agile_object, "Unexpected interface pointer %p, expected %p.\n", tmp_agile_object, agile_object);
+    IAgileObject_Release(tmp_agile_object);
+
+    /* Invalid language tag */
+    hr = WindowsCreateString(L"test-tag", 8, &str);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = ILanguageFactory_CreateLanguage(language_factory, str, &language);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+        ILanguage_Release(language);
+    WindowsDeleteString(str);
+
+    hr = WindowsCreateString(L"en-us", 5, &str);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = ILanguageFactory_CreateLanguage(language_factory, str, &language);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    WindowsDeleteString(str);
+
+    hr = ILanguage_get_LanguageTag(language, &tag);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    buf = WindowsGetStringRawBuffer(tag, NULL);
+    ok(!wcscmp(buf, L"en-US"), "Unexpected tag %s.\n", debugstr_w(buf));
+    GetLocaleInfoEx(L"en-us", LOCALE_SNAME, buffer, ARRAY_SIZE(buffer));
+    ok(!wcscmp(buf, buffer), "Unexpected tag %s, locale name %s.\n", debugstr_w(buf), debugstr_w(buffer));
+
+    WindowsDeleteString(tag);
+
+    ILanguage_Release(language);
+
+    ILanguageFactory_Release(language_factory);
+
+    IAgileObject_Release(agile_object);
+    IInspectable_Release(inspectable);
+    IActivationFactory_Release(factory);
+}
+
+static void test_GeographicRegion(void)
+{
+    static const WCHAR *class_name = RuntimeClass_Windows_Globalization_GeographicRegion;
+    IGeographicRegionFactory *geographic_region_factory;
+    IGeographicRegion *geographic_region;
+    IActivationFactory *factory;
+    HSTRING str, expect_str;
+    HRESULT hr;
+    INT32 res;
+    LONG ref;
+
+    hr = WindowsCreateString( class_name, wcslen( class_name ), &str );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+
+    hr = RoGetActivationFactory( str, &IID_IActivationFactory, (void **)&factory );
+    WindowsDeleteString( str );
+    ok( hr == S_OK || broken( hr == REGDB_E_CLASSNOTREG ), "got hr %#lx.\n", hr );
+    if (hr == REGDB_E_CLASSNOTREG)
+    {
+        win_skip( "%s runtimeclass not registered, skipping tests.\n", wine_dbgstr_w( class_name ) );
+        return;
+    }
+
+    check_interface( factory, &IID_IUnknown );
+    check_interface( factory, &IID_IInspectable );
+    check_interface( factory, &IID_IAgileObject );
+
+    hr = IActivationFactory_ActivateInstance( factory, (IInspectable **)&geographic_region );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+
+    check_interface( geographic_region, &IID_IUnknown );
+    check_interface( geographic_region, &IID_IInspectable );
+    check_interface( geographic_region, &IID_IAgileObject );
+
+    hr = IGeographicRegion_get_CodeTwoLetter( geographic_region, &str );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    WindowsDeleteString( str );
+
+    ref = IGeographicRegion_Release( geographic_region );
+    ok( ref == 0, "got ref %ld.\n", ref );
+
+    hr = IActivationFactory_QueryInterface( factory, &IID_IGeographicRegionFactory, (void **)&geographic_region_factory );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+
+    hr = WindowsCreateString( L"US", wcslen( L"US" ), &str );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = IGeographicRegionFactory_CreateGeographicRegion( geographic_region_factory, str, &geographic_region );
+    todo_wine ok( hr == S_OK, "got hr %#lx.\n", hr );
+    WindowsDeleteString( str );
+
+    if (hr == S_OK)
+    {
+    hr = WindowsCreateString( L"US", wcslen( L"US" ), &expect_str );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = IGeographicRegion_get_CodeTwoLetter( geographic_region, &str );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = WindowsCompareStringOrdinal( str, expect_str, &res );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( !res, "got unexpected string %s.\n", debugstr_hstring(str) );
+    WindowsDeleteString( str );
+    WindowsDeleteString( expect_str );
+
+    ref = IGeographicRegion_Release( geographic_region );
+    ok( ref == 0, "got ref %ld.\n", ref );
+    }
+
+    ref = IGeographicRegionFactory_Release( geographic_region_factory );
+    ok( ref == 2, "got ref %ld.\n", ref );
+
+    ref = IActivationFactory_Release( factory );
+    ok( ref == 1, "got ref %ld.\n", ref );
 }
 
 START_TEST(globalization)
 {
     HMODULE kernel32;
+    HRESULT hr;
 
     kernel32 = GetModuleHandleA("kernel32");
     pGetUserDefaultGeoName = (void*)GetProcAddress(kernel32, "GetUserDefaultGeoName");
 
+    hr = RoInitialize( RO_INIT_MULTITHREADED );
+    ok( hr == S_OK, "RoInitialize failed, hr %#lx\n", hr );
+
     test_GlobalizationPreferences();
+    test_Language();
+    test_GeographicRegion();
+
+    RoUninitialize();
 }

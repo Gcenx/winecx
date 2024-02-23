@@ -110,14 +110,14 @@
 @ extern _HUGE MSVCRT__HUGE
 @ cdecl _Strftime(ptr long str ptr ptr)
 @ cdecl _XcptFilter(long ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CppXcptFilter(long ptr)
+@ cdecl __CppXcptFilter(long ptr)
 @ stub __CxxCallUnwindDtor
 @ stub __CxxCallUnwindVecDtor
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxDetectRethrow(ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxExceptionFilter(ptr ptr long ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
+@ cdecl __CxxDetectRethrow(ptr)
+@ cdecl __CxxExceptionFilter(ptr ptr long ptr)
+@ cdecl -norelay __CxxFrameHandler(ptr ptr ptr ptr)
 @ stdcall -arch=i386 __CxxLongjmpUnwind(ptr)
-@ cdecl -arch=i386,x86_64,arm,arm64 __CxxQueryExceptionSize()
+@ cdecl __CxxQueryExceptionSize()
 @ cdecl __CxxRegisterExceptionObject(ptr ptr)
 @ cdecl __CxxUnregisterExceptionObject(ptr long)
 @ cdecl __DestructExceptionObject(ptr)
@@ -253,7 +253,7 @@
 @ extern _commode MSVCRT__commode
 @ cdecl _control87(long long)
 @ cdecl _controlfp(long long)
-@ cdecl _copysign(double double)
+@ cdecl _copysign(double double) copysign
 @ varargs _cprintf(str)
 @ cdecl _cputs(str)
 @ cdecl _cputws(wstr)
@@ -307,7 +307,7 @@
 @ cdecl _flushall()
 @ extern _fmode MSVCRT__fmode
 @ cdecl _fpclass(double)
-@ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr)
+@ cdecl _fpieee_flt(long ptr ptr)
 @ cdecl _fpreset()
 @ cdecl _fputchar(long)
 @ cdecl _fputwchar(long)
@@ -403,7 +403,7 @@
 @ cdecl _localtime64(ptr)
 @ cdecl _lock(long)
 @ cdecl _locking(long long long)
-@ cdecl _logb(double)
+@ cdecl _logb(double) logb
 @ cdecl -arch=i386 _longjmpex(ptr long) MSVCRT_longjmp
 @ cdecl _lrotl(long long) MSVCRT__lrotl
 @ cdecl _lrotr(long long) MSVCRT__lrotr
@@ -474,7 +474,7 @@
 @ cdecl _mktemp(str)
 @ cdecl _mktime64(ptr)
 @ cdecl _msize(ptr)
-@ cdecl _nextafter(double double)
+@ cdecl _nextafter(double double) nextafter
 @ cdecl _onexit(ptr)
 @ varargs _open(str long)
 @ cdecl _open_osfhandle(long long)
@@ -516,7 +516,7 @@
 @ cdecl _set_sbh_threshold(long)
 @ cdecl _set_security_error_handler(ptr)
 @ cdecl _seterrormode(long)
-@ cdecl -arch=i386,x86_64,arm,arm64 -norelay _setjmp(ptr) MSVCRT__setjmp
+@ cdecl -norelay _setjmp(ptr) MSVCRT__setjmp
 @ cdecl -arch=i386 -norelay _setjmp3(ptr long) MSVCRT__setjmp3
 @ cdecl _setmaxstdio(long)
 @ cdecl _setmbcp(long)
@@ -684,7 +684,7 @@
 @ cdecl abs(long)
 @ cdecl acos(double)
 @ cdecl asctime(ptr)
-@ cdecl asin(double)
+@ cdecl asin(double) MSVCRT_asin
 @ cdecl atan(double)
 @ cdecl atan2(double double)
 @ cdecl -private atexit(ptr) MSVCRT_atexit  # not imported to avoid conflicts with Mingw
@@ -776,7 +776,7 @@
 @ cdecl -arch=win64 localtime(ptr) _localtime64
 @ cdecl log(double)
 @ cdecl log10(double)
-@ cdecl -arch=i386,x86_64,arm,arm64 longjmp(ptr long) MSVCRT_longjmp
+@ cdecl longjmp(ptr long) MSVCRT_longjmp
 @ cdecl malloc(long)
 @ cdecl mblen(ptr long)
 @ cdecl mbstowcs(ptr str long)
@@ -811,7 +811,7 @@
 @ cdecl sin(double)
 @ cdecl sinh(double)
 @ varargs sprintf(ptr str)
-@ cdecl sqrt(double)
+@ cdecl sqrt(double) MSVCRT_sqrt
 @ cdecl srand(long)
 @ varargs sscanf(str str)
 @ cdecl strcat(str str)
@@ -839,7 +839,7 @@
 @ varargs swscanf(wstr wstr)
 @ cdecl system(str)
 @ cdecl tan(double)
-@ cdecl tanh(double)
+@ cdecl tanh(double) MSVCRT_tanh
 @ cdecl -arch=win32 time(ptr) _time32
 @ cdecl -arch=win64 time(ptr) _time64
 @ cdecl tmpfile()

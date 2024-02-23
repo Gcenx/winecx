@@ -60,82 +60,6 @@ int MSVCRT_app_type = 0;
 char* MSVCRT__pgmptr = NULL;
 WCHAR* MSVCRT__wpgmptr = NULL;
 
-/* Get a snapshot of the current environment
- * and construct the __p__environ array
- *
- * The pointer returned from GetEnvironmentStrings may get invalid when
- * some other module cause a reallocation of the env-variable block
- *
- * blk is an array of pointers to environment strings, ending with a NULL
- * and after that the actual copy of the environment strings, ending in a \0
- */
-char ** msvcrt_SnapshotOfEnvironmentA(char **blk)
-{
-  char* environ_strings = GetEnvironmentStringsA();
-  int count = 1, len = 1, i = 0; /* keep space for the trailing NULLS */
-  char *ptr;
-
-  for (ptr = environ_strings; *ptr; ptr += strlen(ptr) + 1)
-  {
-    /* Don't count environment variables starting with '=' which are command shell specific */
-    if (*ptr != '=') count++;
-    len += strlen(ptr) + 1;
-  }
-  if (blk)
-      blk = HeapReAlloc( GetProcessHeap(), 0, blk, count* sizeof(char*) + len );
-  else
-    blk = HeapAlloc(GetProcessHeap(), 0, count* sizeof(char*) + len );
-
-  if (blk)
-    {
-      if (count)
-	{
-	  memcpy(&blk[count],environ_strings,len);
-	  for (ptr = (char*) &blk[count]; *ptr; ptr += strlen(ptr) + 1)
-	    {
-	      /* Skip special environment strings set by the command shell */
-	      if (*ptr != '=') blk[i++] = ptr;
-	    }
-	}
-      blk[i] = NULL;
-    }
-  FreeEnvironmentStringsA(environ_strings);
-  return blk;
-}
-
-wchar_t ** msvcrt_SnapshotOfEnvironmentW(wchar_t **wblk)
-{
-  wchar_t* wenviron_strings = GetEnvironmentStringsW();
-  int count = 1, len = 1, i = 0; /* keep space for the trailing NULLS */
-  wchar_t *wptr;
-
-  for (wptr = wenviron_strings; *wptr; wptr += wcslen(wptr) + 1)
-  {
-    /* Don't count environment variables starting with '=' which are command shell specific */
-    if (*wptr != '=') count++;
-    len += wcslen(wptr) + 1;
-  }
-  if (wblk)
-      wblk = HeapReAlloc( GetProcessHeap(), 0, wblk, count* sizeof(wchar_t*) + len * sizeof(wchar_t));
-  else
-    wblk = HeapAlloc(GetProcessHeap(), 0, count* sizeof(wchar_t*) + len * sizeof(wchar_t));
-  if (wblk)
-    {
-      if (count)
-	{
-	  memcpy(&wblk[count],wenviron_strings,len * sizeof(wchar_t));
-	  for (wptr = (wchar_t*)&wblk[count]; *wptr; wptr += wcslen(wptr) + 1)
-	    {
-	      /* Skip special environment strings set by the command shell */
-	      if (*wptr != '=') wblk[i++] = wptr;
-	    }
-	}
-      wblk[i] = NULL;
-    }
-  FreeEnvironmentStringsW(wenviron_strings);
-  return wblk;
-}
-
 static char **build_argv( WCHAR **wargv )
 {
     int argc;
@@ -438,9 +362,7 @@ void msvcrt_init_args(void)
   MSVCRT___unguarded_readlc_active = 0;
   MSVCRT__fmode = _O_TEXT;
 
-  MSVCRT__environ = msvcrt_SnapshotOfEnvironmentA(NULL);
-  MSVCRT___initenv = msvcrt_SnapshotOfEnvironmentA(NULL);
-  MSVCRT___winitenv = msvcrt_SnapshotOfEnvironmentW(NULL);
+  env_init(FALSE, FALSE);
 
   MSVCRT__pgmptr = HeapAlloc(GetProcessHeap(), 0, MAX_PATH);
   if (MSVCRT__pgmptr)
@@ -466,10 +388,6 @@ void msvcrt_free_args(void)
 {
   /* FIXME: more things to free */
   HeapFree(GetProcessHeap(), 0, MSVCRT___argv);
-  HeapFree(GetProcessHeap(), 0, MSVCRT___initenv);
-  HeapFree(GetProcessHeap(), 0, MSVCRT___winitenv);
-  HeapFree(GetProcessHeap(), 0, MSVCRT__environ);
-  HeapFree(GetProcessHeap(), 0, MSVCRT__wenviron);
   HeapFree(GetProcessHeap(), 0, MSVCRT__pgmptr);
   HeapFree(GetProcessHeap(), 0, MSVCRT__wpgmptr);
   HeapFree(GetProcessHeap(), 0, wargv_expand);
@@ -563,12 +481,11 @@ int CDECL __wgetmainargs(int *argc, wchar_t** *wargv, wchar_t** *wenvp,
         MSVCRT___wargv = initial_wargv;
     }
 
-    /* Initialize the _wenviron array if it's not already created. */
-    if (!MSVCRT__wenviron)
-        MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(NULL);
+    env_init(TRUE, FALSE);
+
     *argc = MSVCRT___argc;
     *wargv = MSVCRT___wargv;
-    *wenvp = MSVCRT___winitenv;
+    *wenvp = MSVCRT__wenviron;
     if (new_mode)
         _set_new_mode( *new_mode );
     return 0;
@@ -602,7 +519,7 @@ int CDECL __getmainargs(int *argc, char** *argv, char** *envp,
 
     *argc = MSVCRT___argc;
     *argv = MSVCRT___argv;
-    *envp = MSVCRT___initenv;
+    *envp = MSVCRT__environ;
 
     if (new_mode)
         _set_new_mode( *new_mode );
@@ -676,14 +593,6 @@ void CDECL __set_app_type(int app_type)
 #if _MSVCR_VER>=140
 
 /*********************************************************************
- *		_get_initial_narrow_environment (UCRTBASE.@)
- */
-char** CDECL _get_initial_narrow_environment(void)
-{
-  return MSVCRT___initenv;
-}
-
-/*********************************************************************
  *		_configure_narrow_argv (UCRTBASE.@)
  */
 int CDECL _configure_narrow_argv(int mode)
@@ -697,16 +606,18 @@ int CDECL _configure_narrow_argv(int mode)
  */
 int CDECL _initialize_narrow_environment(void)
 {
-  TRACE("\n");
-  return 0;
+    TRACE("\n");
+    return env_init(FALSE, FALSE);
 }
 
 /*********************************************************************
- *		_get_initial_wide_environment (UCRTBASE.@)
+ *		_get_initial_narrow_environment (UCRTBASE.@)
  */
-wchar_t** CDECL _get_initial_wide_environment(void)
+char** CDECL _get_initial_narrow_environment(void)
 {
-  return MSVCRT___winitenv;
+    TRACE("\n");
+    _initialize_narrow_environment();
+    return MSVCRT___initenv;
 }
 
 /*********************************************************************
@@ -723,8 +634,18 @@ int CDECL _configure_wide_argv(int mode)
  */
 int CDECL _initialize_wide_environment(void)
 {
-  WARN("stub\n");
-  return 0;
+    TRACE("\n");
+    return env_init(TRUE, FALSE);
+}
+
+/*********************************************************************
+ *		_get_initial_wide_environment (UCRTBASE.@)
+ */
+wchar_t** CDECL _get_initial_wide_environment(void)
+{
+    TRACE("\n");
+    _initialize_wide_environment();
+    return MSVCRT___winitenv;
 }
 
 /*********************************************************************

@@ -413,9 +413,9 @@ static void ok_path(HDC hdc, const char *path_name, const path_test_t *expected,
     ok(size > 0, "GetPath returned size %d, last error %ld\n", size, GetLastError());
     if (size <= 0) return;
 
-    pnt = HeapAlloc(GetProcessHeap(), 0, size*sizeof(POINT));
+    pnt = malloc(size * sizeof(POINT));
     assert(pnt != 0);
-    types = HeapAlloc(GetProcessHeap(), 0, size*sizeof(BYTE));
+    types = malloc(size);
     assert(types != 0);
     size = GetPath(hdc, pnt, types, size);
     assert(size > 0);
@@ -448,8 +448,8 @@ static void ok_path(HDC hdc, const char *path_name, const path_test_t *expected,
         printf("};\n" );
     }
 
-    HeapFree(GetProcessHeap(), 0, types);
-    HeapFree(GetProcessHeap(), 0, pnt);
+    free(types);
+    free(pnt);
 }
 
 static const path_test_t arcto_path[] =
@@ -607,6 +607,7 @@ static void test_polydraw(void)
     BOOL retb;
     POINT pos;
     HDC hdc = GetDC(0);
+    HWND hwnd;
 
     MoveToEx( hdc, -20, -20, NULL );
 
@@ -620,7 +621,8 @@ static void test_polydraw(void)
     {
         /* PolyDraw is only available on Win2k and later */
         win_skip("PolyDraw is not available\n");
-        goto done;
+        ReleaseDC(0, hdc);
+        return;
     }
     expect(TRUE, retb);
     GetCurrentPositionEx( hdc, &pos );
@@ -684,8 +686,20 @@ static void test_polydraw(void)
     ok_path(hdc, "polydraw_path", polydraw_path, ARRAY_SIZE(polydraw_path));
     GetCurrentPositionEx( hdc, &pos );
     ok( pos.x == 80 && pos.y == 80, "wrong pos %ld,%ld\n", pos.x, pos.y );
-done:
     ReleaseDC(0, hdc);
+
+    /* Test a special case that GDI path driver is created before window driver */
+    hwnd = CreateWindowA("static", NULL, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
+    hdc = GetDC(hwnd);
+
+    BeginPath(hdc);
+    SetWindowPos(hwnd, 0, 0, 0, 100, 100, SWP_NOZORDER | SWP_NOMOVE | SWP_SHOWWINDOW);
+    retb = PolyDraw(hdc, polydraw_pts, polydraw_tps, 2);
+    ok(retb, "PolyDraw failed, error %#lx\n", GetLastError());
+    EndPath(hdc);
+
+    ReleaseDC(hwnd, hdc);
+    DestroyWindow(hwnd);
 }
 
 static void test_closefigure(void) {

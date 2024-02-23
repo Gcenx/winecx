@@ -21,8 +21,6 @@
 #include <stdarg.h>
 #include <stdlib.h>
 
-#define NONAMELESSUNION
-
 #include "mountmgr.h"
 #include "winreg.h"
 #include "unixlib.h"
@@ -280,8 +278,6 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
     char *buffer = NULL, *backup = NULL;
     struct set_shell_folder_params params;
 
-    FIXME("%p %llu\n", in_buff, (unsigned long long)insize);
-
     if (input->folder_offset >= insize || input->folder_size > insize - input->folder_offset ||
         input->symlink_offset >= insize)
         return STATUS_INVALID_PARAMETER;
@@ -297,8 +293,6 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
     name.Buffer = (WCHAR *)((char *)in_buff + input->folder_offset);
     name.Length = input->folder_size;
     InitializeObjectAttributes( &attr, &name, 0, 0, NULL );
-
-    FIXME("folder %s link=%s\n", debugstr_w(name.Buffer), debugstr_a(link));
 
     for (;;)
     {
@@ -382,20 +376,20 @@ static void WINAPI query_dhcp_request_params( TP_CALLBACK_INSTANCE *instance, vo
     /* sanity checks */
     if (FIELD_OFFSET(struct mountmgr_dhcp_request_params, params[query->count]) > insize)
     {
-        irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
+        irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
         goto err;
     }
 
     for (i = 0; i < query->count; i++)
         if (query->params[i].offset + query->params[i].size > insize)
         {
-            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
+            irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
             goto err;
         }
 
     if (!memchr( query->unix_name, 0, sizeof(query->unix_name) ))
     {
-        irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
+        irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
         goto err;
     }
 
@@ -411,11 +405,11 @@ static void WINAPI query_dhcp_request_params( TP_CALLBACK_INSTANCE *instance, vo
         {
             if (offset >= sizeof(query->size)) query->size = offset;
             offset = sizeof(query->size);
-            irp->IoStatus.u.Status = STATUS_BUFFER_OVERFLOW;
+            irp->IoStatus.Status = STATUS_BUFFER_OVERFLOW;
             goto err;
         }
     }
-    irp->IoStatus.u.Status = STATUS_SUCCESS;
+    irp->IoStatus.Status = STATUS_SUCCESS;
 
 err:
     irp->IoStatus.Information = offset;
@@ -434,7 +428,7 @@ static void WINAPI query_symbol_file_callback( TP_CALLBACK_INSTANCE *instance, v
     NTSTATUS status = MOUNTMGR_CALL( query_symbol_file, &params );
 
     irp->IoStatus.Information = info;
-    irp->IoStatus.u.Status = status;
+    irp->IoStatus.Status = status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
 }
 
@@ -531,7 +525,7 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
         }
 
         if (TrySubmitThreadpoolCallback( query_dhcp_request_params, irp, NULL ))
-            return (irp->IoStatus.u.Status = STATUS_PENDING);
+            return (irp->IoStatus.Status = STATUS_PENDING);
         status = STATUS_NO_MEMORY;
         break;
     case IOCTL_MOUNTMGR_QUERY_SYMBOL_FILE:
@@ -541,7 +535,7 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
             break;
         }
         if (TrySubmitThreadpoolCallback( query_symbol_file_callback, irp, NULL ))
-            return (irp->IoStatus.u.Status = STATUS_PENDING);
+            return (irp->IoStatus.Status = STATUS_PENDING);
         status = STATUS_NO_MEMORY;
         break;
     case IOCTL_MOUNTMGR_READ_CREDENTIAL:
@@ -597,7 +591,7 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
         status = STATUS_NOT_SUPPORTED;
         break;
     }
-    irp->IoStatus.u.Status = status;
+    irp->IoStatus.Status = status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return status;
 }
@@ -620,7 +614,11 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 #ifdef _WIN64
     HKEY wow64_ports_key = NULL;
 #endif
-    UNICODE_STRING nameW, linkW;
+    UNICODE_STRING device_mount_point_manager = RTL_CONSTANT_STRING( L"\\Device\\MountPointManager" );
+    UNICODE_STRING object_mount_point_manager = RTL_CONSTANT_STRING( L"\\??\\MountPointManager" );
+    UNICODE_STRING driver_harddisk = RTL_CONSTANT_STRING( L"\\Driver\\Harddisk" );
+    UNICODE_STRING driver_serial = RTL_CONSTANT_STRING( L"\\Driver\\Serial" );
+    UNICODE_STRING driver_parallel = RTL_CONSTANT_STRING( L"\\Driver\\Parallel" );
     DEVICE_OBJECT *device;
     HKEY devicemap_key;
     NTSTATUS status;
@@ -633,10 +631,8 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     driver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = mountmgr_ioctl;
 
-    RtlInitUnicodeString( &nameW, L"\\Device\\MountPointManager" );
-    RtlInitUnicodeString( &linkW, L"\\??\\MountPointManager" );
-    if (!(status = IoCreateDevice( driver, 0, &nameW, 0, 0, FALSE, &device )))
-        status = IoCreateSymbolicLink( &linkW, &nameW );
+    if (!(status = IoCreateDevice( driver, 0, &device_mount_point_manager, 0, 0, FALSE, &device )))
+        status = IoCreateSymbolicLink( &object_mount_point_manager, &device_mount_point_manager );
     if (status)
     {
         FIXME( "failed to create device error %lx\n", status );
@@ -650,8 +646,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
                           KEY_ALL_ACCESS, NULL, &devicemap_key, NULL ))
         RegCloseKey( devicemap_key );
 
-    RtlInitUnicodeString( &nameW, L"\\Driver\\Harddisk" );
-    status = IoCreateDriver( &nameW, harddisk_driver_entry );
+    status = IoCreateDriver( &driver_harddisk, harddisk_driver_entry );
 
     thread = CreateThread( NULL, 0, device_op_thread, NULL, 0, NULL );
     CloseHandle( CreateThread( NULL, 0, run_loop_thread, thread, 0, NULL ));
@@ -666,11 +661,8 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
     RegCloseKey( wow64_ports_key );
 #endif
 
-    RtlInitUnicodeString( &nameW, L"\\Driver\\Serial" );
-    IoCreateDriver( &nameW, serial_driver_entry );
-
-    RtlInitUnicodeString( &nameW, L"\\Driver\\Parallel" );
-    IoCreateDriver( &nameW, parallel_driver_entry );
+    IoCreateDriver( &driver_serial, serial_driver_entry );
+    IoCreateDriver( &driver_parallel, parallel_driver_entry );
 
     return status;
 }

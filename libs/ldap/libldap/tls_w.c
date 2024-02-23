@@ -46,8 +46,8 @@ typedef struct tlsw_ctx {
 } tlsw_ctx;
 
 typedef struct tlsw_session {
+	CtxtHandle ctxt_handle; /* ctxt_handle must be the first field */
 	CredHandle cred_handle;
-	CtxtHandle ctxt_handle;
 	Sockbuf_IO_Desc *sbiod;
 	struct berval peer_der_dn;
 } tlsw_session;
@@ -221,14 +221,16 @@ tlsw_session_connect( LDAP *ld, tls_session *session, const char *name_in )
 
 		while ( expected > 0 ) {
 			size = tlsw_recv( s->sbiod, (char *)in_bufs[0].pvBuffer + recv_offset, expected );
-			if ( size < 0 )
-				break;
+			if ( size <= 0 )
+				goto done;
 			in_bufs[0].cbBuffer += size;
 			recv_offset += size;
 			expected -= size;
 		}
 
-		out_bufs[0].cbBuffer = max_token;
+		FreeContextBuffer( out_bufs[0].pvBuffer );
+		out_bufs[0].pvBuffer = NULL;
+
 		status = InitializeSecurityContextA( &s->cred_handle, &s->ctxt_handle, (SEC_CHAR *)name_in,
 			flags, 0, 0, &in_buf_desc, 0, NULL, &out_buf_desc, &attrs, NULL );
 		if ( status == SEC_E_INCOMPLETE_MESSAGE ) {
@@ -239,6 +241,7 @@ tlsw_session_connect( LDAP *ld, tls_session *session, const char *name_in )
 		}
 	}
 
+done:
 	ber_memfree( in_bufs[0].pvBuffer );
 	FreeContextBuffer( out_bufs[0].pvBuffer );
 	return status == SEC_E_OK ? 0 : -1;
@@ -247,7 +250,7 @@ tlsw_session_connect( LDAP *ld, tls_session *session, const char *name_in )
 static int
 tlsw_session_upflags( Sockbuf *sb, tls_session *session, int rc )
 {
-	return -1;
+	return 0;
 }
 
 static char *

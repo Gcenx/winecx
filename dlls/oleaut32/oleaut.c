@@ -661,10 +661,12 @@ ULONG WINAPI OaBuildVersion(void)
     case 0x00000105:  /* WinXP */
     case 0x00000006:  /* Vista */
     case 0x00000106:  /* Win7 */
+    case 0x00000205:  /* W2K3 */
+    case 0x00000206:  /* Win8, Win10, Win11 */
 		return MAKELONG(0xffff, 50);
     default:
 		FIXME("Version value not known yet. Please investigate it !\n");
-		return MAKELONG(0xffff, 40);  /* for now return the same value as for w2k */
+		return MAKELONG(0xffff, 50);  /* for now return the same value as for Win10 */
     }
 }
 
@@ -758,10 +760,10 @@ HRESULT WINAPI OleTranslateColor(
   return S_OK;
 }
 
-extern HRESULT WINAPI OLEAUTPS_DllGetClassObject(REFCLSID, REFIID, LPVOID *) DECLSPEC_HIDDEN;
-extern BOOL WINAPI OLEAUTPS_DllMain(HINSTANCE, DWORD, LPVOID) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI OLEAUTPS_DllRegisterServer(void) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI OLEAUTPS_DllUnregisterServer(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI OLEAUTPS_DllGetClassObject(REFCLSID, REFIID, LPVOID *);
+extern BOOL WINAPI OLEAUTPS_DllMain(HINSTANCE, DWORD, LPVOID);
+extern HRESULT WINAPI OLEAUTPS_DllRegisterServer(void);
+extern HRESULT WINAPI OLEAUTPS_DllUnregisterServer(void);
 
 extern HRESULT WINAPI CreateProxyFromTypeInfo(ITypeInfo *typeinfo,
         IUnknown *outer, REFIID iid, IRpcProxyBuffer **proxy, void **obj);

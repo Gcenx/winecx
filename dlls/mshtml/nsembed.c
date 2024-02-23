@@ -540,6 +540,7 @@ static void set_preferences(void)
     set_lang(pref);
     set_bool_pref(pref, "security.warn_entering_secure", FALSE);
     set_bool_pref(pref, "security.warn_submit_insecure", FALSE);
+    set_bool_pref(pref, "dom.ipc.plugins.enabled", FALSE);
     set_bool_pref(pref, "layout.css.grid.enabled", TRUE);
     set_int_pref(pref, "layout.spellcheckDefault", 0);
 
@@ -560,6 +561,7 @@ static BOOL init_xpcom(const PRUnichar *gre_path)
     }
 
     nsres = NS_InitXPCOM2(&pServMgr, gre_dir, (nsIDirectoryServiceProvider*)&nsDirectoryServiceProvider2);
+    nsIFile_Release(gre_dir);
     if(NS_FAILED(nsres)) {
         ERR("NS_InitXPCOM2 failed: %08lx\n", nsres);
         FreeLibrary(xul_handle);
@@ -594,7 +596,8 @@ static BOOL init_xpcom(const PRUnichar *gre_path)
         ERR("NS_GetComponentRegistrar failed: %08lx\n", nsres);
     }
 
-    init_node_cc();
+    init_dispex_cc();
+    init_window_cc();
 
     return TRUE;
 }
@@ -816,7 +819,8 @@ BOOL load_gecko(void)
            MESSAGE("Could not find Wine Gecko. HTML rendering will be disabled.\n");
         }
     }else {
-        ret = pCompMgr != NULL;
+        FIXME("Gecko can only be used from one thread.\n");
+        ret = FALSE;
     }
 
     LeaveCriticalSection(&cs_load_gecko);
@@ -1214,15 +1218,8 @@ void setup_editor_controller(GeckoBrowser *This)
     nsIControllerContext *ctrlctx;
     nsresult nsres;
 
-    if(This->editor) {
-        nsIEditor_Release(This->editor);
-        This->editor = NULL;
-    }
-
-    if(This->editor_controller) {
-        nsIController_Release(This->editor_controller);
-        This->editor_controller = NULL;
-    }
+    unlink_ref(&This->editor);
+    unlink_ref(&This->editor_controller);
 
     nsres = get_nsinterface((nsISupports*)This->webbrowser, &IID_nsIEditingSession,
             (void**)&editing_session);
@@ -2268,7 +2265,7 @@ static HRESULT init_browser(GeckoBrowser *browser)
     nsres = nsIWebBrowser_QueryInterface(browser->webbrowser, &IID_nsIScrollable, (void**)&scrollable);
     if(NS_SUCCEEDED(nsres)) {
         nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable,
-                ScrollOrientation_Y, Scrollbar_Always);
+                ScrollOrientation_Y, Scrollbar_Auto);
         if(NS_FAILED(nsres))
             ERR("Could not set default Y scrollbar prefs: %08lx\n", nsres);
 
@@ -2439,6 +2436,7 @@ nsIXMLHttpRequest *create_nsxhr(nsIDOMWindow *nswindow)
     nsres = nsIGlobalObject_QueryInterface(nsglo, &IID_nsIScriptObjectPrincipal, (void**)&sop);
     assert(nsres == NS_OK);
 
+    /* The returned principal is *not* AddRef'd */
     nspri = nsIScriptObjectPrincipal_GetPrincipal(sop);
     nsIScriptObjectPrincipal_Release(sop);
 
@@ -2450,7 +2448,6 @@ nsIXMLHttpRequest *create_nsxhr(nsIDOMWindow *nswindow)
         if(NS_FAILED(nsres))
             nsIXMLHttpRequest_Release(nsxhr);
     }
-    nsISupports_Release(nspri);
     nsIGlobalObject_Release(nsglo);
     if(NS_FAILED(nsres)) {
         ERR("nsIXMLHttpRequest_Init failed: %08lx\n", nsres);

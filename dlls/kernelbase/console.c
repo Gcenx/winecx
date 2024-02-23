@@ -29,7 +29,6 @@
 #include <string.h>
 #include <limits.h>
 
-#define NONAMELESSUNION
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -202,6 +201,32 @@ static COORD get_console_font_size( HANDLE handle, DWORD index )
     return c;
 }
 
+/* helper function for GetConsoleTitle and GetConsoleOriginalTitle */
+static DWORD get_console_title( WCHAR *title, DWORD size, BOOL current_title )
+{
+    struct condrv_title_params *params;
+    size_t max_size = sizeof(*params) + (size - 1) * sizeof(WCHAR);
+
+    if (!title || !size) return 0;
+
+    if (!(params = HeapAlloc( GetProcessHeap(), 0, max_size )))
+        return 0;
+
+    if (console_ioctl( RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle, IOCTL_CONDRV_GET_TITLE,
+                       &current_title, sizeof(current_title), params, max_size, &size ) &&
+        size >= sizeof(*params))
+    {
+        size -= sizeof(*params);
+        memcpy( title, params->buffer, size );
+        title[ size / sizeof(WCHAR) ] = 0;
+        size = params->title_len;
+    }
+    else size = 0;
+
+    HeapFree( GetProcessHeap(), 0, params );
+    return size;
+}
+
 static HANDLE create_console_server( void )
 {
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
@@ -368,10 +393,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH AttachConsole( DWORD pid )
 static BOOL alloc_console( BOOL headless )
 {
     SECURITY_ATTRIBUTES inheritable_attr = { sizeof(inheritable_attr), NULL, TRUE };
-    STARTUPINFOW app_si, console_si;
+    STARTUPINFOEXW console_si;
+    STARTUPINFOW app_si;
     HANDLE server, console = NULL;
     WCHAR buffer[1024], cmd[256], conhost_path[MAX_PATH];
     PROCESS_INFORMATION pi;
+    SIZE_T size;
     void *redir;
     BOOL ret;
 
@@ -387,42 +414,50 @@ static BOOL alloc_console( BOOL headless )
         return FALSE;
     }
 
+    memset( &console_si, 0, sizeof(console_si) );
+    console_si.StartupInfo.cb = sizeof(console_si);
+    InitializeProcThreadAttributeList( NULL, 1, 0, &size );
+    if (!(console_si.lpAttributeList = HeapAlloc( GetProcessHeap(), 0, size ))) return FALSE;
+    InitializeProcThreadAttributeList( console_si.lpAttributeList, 1, 0, &size );
+
     if (!(server = create_console_server()) || !(console = create_console_reference( server ))) goto error;
 
     GetStartupInfoW(&app_si);
 
-    memset(&console_si, 0, sizeof(console_si));
-    console_si.cb = sizeof(console_si);
     /* setup a view arguments for conhost (it'll use them as default values)  */
     if (app_si.dwFlags & STARTF_USECOUNTCHARS)
     {
-        console_si.dwFlags |= STARTF_USECOUNTCHARS;
-        console_si.dwXCountChars = app_si.dwXCountChars;
-        console_si.dwYCountChars = app_si.dwYCountChars;
+        console_si.StartupInfo.dwFlags |= STARTF_USECOUNTCHARS;
+        console_si.StartupInfo.dwXCountChars = app_si.dwXCountChars;
+        console_si.StartupInfo.dwYCountChars = app_si.dwYCountChars;
     }
     if (app_si.dwFlags & STARTF_USEFILLATTRIBUTE)
     {
-        console_si.dwFlags |= STARTF_USEFILLATTRIBUTE;
-        console_si.dwFillAttribute = app_si.dwFillAttribute;
+        console_si.StartupInfo.dwFlags |= STARTF_USEFILLATTRIBUTE;
+        console_si.StartupInfo.dwFillAttribute = app_si.dwFillAttribute;
     }
     if (app_si.dwFlags & STARTF_USESHOWWINDOW)
     {
-        console_si.dwFlags |= STARTF_USESHOWWINDOW;
-        console_si.wShowWindow = app_si.wShowWindow;
+        console_si.StartupInfo.dwFlags |= STARTF_USESHOWWINDOW;
+        console_si.StartupInfo.wShowWindow = app_si.wShowWindow;
     }
     if (app_si.lpTitle)
-        console_si.lpTitle = app_si.lpTitle;
+        console_si.StartupInfo.lpTitle = app_si.lpTitle;
     else if (GetModuleFileNameW(0, buffer, ARRAY_SIZE(buffer)))
     {
         buffer[ARRAY_SIZE(buffer) - 1] = 0;
-        console_si.lpTitle = buffer;
+        console_si.StartupInfo.lpTitle = buffer;
     }
 
+
+    UpdateProcThreadAttribute( console_si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                               &server, sizeof(server), NULL, NULL );
     swprintf( conhost_path, ARRAY_SIZE(conhost_path), L"%s\\conhost.exe", system_dir );
     swprintf( cmd, ARRAY_SIZE(cmd),  L"\"%s\" --server 0x%x", conhost_path, condrv_handle( server ));
     if (headless) wcscat( cmd, L" --headless" );
     Wow64DisableWow64FsRedirection( &redir );
-    ret = CreateProcessW( conhost_path, cmd, NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &console_si, &pi );
+    ret = CreateProcessW( conhost_path, cmd, NULL, NULL, TRUE, DETACHED_PROCESS | EXTENDED_STARTUPINFO_PRESENT,
+                          NULL, NULL, &console_si.StartupInfo, &pi );
     Wow64RevertWow64FsRedirection( redir );
 
     if (!ret || !create_console_connection( console)) goto error;
@@ -431,6 +466,7 @@ static BOOL alloc_console( BOOL headless )
     RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle = console;
     TRACE( "Started conhost pid=%08lx tid=%08lx\n", pi.dwProcessId, pi.dwThreadId );
 
+    HeapFree( GetProcessHeap(), 0, console_si.lpAttributeList );
     CloseHandle( server );
     RtlLeaveCriticalSection( &console_section );
     SetLastError( ERROR_SUCCESS );
@@ -438,6 +474,7 @@ static BOOL alloc_console( BOOL headless )
 
 error:
     ERR("Can't allocate console\n");
+    HeapFree( GetProcessHeap(), 0, console_si.lpAttributeList );
     NtClose( console );
     NtClose( server );
     FreeConsole();
@@ -888,9 +925,17 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleMode( HANDLE handle, DWORD *mode )
  */
 DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleOriginalTitleA( LPSTR title, DWORD size )
 {
-    FIXME( ": (%p, %lu) stub!\n", title, size );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return 0;
+    WCHAR *ptr = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) );
+    DWORD ret;
+
+    if (!ptr) return 0;
+
+    ret = GetConsoleOriginalTitleW( ptr, size );
+    if (ret)
+        WideCharToMultiByte( GetConsoleOutputCP(), 0, ptr, -1, title, size, NULL, NULL);
+
+    HeapFree( GetProcessHeap(), 0, ptr );
+    return ret;
 }
 
 
@@ -899,9 +944,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleOriginalTitleA( LPSTR title, DWORD size
  */
 DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleOriginalTitleW( LPWSTR title, DWORD size )
 {
-    FIXME( ": (%p, %lu) stub!\n", title, size );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return 0;
+    return get_console_title( title, size, FALSE );
 }
 
 
@@ -1046,27 +1089,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleTitleA( LPSTR title, DWORD size )
  */
 DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleTitleW( LPWSTR title, DWORD size )
 {
-    struct condrv_title_params *params;
-    size_t max_size = sizeof(*params) + (size - 1) * sizeof(WCHAR);
-
-    if (!title || !size) return 0;
-
-    if (!(params = HeapAlloc( GetProcessHeap(), 0, max_size )))
-        return 0;
-
-    if (console_ioctl( RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle, IOCTL_CONDRV_GET_TITLE,
-                       NULL, 0, params, max_size, &size ) &&
-        size >= sizeof(*params))
-    {
-        size -= sizeof(*params);
-        memcpy( title, params->buffer, size );
-        title[ size / sizeof(WCHAR) ] = 0;
-        size = params->title_len;
-    }
-    else size = 0;
-
-    HeapFree( GetProcessHeap(), 0, params );
-    return size;
+    return get_console_title( title, size, TRUE );
 }
 
 
@@ -2164,9 +2187,12 @@ static HANDLE create_pseudo_console( COORD size, HANDLE input, HANDLE output, HA
                                      DWORD flags, HANDLE *process )
 {
     WCHAR cmd[MAX_PATH], conhost_path[MAX_PATH];
+    unsigned int inherit_count;
     PROCESS_INFORMATION pi;
     HANDLE server, console;
+    HANDLE inherit[2];
     STARTUPINFOEXW si;
+    SIZE_T attr_size;
     void *redir;
     BOOL res;
 
@@ -2185,6 +2211,21 @@ static HANDLE create_pseudo_console( COORD size, HANDLE input, HANDLE output, HA
     si.StartupInfo.hStdOutput = output;
     si.StartupInfo.hStdError  = output;
     si.StartupInfo.dwFlags    = STARTF_USESTDHANDLES;
+
+    inherit[0] = server;
+    inherit[1] = signal;
+    inherit_count = signal ? 2 : 1;
+    InitializeProcThreadAttributeList( NULL, inherit_count, 0, &attr_size );
+    if (!(si.lpAttributeList = HeapAlloc( GetProcessHeap(), 0, attr_size )))
+    {
+        NtClose( console );
+        NtClose( server );
+        return FALSE;
+    }
+    InitializeProcThreadAttributeList( si.lpAttributeList, inherit_count, 0, &attr_size );
+    UpdateProcThreadAttribute( si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                               inherit, sizeof(*inherit) * inherit_count, NULL, NULL );
+
     swprintf( conhost_path, ARRAY_SIZE(conhost_path), L"%s\\conhost.exe", system_dir );
     if (signal)
     {
@@ -2199,8 +2240,9 @@ static HANDLE create_pseudo_console( COORD size, HANDLE input, HANDLE output, HA
                   conhost_path, size.X, size.Y, server );
     }
     Wow64DisableWow64FsRedirection( &redir );
-    res = CreateProcessW( conhost_path, cmd, NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL,
-                          &si.StartupInfo, &pi );
+    res = CreateProcessW( conhost_path, cmd, NULL, NULL, TRUE, DETACHED_PROCESS | EXTENDED_STARTUPINFO_PRESENT,
+                          NULL, NULL, &si.StartupInfo, &pi );
+    HeapFree( GetProcessHeap(), 0, si.lpAttributeList );
     Wow64RevertWow64FsRedirection( redir );
     NtClose( server );
     if (!res)

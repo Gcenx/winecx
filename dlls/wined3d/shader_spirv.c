@@ -18,8 +18,7 @@
  */
 
 #include "wined3d_private.h"
-#define LIBVKD3D_SHADER_SOURCE
-#include <vkd3d_shader.h>
+#include "wined3d_vk.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 
@@ -27,7 +26,8 @@ static const struct wined3d_shader_backend_ops spirv_shader_backend_vk;
 
 static const struct vkd3d_shader_compile_option spirv_compile_options[] =
 {
-    {VKD3D_SHADER_COMPILE_OPTION_API_VERSION, VKD3D_SHADER_API_VERSION_1_3},
+    {VKD3D_SHADER_COMPILE_OPTION_API_VERSION, VKD3D_SHADER_API_VERSION_1_7},
+    {VKD3D_SHADER_COMPILE_OPTION_WRITE_TESS_GEOM_POINT_SIZE, 0},
 };
 
 struct shader_spirv_resource_bindings
@@ -49,7 +49,6 @@ struct shader_spirv_priv
 {
     const struct wined3d_vertex_pipe_ops *vertex_pipe;
     const struct wined3d_fragment_pipe_ops *fragment_pipe;
-    bool ffp_proj_control;
 
     struct shader_spirv_resource_bindings bindings;
 };
@@ -202,22 +201,6 @@ static void shader_spirv_init_compile_args(struct wined3d_shader_spirv_compile_a
     }
 }
 
-static const char *get_line(const char **ptr)
-{
-    const char *p, *q;
-
-    p = *ptr;
-    if (!(q = strstr(p, "\n")))
-    {
-        if (!*p) return NULL;
-        *ptr += strlen(p);
-        return p;
-    }
-    *ptr = q + 1;
-
-    return p;
-}
-
 static void shader_spirv_init_shader_interface_vk(struct wined3d_shader_spirv_shader_interface *iface,
         const struct shader_spirv_resource_bindings *b, const struct wined3d_stream_output_desc *so_desc)
 {
@@ -279,11 +262,12 @@ static VkShaderModule shader_spirv_compile_shader(struct wined3d_context_vk *con
     ret = vkd3d_shader_compile(&info, &spirv, &messages);
     if (messages && *messages && FIXME_ON(d3d_shader))
     {
-        const char *ptr = messages;
-        const char *line;
+        const char *ptr, *end, *line;
 
         FIXME("Shader log:\n");
-        while ((line = get_line(&ptr)))
+        ptr = messages;
+        end = ptr + strlen(ptr);
+        while ((line = wined3d_get_line(&ptr, end)))
         {
             FIXME("    %.*s", (int)(ptr - line), line);
         }
@@ -719,11 +703,12 @@ static void shader_spirv_scan_shader(struct wined3d_shader *shader,
         ERR("Failed to scan shader, ret %d.\n", ret);
     if (messages && *messages && FIXME_ON(d3d_shader))
     {
-        const char *ptr = messages;
-        const char *line;
+        const char *ptr, *end, *line;
 
         FIXME("Shader log:\n");
-        while ((line = get_line(&ptr)))
+        ptr = messages;
+        end = ptr + strlen(ptr);
+        while ((line = wined3d_get_line(&ptr, end)))
         {
             FIXME("    %.*s", (int)(ptr - line), line);
         }
@@ -982,7 +967,6 @@ static void shader_spirv_destroy(struct wined3d_shader *shader)
 static HRESULT shader_spirv_alloc(struct wined3d_device *device,
         const struct wined3d_vertex_pipe_ops *vertex_pipe, const struct wined3d_fragment_pipe_ops *fragment_pipe)
 {
-    struct fragment_caps fragment_caps;
     void *vertex_priv, *fragment_priv;
     struct shader_spirv_priv *priv;
 
@@ -1006,8 +990,6 @@ static HRESULT shader_spirv_alloc(struct wined3d_device *device,
 
     priv->vertex_pipe = vertex_pipe;
     priv->fragment_pipe = fragment_pipe;
-    fragment_pipe->get_caps(device->adapter, &fragment_caps);
-    priv->ffp_proj_control = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_PROJ_CONTROL;
     memset(&priv->bindings, 0, sizeof(priv->bindings));
 
     device->vertex_priv = vertex_priv;
@@ -1063,13 +1045,6 @@ static BOOL shader_spirv_color_fixup_supported(struct color_fixup_desc fixup)
     return is_identity_fixup(fixup);
 }
 
-static BOOL shader_spirv_has_ffp_proj_control(void *shader_priv)
-{
-    struct shader_spirv_priv *priv = shader_priv;
-
-    return priv->ffp_proj_control;
-}
-
 static uint64_t shader_spirv_compile(struct wined3d_context *context, const struct wined3d_shader_desc *shader_desc,
         enum wined3d_shader_type shader_type)
 {
@@ -1095,7 +1070,6 @@ static const struct wined3d_shader_backend_ops spirv_shader_backend_vk =
     .shader_init_context_state = shader_spirv_init_context_state,
     .shader_get_caps = shader_spirv_get_caps,
     .shader_color_fixup_supported = shader_spirv_color_fixup_supported,
-    .shader_has_ffp_proj_control = shader_spirv_has_ffp_proj_control,
     .shader_compile = shader_spirv_compile,
 };
 
@@ -1118,7 +1092,7 @@ static void spirv_vertex_pipe_vk_vp_get_caps(const struct wined3d_adapter *adapt
     caps->ffp_generic_attributes = TRUE;
 }
 
-static unsigned int spirv_vertex_pipe_vk_vp_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int spirv_vertex_pipe_vk_vp_get_emul_mask(const struct wined3d_adapter *adapter)
 {
     return 0;
 }
@@ -1161,8 +1135,6 @@ static const struct wined3d_state_entry_template spirv_vertex_pipe_vk_vp_states[
     {STATE_RENDER(WINED3D_RS_POINTSCALE_B),             {STATE_RENDER(WINED3D_RS_POINTSCALE_B),             state_nop}},
     {STATE_RENDER(WINED3D_RS_POINTSCALE_C),             {STATE_RENDER(WINED3D_RS_POINTSCALE_C),             state_nop}},
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),            {STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),            state_nop}},
-    {STATE_RENDER(WINED3D_RS_INDEXEDVERTEXBLENDENABLE), {STATE_RENDER(WINED3D_RS_INDEXEDVERTEXBLENDENABLE), state_nop}},
-    {STATE_RENDER(WINED3D_RS_TWEENFACTOR),              {STATE_RENDER(WINED3D_RS_TWEENFACTOR),              state_nop}},
     {STATE_MATERIAL,                                    {STATE_MATERIAL,                                    state_nop}},
     {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),          state_nop}},
     {STATE_LIGHT_TYPE,                                  {STATE_LIGHT_TYPE,                                  state_nop}},
@@ -1194,7 +1166,7 @@ static void spirv_fragment_pipe_vk_fp_get_caps(const struct wined3d_adapter *ada
     memset(caps, 0, sizeof(*caps));
 }
 
-static unsigned int spirv_fragment_pipe_vk_fp_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int spirv_fragment_pipe_vk_fp_get_emul_mask(const struct wined3d_adapter *adapter)
 {
     return 0;
 }

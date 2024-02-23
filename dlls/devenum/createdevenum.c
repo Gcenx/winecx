@@ -23,16 +23,12 @@
  * - Also creates the special registry keys created at run-time
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
-
 #include "devenum_private.h"
 #include "vfw.h"
 #include "aviriff.h"
 #include "dsound.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "mmddk.h"
 
 #include "initguid.h"
@@ -90,7 +86,7 @@ static HRESULT register_codec(const GUID *class, const WCHAR *name,
     if (FAILED(hr))
         return hr;
 
-    if (!(buffer = heap_alloc((wcslen(L"@device:cm:") + CHARS_IN_GUID + wcslen(name) + 1) * sizeof(WCHAR))))
+    if (!(buffer = malloc((wcslen(L"@device:cm:") + CHARS_IN_GUID + wcslen(name) + 1) * sizeof(WCHAR))))
     {
         IParseDisplayName_Release(parser);
         return E_OUTOFMEMORY;
@@ -103,7 +99,7 @@ static HRESULT register_codec(const GUID *class, const WCHAR *name,
 
     IParseDisplayName_ParseDisplayName(parser, NULL, buffer, &eaten, &mon);
     IParseDisplayName_Release(parser);
-    heap_free(buffer);
+    free(buffer);
 
     IMoniker_BindToStorage(mon, NULL, NULL, &IID_IPropertyBag, (void **)&propbag);
     IMoniker_Release(mon);
@@ -431,7 +427,7 @@ static void register_legacy_filters(void)
             len = 0;
             if (!RegQueryValueExW(classkey, NULL, NULL, &Type, NULL, &len))
             {
-                WCHAR *friendlyname = heap_alloc(len);
+                WCHAR *friendlyname = malloc(len);
                 if (!friendlyname)
                 {
                     RegCloseKey(classkey);
@@ -442,7 +438,7 @@ static void register_legacy_filters(void)
                 hr = register_codec(&CLSID_LegacyAmFilterCategory, wszFilterSubkeyName,
                         &clsid, friendlyname, &prop_bag);
 
-                heap_free(friendlyname);
+                free(friendlyname);
             }
             else
                 hr = register_codec(&CLSID_LegacyAmFilterCategory, wszFilterSubkeyName,
@@ -485,7 +481,7 @@ static BOOL CALLBACK register_dsound_devices(GUID *guid, const WCHAR *desc, cons
 
     if (guid)
     {
-        WCHAR *name = heap_alloc(sizeof(defaultW) + wcslen(desc) * sizeof(WCHAR));
+        WCHAR *name = malloc(sizeof(defaultW) + wcslen(desc) * sizeof(WCHAR));
         if (!name)
             return FALSE;
         wcscpy(name, L"DirectSound: ");
@@ -493,7 +489,7 @@ static BOOL CALLBACK register_dsound_devices(GUID *guid, const WCHAR *desc, cons
 
         hr = register_codec(&CLSID_AudioRendererCategory, name,
                 &CLSID_DSoundRender, name, &prop_bag);
-        heap_free(name);
+        free(name);
     }
     else
         hr = register_codec(&CLSID_AudioRendererCategory, defaultW,

@@ -84,6 +84,7 @@
 @ stdcall D3DKMTOpenAdapterFromGdiDisplayName(ptr)
 @ stdcall D3DKMTOpenAdapterFromHdc(ptr) win32u.NtGdiDdDDIOpenAdapterFromHdc
 @ stdcall D3DKMTOpenAdapterFromLuid(ptr) win32u.NtGdiDdDDIOpenAdapterFromLuid
+@ stdcall D3DKMTQueryAdapterInfo(ptr) win32u.NtGdiDdDDIQueryAdapterInfo
 @ stdcall D3DKMTQueryStatistics(ptr) win32u.NtGdiDdDDIQueryStatistics
 @ stdcall D3DKMTQueryVideoMemoryInfo(ptr) win32u.NtGdiDdDDIQueryVideoMemoryInfo
 @ stdcall D3DKMTSetQueuedLimit(ptr) win32u.NtGdiDdDDISetQueuedLimit
@@ -176,7 +177,7 @@
 @ stub GdiDciSetDestination
 @ stub GdiDeleteLocalDC
 @ stub GdiDeleteLocalObject
-# @ stub GdiDeleteSpoolFileHandle
+@ stdcall GdiDeleteSpoolFileHandle(ptr)
 @ stdcall GdiDescribePixelFormat(long long long ptr) NtGdiDescribePixelFormat
 @ stdcall GdiDllInitialize(ptr long ptr)
 @ stdcall GdiDrawStream(long long ptr) NtGdiDrawStream
@@ -190,14 +191,14 @@
 @ stdcall GdiGetCharDimensions(long ptr ptr)
 @ stdcall GdiGetCodePage(long)
 # @ stub GdiGetDC
-# @ stub GdiGetDevmodeForPage
+@ stdcall GdiGetDevmodeForPage(ptr long ptr ptr)
 @ stub GdiGetLocalBitmap
 @ stub GdiGetLocalBrush
 @ stub GdiGetLocalDC
 @ stub GdiGetLocalFont
 # @ stub GdiGetPageCount
 # @ stub GdiGetPageHandle
-# @ stub GdiGetSpoolFileHandle
+@ stdcall GdiGetSpoolFileHandle(wstr ptr wstr)
 @ stdcall GdiGetSpoolMessage(ptr long ptr long) NtGdiGetSpoolMessage
 @ stdcall GdiGradientFill(long ptr long ptr long long) 
 @ stdcall GdiInitSpool() NtGdiInitSpool
@@ -482,7 +483,7 @@
 @ stdcall SetDCBrushColor(long long)
 @ stdcall SetDCPenColor(long long)
 @ stdcall SetDIBColorTable(long long long ptr)
-@ stdcall SetDIBits(long long long long ptr ptr long) NtGdiSetDIBits
+@ stdcall SetDIBits(long long long long ptr ptr long)
 @ stdcall SetDIBitsToDevice(long long long long long long long long long ptr ptr long)
 @ stdcall SetDeviceGammaRamp(long ptr) NtGdiSetDeviceGammaRamp
 @ stdcall SetEnhMetaFileBits(long ptr)

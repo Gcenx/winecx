@@ -22,6 +22,8 @@
  */
 
 #include "wined3d_private.h"
+#include "wined3d_gl.h"
+#include "wined3d_vk.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
@@ -59,7 +61,6 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
     const struct wined3d_d3d_info *d3d_info = &device->adapter->d3d_info;
     enum wined3d_gl_resource_type base_type = WINED3D_GL_RES_TYPE_COUNT;
     enum wined3d_gl_resource_type gl_type = WINED3D_GL_RES_TYPE_COUNT;
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     BOOL tex_2d_ok = FALSE;
     unsigned int i;
 
@@ -142,8 +143,7 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
             continue;
         }
         if (((width & (width - 1)) || (height & (height - 1)))
-                && !d3d_info->texture_npot
-                && !gl_info->supported[WINED3D_GL_NORMALIZED_TEXRECT]
+                && !d3d_info->texture_npot && !d3d_info->normalized_texrect
                 && gl_type == WINED3D_GL_RES_TYPE_TEX_2D)
         {
             TRACE("Skipping 2D texture type to try texture rectangle.\n");
@@ -208,23 +208,22 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
     resource->parent_ops = parent_ops;
     resource->resource_ops = resource_ops;
     resource->map_binding = WINED3D_LOCATION_SYSMEM;
+    resource->heap_pointer = NULL;
     resource->heap_memory = NULL;
 
-    if (!(usage & WINED3DUSAGE_PRIVATE))
+    /* Check that we have enough video ram left */
+    if (!(access & WINED3D_RESOURCE_ACCESS_CPU) && usage & WINED3DUSAGE_VIDMEM_ACCOUNTING)
     {
-        /* Check that we have enough video ram left */
-        if (!(access & WINED3D_RESOURCE_ACCESS_CPU) && device->wined3d->flags & WINED3D_VIDMEM_ACCOUNTING)
+        if (size > wined3d_device_get_available_texture_mem(device))
         {
-            if (size > wined3d_device_get_available_texture_mem(device))
-            {
-                ERR("Out of adapter memory.\n");
-                return WINED3DERR_OUTOFVIDEOMEMORY;
-            }
-            adapter_adjust_memory(device->adapter, size);
+            ERR("Out of adapter memory.\n");
+            return WINED3DERR_OUTOFVIDEOMEMORY;
         }
-
-        device_resource_add(device, resource);
+        adapter_adjust_memory(device->adapter, size);
     }
+
+    if (!(usage & WINED3DUSAGE_PRIVATE))
+        device_resource_add(device, resource);
 
     return WINED3D_OK;
 }
@@ -241,20 +240,17 @@ static void wined3d_resource_destroy_object(void *object)
 
 void resource_cleanup(struct wined3d_resource *resource)
 {
-    const struct wined3d *d3d = resource->device->wined3d;
-
     TRACE("Cleaning up resource %p.\n", resource);
 
-    if (!(resource->usage & WINED3DUSAGE_PRIVATE))
+    if (!(resource->access & WINED3D_RESOURCE_ACCESS_CPU) && resource->usage & WINED3DUSAGE_VIDMEM_ACCOUNTING)
     {
-        if (!(resource->access & WINED3D_RESOURCE_ACCESS_CPU) && d3d->flags & WINED3D_VIDMEM_ACCOUNTING)
-        {
-            TRACE("Decrementing device memory pool by %u.\n", resource->size);
-            adapter_adjust_memory(resource->device->adapter, (INT64)0 - resource->size);
-        }
-
-        device_resource_released(resource->device, resource);
+        TRACE("Decrementing device memory pool by %u.\n", resource->size);
+        adapter_adjust_memory(resource->device->adapter, (INT64)0 - resource->size);
     }
+
+    if (!(resource->usage & WINED3DUSAGE_PRIVATE))
+        device_resource_released(resource->device, resource);
+
     wined3d_resource_reference(resource);
     wined3d_cs_destroy_object(resource->device->cs, wined3d_resource_destroy_object, resource);
 }
@@ -292,9 +288,10 @@ void * CDECL wined3d_resource_get_parent(const struct wined3d_resource *resource
     return resource->parent;
 }
 
-void CDECL wined3d_resource_set_parent(struct wined3d_resource *resource, void *parent)
+void CDECL wined3d_resource_set_parent(struct wined3d_resource *resource, void *parent, const struct wined3d_parent_ops *parent_ops)
 {
     resource->parent = parent;
+    resource->parent_ops = parent_ops;
 }
 
 void CDECL wined3d_resource_get_desc(const struct wined3d_resource *resource, struct wined3d_resource_desc *desc)
@@ -335,8 +332,11 @@ void CDECL wined3d_resource_preload(struct wined3d_resource *resource)
 
 static BOOL wined3d_resource_allocate_sysmem(struct wined3d_resource *resource)
 {
-    void **p;
-    SIZE_T align = RESOURCE_ALIGNMENT - 1 + sizeof(*p);
+    /* Overallocate and add padding to the allocated pointer, to guard against
+     * games (for instance Railroad Tycoon 2) writing before the locked resource
+     * memory pointer.
+     */
+    static const SIZE_T align = RESOURCE_ALIGNMENT;
     void *mem;
 
     if (!(mem = heap_alloc_zero(resource->size + align)))
@@ -345,10 +345,8 @@ static BOOL wined3d_resource_allocate_sysmem(struct wined3d_resource *resource)
         return FALSE;
     }
 
-    p = (void **)(((ULONG_PTR)mem + align) & ~(RESOURCE_ALIGNMENT - 1)) - 1;
-    *p = mem;
-
-    resource->heap_memory = ++p;
+    resource->heap_memory = (void *)(((ULONG_PTR)mem + align) & ~(RESOURCE_ALIGNMENT - 1));
+    resource->heap_pointer = mem;
 
     return TRUE;
 }
@@ -363,13 +361,12 @@ BOOL wined3d_resource_prepare_sysmem(struct wined3d_resource *resource)
 
 void wined3d_resource_free_sysmem(struct wined3d_resource *resource)
 {
-    void **p = resource->heap_memory;
-
-    if (!p)
+    if (!resource->heap_memory)
         return;
-
-    heap_free(*(--p));
     resource->heap_memory = NULL;
+
+    heap_free(resource->heap_pointer);
+    resource->heap_pointer = NULL;
 }
 
 GLbitfield wined3d_resource_gl_storage_flags(const struct wined3d_resource *resource)
@@ -586,7 +583,7 @@ VkPipelineStageFlags vk_pipeline_stage_mask_from_bind_flags(uint32_t bind_flags)
     if (bind_flags & WINED3D_BIND_RENDER_TARGET)
         flags |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
-        flags |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        flags |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     if (bind_flags & WINED3D_BIND_STREAM_OUTPUT)
         flags |= VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT;
 

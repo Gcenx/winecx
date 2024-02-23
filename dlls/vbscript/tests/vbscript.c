@@ -109,18 +109,6 @@ DEFINE_EXPECT(testCall);
 DEFINE_GUID(CLSID_VBScript, 0xb54f3741, 0x5b07, 0x11cf, 0xa4,0xb0, 0x00,0xaa,0x00,0x4a,0x55,0xe8);
 DEFINE_GUID(CLSID_VBScriptRegExp, 0x3f4daca4, 0x160d, 0x11d2, 0xa8,0xe9, 0x00,0x10,0x4b,0x36,0x5c,0x9f);
 
-static BSTR a2bstr(const char *str)
-{
-    BSTR ret;
-    int len;
-
-    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    ret = SysAllocStringLen(NULL, len-1);
-    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
-
-    return ret;
-}
-
 #define test_state(s,ss) _test_state(__LINE__,s,ss)
 static void _test_state(unsigned line, IActiveScript *script, SCRIPTSTATE exstate)
 {
@@ -566,7 +554,7 @@ static IDispatchEx *get_script_dispatch(IActiveScript *script, const WCHAR *item
     return dispex;
 }
 
-static void parse_script(IActiveScriptParse *parse, const char *src)
+static void parse_script(IActiveScriptParse *parse, const WCHAR *src)
 {
     BSTR str;
     HRESULT hres;
@@ -574,7 +562,7 @@ static void parse_script(IActiveScriptParse *parse, const char *src)
     SET_EXPECT(OnEnterScript);
     SET_EXPECT(OnLeaveScript);
 
-    str = a2bstr(src);
+    str = SysAllocString(src);
     hres = IActiveScriptParse_ParseScriptText(parse, str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     SysFreeString(str);
     ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
@@ -584,20 +572,22 @@ static void parse_script(IActiveScriptParse *parse, const char *src)
 }
 
 #define get_disp_id(a,b,c,d) _get_disp_id(__LINE__,a,b,c,d)
-static void _get_disp_id(unsigned line, IDispatchEx *dispex, const char *name, HRESULT exhres, DISPID *id)
+static void _get_disp_id(unsigned line, IDispatchEx *dispex, const WCHAR *name, HRESULT exhres, DISPID *id)
 {
     DISPID id2;
     BSTR str;
     HRESULT hres;
 
-    str = a2bstr(name);
+    str = SysAllocString(name);
     hres = IDispatchEx_GetDispID(dispex, str, 0, id);
-    ok_(__FILE__,line)(hres == exhres, "GetDispID(%s) returned %08lx, expected %08lx\n", name, hres, exhres);
+    ok_(__FILE__,line)(hres == exhres, "GetDispID(%s) returned %08lx, expected %08lx\n",
+            wine_dbgstr_w(name), hres, exhres);
 
     hres = IDispatchEx_GetIDsOfNames(dispex, &IID_NULL, &str, 1, 0, &id2);
     SysFreeString(str);
-    ok_(__FILE__,line)(hres == exhres, "GetIDsOfNames(%s) returned %08lx, expected %08lx\n", name, hres, exhres);
-    ok_(__FILE__,line)(*id == id2, "GetIDsOfNames(%s) id != id2\n", name);
+    ok_(__FILE__,line)(hres == exhres, "GetIDsOfNames(%s) returned %08lx, expected %08lx\n",
+            wine_dbgstr_w(name), hres, exhres);
+    ok_(__FILE__,line)(*id == id2, "GetIDsOfNames(%s) id != id2\n", wine_dbgstr_w(name));
 }
 
 static void test_no_script_dispatch(IActiveScript *script)
@@ -671,12 +661,12 @@ static void test_scriptdisp(void)
     IDispatchEx_Release(script_disp2);
 
     id = 100;
-    get_disp_id(script_disp, "LCase", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"LCase", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
 
-    get_disp_id(script_disp, "globalVariable", DISP_E_UNKNOWNNAME, &id);
-    parse_script(parser, "dim globalVariable\nglobalVariable = 3");
-    get_disp_id(script_disp, "globalVariable", S_OK, &id);
+    get_disp_id(script_disp, L"globalVariable", DISP_E_UNKNOWNNAME, &id);
+    parse_script(parser, L"dim globalVariable\nglobalVariable = 3");
+    get_disp_id(script_disp, L"globalVariable", S_OK, &id);
 
     memset(&dp, 0, sizeof(dp));
     memset(&ei, 0, sizeof(ei));
@@ -686,13 +676,13 @@ static void test_scriptdisp(void)
     ok(V_VT(&v) == VT_I2, "V_VT(v) = %d\n", V_VT(&v));
     ok(V_I2(&v) == 3, "V_I2(v) = %d\n", V_I2(&v));
 
-    get_disp_id(script_disp, "globalVariable2", DISP_E_UNKNOWNNAME, &id);
-    parse_script(parser, "globalVariable2 = 4");
-    get_disp_id(script_disp, "globalVariable2", S_OK, &id);
+    get_disp_id(script_disp, L"globalVariable2", DISP_E_UNKNOWNNAME, &id);
+    parse_script(parser, L"globalVariable2 = 4");
+    get_disp_id(script_disp, L"globalVariable2", S_OK, &id);
 
-    get_disp_id(script_disp, "globalFunction", DISP_E_UNKNOWNNAME, &id);
-    parse_script(parser, "function globalFunction()\nglobalFunction=5\nend function");
-    get_disp_id(script_disp, "globalFunction", S_OK, &id);
+    get_disp_id(script_disp, L"globalFunction", DISP_E_UNKNOWNNAME, &id);
+    parse_script(parser, L"function globalFunction()\nglobalFunction=5\nend function");
+    get_disp_id(script_disp, L"globalFunction", S_OK, &id);
 
     SET_EXPECT(OnEnterScript);
     SET_EXPECT(OnLeaveScript);
@@ -722,16 +712,16 @@ static void test_scriptdisp(void)
     CHECK_CALLED(OnEnterScript);
     CHECK_CALLED(OnLeaveScript);
 
-    get_disp_id(script_disp, "globalSub", DISP_E_UNKNOWNNAME, &id);
-    parse_script(parser, "sub globalSub()\nend sub");
-    get_disp_id(script_disp, "globalSub", S_OK, &id);
-    get_disp_id(script_disp, "globalSub", S_OK, &id2);
+    get_disp_id(script_disp, L"globalSub", DISP_E_UNKNOWNNAME, &id);
+    parse_script(parser, L"sub globalSub()\nend sub");
+    get_disp_id(script_disp, L"globalSub", S_OK, &id);
+    get_disp_id(script_disp, L"globalSub", S_OK, &id2);
     ok(id == id2, "id != id2\n");
 
-    get_disp_id(script_disp, "constVariable", DISP_E_UNKNOWNNAME, &id);
-    parse_script(parser, "const constVariable = 6");
-    get_disp_id(script_disp, "ConstVariable", S_OK, &id);
-    get_disp_id(script_disp, "Constvariable", S_OK, &id2);
+    get_disp_id(script_disp, L"constVariable", DISP_E_UNKNOWNNAME, &id);
+    parse_script(parser, L"const constVariable = 6");
+    get_disp_id(script_disp, L"ConstVariable", S_OK, &id);
+    get_disp_id(script_disp, L"Constvariable", S_OK, &id2);
     ok(id == id2, "id != id2\n");
 
     IDispatchEx_Release(script_disp);
@@ -782,7 +772,7 @@ static void test_param_ids(void)
     ok(hr == S_OK, "SetScriptState(SCRIPTSTATE_CONNECTED) failed: %08lx\n", hr);
     CHECK_CALLED(OnStateChange_CONNECTED);
 
-    parse_script(parser, "function test(byval a, byval b, byval c, byval foo)\ntest = a + b + c - foo\nend function\n"
+    parse_script(parser, L"function test(byval a, byval b, byval c, byval foo)\ntest = a + b + c - foo\nend function\n"
                          "function bar\nend function");
     script_disp = get_script_dispatch(vbscript, NULL);
 
@@ -863,13 +853,13 @@ static void test_code_persistence(void)
     /* Pending code does not add identifiers to the global scope */
     script_disp = get_script_dispatch(vbscript, NULL);
     id = 0;
-    get_disp_id(script_disp, "x", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"x", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
     id = 0;
-    get_disp_id(script_disp, "y", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"y", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
     id = 0;
-    get_disp_id(script_disp, "z", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"z", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
     IDispatchEx_Release(script_disp);
 
@@ -902,13 +892,13 @@ static void test_code_persistence(void)
 
     script_disp = get_script_dispatch(vbscript, NULL);
     id = 0;
-    get_disp_id(script_disp, "x", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"x", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
     id = 0;
-    get_disp_id(script_disp, "y", S_OK, &id);
+    get_disp_id(script_disp, L"y", S_OK, &id);
     ok(id != -1, "id = -1\n");
     id = 0;
-    get_disp_id(script_disp, "z", S_OK, &id);
+    get_disp_id(script_disp, L"z", S_OK, &id);
     ok(id != -1, "id = -1\n");
     IDispatchEx_Release(script_disp);
 
@@ -948,7 +938,7 @@ static void test_code_persistence(void)
 
     script_disp = get_script_dispatch(vbscript, NULL);
     id = 0;
-    get_disp_id(script_disp, "z", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"z", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
     IDispatchEx_Release(script_disp);
 
@@ -964,7 +954,7 @@ static void test_code_persistence(void)
 
     script_disp = get_script_dispatch(vbscript, NULL);
     id = 0;
-    get_disp_id(script_disp, "z", S_OK, &id);
+    get_disp_id(script_disp, L"z", S_OK, &id);
     ok(id != -1, "id = -1\n");
     IDispatchEx_Release(script_disp);
 
@@ -1027,10 +1017,10 @@ static void test_code_persistence(void)
 
     script_disp = get_script_dispatch(vbscript, NULL);
     id = 0;
-    get_disp_id(script_disp, "y", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"y", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
     id = 0;
-    get_disp_id(script_disp, "z", DISP_E_UNKNOWNNAME, &id);
+    get_disp_id(script_disp, L"z", DISP_E_UNKNOWNNAME, &id);
     ok(id == -1, "id = %ld, expected -1\n", id);
     IDispatchEx_Release(script_disp);
 
@@ -1111,7 +1101,7 @@ static void test_script_typeinfo(void)
     CHECK_CALLED(OnStateChange_CONNECTED);
 
     parse_script(parser,
-        "dim global_var\n"
+        L"dim global_var\n"
         "const const_var = 1337\n"
 
         "function foobar\n"
@@ -1442,7 +1432,7 @@ static void test_script_typeinfo(void)
     /* Updating the script won't update the typeinfo obtained before,
        but it will be reflected in any typeinfo obtained afterwards. */
     parse_script(parser,
-        "dim new_var\nnew_var = 10\n"
+        L"dim new_var\nnew_var = 10\n"
         "sub new_sub\nend sub\n"
 
         /* Replace the function foobar with more args */
@@ -1992,12 +1982,12 @@ static void test_named_items(void)
     CHECK_CALLED(OnStateChange_CONNECTED);
 
     SET_EXPECT(testCall);
-    parse_script(parse, "testCall\n");
+    parse_script(parse, L"testCall\n");
     CHECK_CALLED(testCall);
 
     SET_EXPECT(GetItemInfo_visible);
     SET_EXPECT(testCall);
-    parse_script(parse, "visibleItem.testCall\n");
+    parse_script(parse, L"visibleItem.testCall\n");
     CHECK_CALLED(GetItemInfo_visible);
     CHECK_CALLED(testCall);
 
@@ -2036,7 +2026,7 @@ static void test_named_items(void)
 
     SET_EXPECT(GetItemInfo_visible_code);
     SET_EXPECT(testCall);
-    parse_script(parse, "visibleCodeItem.testCall\n");
+    parse_script(parse, L"visibleCodeItem.testCall\n");
     CHECK_CALLED(GetItemInfo_visible_code);
     CHECK_CALLED(testCall);
 
@@ -2046,7 +2036,7 @@ static void test_named_items(void)
     ok(persistent_named_item_ref == 0, "persistent_named_item_ref = %lu\n", persistent_named_item_ref);
 
     SET_EXPECT(testCall);
-    parse_script(parse, "visibleItem.testCall\n");
+    parse_script(parse, L"visibleItem.testCall\n");
     CHECK_CALLED(testCall);
 
     hres = IActiveScriptParse_ParseScriptText(parse, L"sub testSub\nend sub\n", L"noContext", NULL, NULL, 0, 0, 0, NULL, NULL);
@@ -2632,22 +2622,22 @@ static void test_RegExp_Replace(void)
 {
     static const struct
     {
-        const char *pattern;
-        const char *replace;
-        const char *source;
-        const char *result;
+        const WCHAR *pattern;
+        const WCHAR *replace;
+        const WCHAR *source;
+        const WCHAR *result;
         BOOL global;
     } test[] =
     {
-        { "abc", "", "123abc456", "123456", FALSE },
-        { "abc", "dcba", "123abc456", "123dcba456", FALSE },
-        { "[\r\n\t\f]+", " ", "\nHello\rNew\fWorld\t!", " Hello\rNew\fWorld\t!", FALSE },
-        { "[\r\n\t\f]+", " ", "\nHello\rNew\fWorld\t!", " Hello New World !", TRUE },
+        { L"abc", L"", L"123abc456", L"123456", FALSE },
+        { L"abc", L"dcba", L"123abc456", L"123dcba456", FALSE },
+        { L"[\r\n\t\f]+", L" ", L"\nHello\rNew\fWorld\t!", L" Hello\rNew\fWorld\t!", FALSE },
+        { L"[\r\n\t\f]+", L" ", L"\nHello\rNew\fWorld\t!", L" Hello New World !", TRUE },
     };
     HRESULT hr;
     IRegExp2 *regexp;
     VARIANT var;
-    BSTR str, ret, result;
+    BSTR str, ret;
     int i;
 
     hr = CoCreateInstance(&CLSID_VBScriptRegExp, NULL,
@@ -2665,19 +2655,18 @@ static void test_RegExp_Replace(void)
         hr = IRegExp2_put_Global(regexp, test[i].global ? VARIANT_TRUE : VARIANT_FALSE);
         ok(hr == S_OK, "got %#lx\n", hr);
 
-        str = a2bstr(test[i].pattern);
+        str = SysAllocString(test[i].pattern);
         hr = IRegExp2_put_Pattern(regexp, str);
         ok(hr == S_OK, "got %#lx\n", hr);
         SysFreeString(str);
 
-        str = a2bstr(test[i].source);
+        str = SysAllocString(test[i].source);
         V_VT(&var) = VT_BSTR;
-        V_BSTR(&var) = a2bstr(test[i].replace);
+        V_BSTR(&var) = SysAllocString(test[i].replace);
         hr = IRegExp2_Replace(regexp, str, var, &ret);
         ok(hr == S_OK, "got %#lx\n", hr);
-        result = a2bstr(test[i].result);
-        ok(!wcscmp(ret, result), "got %s, expected %s\n", wine_dbgstr_w(ret), wine_dbgstr_w(result));
-        SysFreeString(result);
+        ok(!wcscmp(ret, test[i].result), "got %s, expected %s\n", wine_dbgstr_w(ret),
+                wine_dbgstr_w(test[i].result));
         SysFreeString(ret);
         SysFreeString(V_BSTR(&var));
         SysFreeString(str);

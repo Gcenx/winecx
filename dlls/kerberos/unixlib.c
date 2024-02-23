@@ -155,7 +155,7 @@ struct ticket_list
 {
     ULONG count;
     ULONG allocated;
-    KERB_TICKET_CACHE_INFO *tickets;
+    KERB_TICKET_CACHE_INFO_EX *tickets;
 };
 
 static void utf8_to_wstr( UNICODE_STRING *strW, const char *src )
@@ -168,6 +168,25 @@ static void utf8_to_wstr( UNICODE_STRING *strW, const char *src )
     strW->Length = dstlen - sizeof(WCHAR);
 }
 
+static void principal_to_name_and_realm(char *name_with_realm, char **name, char **realm)
+{
+    char* separator;
+
+    separator = strchr( name_with_realm, '@' );
+    if (!separator)
+    {
+        ERR( "got a name without a @\n" );
+        *name = name_with_realm;
+        *realm = *name + strlen(*name); /* point it to a null byte */
+        return;
+    }
+
+    *separator = '\0';
+    *name = name_with_realm;
+    *realm = separator + 1; /* character after a @ */
+    TRACE( "name: %s, realm: %s\n", debugstr_a(*name), debugstr_a(*realm) );
+}
+
 static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, struct ticket_list *list )
 {
     NTSTATUS status;
@@ -175,7 +194,8 @@ static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, st
     krb5_error_code err;
     krb5_creds creds;
     krb5_ticket *ticket;
-    char *name_with_realm, *name_without_realm, *realm_name;
+    char *server_name_with_realm, *server_name, *server_realm;
+    char *client_name_with_realm, *client_name, *client_realm;
 
     if ((err = p_krb5_cc_start_seq_get( ctx, cache, &cursor ))) return krb5_error_to_status( err );
     for (;;)
@@ -198,7 +218,7 @@ static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, st
         if (list->count == list->allocated)
         {
             ULONG new_allocated = max( 16, list->allocated * 2 );
-            KERB_TICKET_CACHE_INFO *new_tickets = realloc( list->tickets, sizeof(*new_tickets) * new_allocated );
+            KERB_TICKET_CACHE_INFO_EX *new_tickets = realloc( list->tickets, sizeof(*new_tickets) * new_allocated );
             if (!new_tickets)
             {
                 p_krb5_free_cred_contents( ctx, &creds );
@@ -209,35 +229,31 @@ static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, st
             list->allocated = new_allocated;
         }
 
-        if ((err = p_krb5_unparse_name_flags( ctx, creds.server, 0, &name_with_realm )))
+        if ((err = p_krb5_unparse_name_flags( ctx, creds.server, 0, &server_name_with_realm )))
         {
             p_krb5_free_cred_contents( ctx, &creds );
             status = krb5_error_to_status( err );
             break;
         }
-        TRACE( "name_with_realm: %s\n", debugstr_a(name_with_realm) );
+        TRACE( "server_name_with_realm: %s\n", debugstr_a(server_name_with_realm) );
 
-        if ((err = p_krb5_unparse_name_flags( ctx, creds.server, KRB5_PRINCIPAL_UNPARSE_NO_REALM,
-                                              &name_without_realm )))
+        principal_to_name_and_realm( server_name_with_realm, &server_name, &server_realm );
+
+        utf8_to_wstr( &list->tickets[list->count].ServerName, server_name );
+        utf8_to_wstr( &list->tickets[list->count].ServerRealm, server_realm );
+
+        if ((err = p_krb5_unparse_name_flags( ctx, creds.client, 0, &client_name_with_realm )))
         {
-            p_krb5_free_unparsed_name( ctx, name_with_realm );
             p_krb5_free_cred_contents( ctx, &creds );
             status = krb5_error_to_status( err );
             break;
         }
-        TRACE( "name_without_realm: %s\n", debugstr_a(name_without_realm) );
+        TRACE( "client_name_with_realm: %s\n", debugstr_a(client_name_with_realm) );
 
-        utf8_to_wstr( &list->tickets[list->count].ServerName, name_without_realm );
+        principal_to_name_and_realm( client_name_with_realm, &client_name, &client_realm );
 
-        if (!(realm_name = strchr( name_with_realm, '@' )))
-        {
-            ERR( "wrong name with realm %s\n", debugstr_a(name_with_realm) );
-            realm_name = name_with_realm;
-        }
-        else realm_name++;
-
-        /* realm_name - now contains only realm! */
-        utf8_to_wstr( &list->tickets[list->count].RealmName, realm_name );
+        utf8_to_wstr( &list->tickets[list->count].ClientName, client_name );
+        utf8_to_wstr( &list->tickets[list->count].ClientRealm, client_realm );
 
         if (!creds.times.starttime) creds.times.starttime = creds.times.authtime;
 
@@ -250,8 +266,8 @@ static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, st
         list->tickets[list->count].TicketFlags        = creds.ticket_flags;
 
         err = p_krb5_decode_ticket( &creds.ticket, &ticket );
-        p_krb5_free_unparsed_name( ctx, name_with_realm );
-        p_krb5_free_unparsed_name( ctx, name_without_realm );
+        p_krb5_free_unparsed_name( ctx, server_name_with_realm );
+        p_krb5_free_unparsed_name( ctx, client_name_with_realm );
         p_krb5_free_cred_contents( ctx, &creds );
         if (err)
         {
@@ -268,15 +284,17 @@ static NTSTATUS copy_tickets_from_cache( krb5_context ctx, krb5_ccache cache, st
     return status;
 }
 
-static NTSTATUS copy_tickets_to_client( struct ticket_list *list, KERB_QUERY_TKT_CACHE_RESPONSE *resp,
+static NTSTATUS copy_tickets_to_client( struct ticket_list *list, KERB_QUERY_TKT_CACHE_EX_RESPONSE *resp,
                                         ULONG *out_size )
 {
     char *client_str;
-    ULONG i, size = offsetof( KERB_QUERY_TKT_CACHE_RESPONSE, Tickets[list->count] );
+    ULONG i, size = offsetof( KERB_QUERY_TKT_CACHE_EX_RESPONSE, Tickets[list->count] );
 
     for (i = 0; i < list->count; i++)
     {
-        size += list->tickets[i].RealmName.MaximumLength;
+        size += list->tickets[i].ClientRealm.MaximumLength;
+        size += list->tickets[i].ClientName.MaximumLength;
+        size += list->tickets[i].ServerRealm.MaximumLength;
         size += list->tickets[i].ServerName.MaximumLength;
     }
     if (!resp || size > *out_size)
@@ -293,9 +311,15 @@ static NTSTATUS copy_tickets_to_client( struct ticket_list *list, KERB_QUERY_TKT
 
     for (i = 0; i < list->count; i++)
     {
-        resp->Tickets[i].RealmName.Buffer = (WCHAR *)client_str;
-        memcpy( client_str, list->tickets[i].RealmName.Buffer, list->tickets[i].RealmName.MaximumLength );
-        client_str += list->tickets[i].RealmName.MaximumLength;
+        resp->Tickets[i].ClientRealm.Buffer = (WCHAR *)client_str;
+        memcpy( client_str, list->tickets[i].ClientRealm.Buffer, list->tickets[i].ClientRealm.MaximumLength );
+        client_str += list->tickets[i].ClientRealm.MaximumLength;
+        resp->Tickets[i].ClientName.Buffer = (WCHAR *)client_str;
+        memcpy( client_str, list->tickets[i].ClientName.Buffer, list->tickets[i].ClientName.MaximumLength );
+        client_str += list->tickets[i].ClientName.MaximumLength;
+        resp->Tickets[i].ServerRealm.Buffer = (WCHAR *)client_str;
+        memcpy( client_str, list->tickets[i].ServerRealm.Buffer, list->tickets[i].ServerRealm.MaximumLength );
+        client_str += list->tickets[i].ServerRealm.MaximumLength;
         resp->Tickets[i].ServerName.Buffer = (WCHAR *)client_str;
         memcpy( client_str, list->tickets[i].ServerName.Buffer, list->tickets[i].ServerName.MaximumLength );
         client_str += list->tickets[i].ServerName.MaximumLength;
@@ -305,7 +329,7 @@ static NTSTATUS copy_tickets_to_client( struct ticket_list *list, KERB_QUERY_TKT
 
 static NTSTATUS kerberos_fill_ticket_list( struct ticket_list *list )
 {
-    NTSTATUS status;
+    NTSTATUS status = STATUS_SUCCESS;
     krb5_error_code err;
     krb5_context ctx;
     krb5_cccol_cursor cursor = NULL;
@@ -339,22 +363,32 @@ done:
     return status;
 }
 
+static void free_tickets_in_list( struct ticket_list *list )
+{
+    ULONG i;
+
+    for (i = 0; i < list->count; i++)
+    {
+        free( list->tickets[i].ClientRealm.Buffer );
+        free( list->tickets[i].ClientName.Buffer );
+        free( list->tickets[i].ServerRealm.Buffer );
+        free( list->tickets[i].ServerName.Buffer );
+    }
+
+    free( list->tickets );
+}
+
 static NTSTATUS query_ticket_cache( void *args )
 {
     struct query_ticket_cache_params *params = args;
     struct ticket_list list = { 0 };
     NTSTATUS status;
-    ULONG i;
 
     status = kerberos_fill_ticket_list( &list );
 
     if (status == STATUS_SUCCESS) status = copy_tickets_to_client( &list, params->resp, params->out_size );
 
-    for (i = 0; i < list.count; i++)
-    {
-        free( list.tickets[i].RealmName.Buffer );
-        free( list.tickets[i].ServerName.Buffer );
-    }
+    free_tickets_in_list( &list );
     return status;
 }
 
@@ -369,7 +403,9 @@ MAKE_FUNCPTR( gss_get_mic );
 MAKE_FUNCPTR( gss_import_name );
 MAKE_FUNCPTR( gss_init_sec_context );
 MAKE_FUNCPTR( gss_inquire_context );
+MAKE_FUNCPTR( gss_inquire_sec_context_by_oid );
 MAKE_FUNCPTR( gss_release_buffer );
+MAKE_FUNCPTR( gss_release_buffer_set );
 MAKE_FUNCPTR( gss_release_cred );
 MAKE_FUNCPTR( gss_release_iov_buffer );
 MAKE_FUNCPTR( gss_release_name );
@@ -395,21 +431,23 @@ static BOOL load_gssapi_krb5(void)
         goto fail; \
     }
 
-    LOAD_FUNCPTR( gss_accept_sec_context)
-    LOAD_FUNCPTR( gss_acquire_cred)
-    LOAD_FUNCPTR( gss_delete_sec_context)
-    LOAD_FUNCPTR( gss_display_status)
-    LOAD_FUNCPTR( gss_get_mic)
-    LOAD_FUNCPTR( gss_import_name)
-    LOAD_FUNCPTR( gss_init_sec_context)
-    LOAD_FUNCPTR( gss_inquire_context)
-    LOAD_FUNCPTR( gss_release_buffer)
-    LOAD_FUNCPTR( gss_release_cred)
-    LOAD_FUNCPTR( gss_release_iov_buffer)
-    LOAD_FUNCPTR( gss_release_name)
-    LOAD_FUNCPTR( gss_unwrap)
-    LOAD_FUNCPTR( gss_unwrap_iov)
-    LOAD_FUNCPTR( gss_verify_mic)
+    LOAD_FUNCPTR( gss_accept_sec_context )
+    LOAD_FUNCPTR( gss_acquire_cred )
+    LOAD_FUNCPTR( gss_delete_sec_context )
+    LOAD_FUNCPTR( gss_display_status )
+    LOAD_FUNCPTR( gss_get_mic )
+    LOAD_FUNCPTR( gss_import_name )
+    LOAD_FUNCPTR( gss_init_sec_context )
+    LOAD_FUNCPTR( gss_inquire_context )
+    LOAD_FUNCPTR( gss_inquire_sec_context_by_oid )
+    LOAD_FUNCPTR( gss_release_buffer )
+    LOAD_FUNCPTR( gss_release_buffer_set )
+    LOAD_FUNCPTR( gss_release_cred )
+    LOAD_FUNCPTR( gss_release_iov_buffer )
+    LOAD_FUNCPTR( gss_release_name )
+    LOAD_FUNCPTR( gss_unwrap )
+    LOAD_FUNCPTR( gss_unwrap_iov )
+    LOAD_FUNCPTR( gss_verify_mic )
     LOAD_FUNCPTR( gss_wrap )
     LOAD_FUNCPTR( gss_wrap_iov )
 #undef LOAD_FUNCPTR
@@ -770,11 +808,49 @@ static NTSTATUS make_signature( void *args )
 #define KERBEROS_MAX_SIGNATURE_DCE    28
 #define KERBEROS_SECURITY_TRAILER_DCE 76
 
+static NTSTATUS get_session_key( gss_ctx_id_t ctx, SecPkgContext_SessionKey *key )
+{
+    gss_OID_desc GSS_C_INQ_SSPI_SESSION_KEY =
+        { 11, (void *)"\x2a\x86\x48\x86\xf7\x12\x01\x02\x02\x05\x05" }; /* 1.2.840.113554.1.2.2.5.5 */
+    OM_uint32 ret, minor_status;
+    gss_buffer_set_t buffer_set = GSS_C_NO_BUFFER_SET;
+
+    ret = pgss_inquire_sec_context_by_oid( &minor_status, ctx, &GSS_C_INQ_SSPI_SESSION_KEY, &buffer_set );
+    if (GSS_ERROR( ret )) trace_gss_status( ret, minor_status );
+    if (ret != GSS_S_COMPLETE) return STATUS_INTERNAL_ERROR;
+
+    if (buffer_set == GSS_C_NO_BUFFER_SET || buffer_set->count != 2)
+    {
+        pgss_release_buffer_set( &minor_status, &buffer_set );
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    if (key->SessionKeyLength < buffer_set->elements[0].length )
+    {
+        key->SessionKeyLength = buffer_set->elements[0].length;
+        pgss_release_buffer_set( &minor_status, &buffer_set );
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    memcpy( key->SessionKey, buffer_set->elements[0].value, buffer_set->elements[0].length );
+    key->SessionKeyLength = buffer_set->elements[0].length;
+
+    pgss_release_buffer_set( &minor_status, &buffer_set );
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS query_context_attributes( void *args )
 {
     struct query_context_attributes_params *params = args;
     switch (params->attr)
     {
+    case SECPKG_ATTR_SESSION_KEY:
+    {
+        SecPkgContext_SessionKey *key = (SecPkgContext_SessionKey *)params->buf;
+        gss_ctx_id_t ctx  = ctxhandle_sspi_to_gss( params->context );
+
+        return get_session_key( ctx, key );
+    }
     case SECPKG_ATTR_SIZES:
     {
         SecPkgContext_Sizes *sizes = (SecPkgContext_Sizes *)params->buf;
@@ -996,7 +1072,7 @@ static NTSTATUS process_attach( void *args )
     return STATUS_DLL_NOT_FOUND;
 }
 
-unixlib_entry_t __wine_unix_call_funcs[] =
+const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     process_attach,
     accept_context,
@@ -1011,6 +1087,8 @@ unixlib_entry_t __wine_unix_call_funcs[] =
     unseal_message,
     verify_signature,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
 
 #ifdef _WIN64
 
@@ -1165,10 +1243,12 @@ static NTSTATUS wow64_query_context_attributes( void *args )
     return query_context_attributes( &params );
 }
 
-struct KERB_TICKET_CACHE_INFO32
+struct KERB_TICKET_CACHE_INFO_EX32
 {
+    UNICODE_STRING32 ClientName;
+    UNICODE_STRING32 ClientRealm;
     UNICODE_STRING32 ServerName;
-    UNICODE_STRING32 RealmName;
+    UNICODE_STRING32 ServerRealm;
     LARGE_INTEGER StartTime;
     LARGE_INTEGER EndTime;
     LARGE_INTEGER RenewTime;
@@ -1176,11 +1256,11 @@ struct KERB_TICKET_CACHE_INFO32
     ULONG TicketFlags;
 };
 
-struct KERB_QUERY_TKT_CACHE_RESPONSE32
+struct KERB_QUERY_TKT_CACHE_EX_RESPONSE32
 {
     KERB_PROTOCOL_MESSAGE_TYPE MessageType;
     ULONG CountOfTickets;
-    struct KERB_TICKET_CACHE_INFO32 Tickets[ANYSIZE_ARRAY];
+    struct KERB_TICKET_CACHE_INFO_EX32 Tickets[ANYSIZE_ARRAY];
 };
 
 static void copy_ticket_ustr_64to32( const UNICODE_STRING *str, UNICODE_STRING32 *str32, ULONG *client_str )
@@ -1192,16 +1272,16 @@ static void copy_ticket_ustr_64to32( const UNICODE_STRING *str, UNICODE_STRING32
     *client_str += str->MaximumLength;
 }
 
-static NTSTATUS copy_tickets_to_client32( struct ticket_list *list, struct KERB_QUERY_TKT_CACHE_RESPONSE32 *resp,
+static NTSTATUS copy_tickets_to_client32( struct ticket_list *list, struct KERB_QUERY_TKT_CACHE_EX_RESPONSE32 *resp,
         ULONG *out_size )
 {
     ULONG i, size, size_fixed;
     ULONG client_str;
 
-    size = size_fixed = offsetof( struct KERB_QUERY_TKT_CACHE_RESPONSE32, Tickets[list->count] );
+    size = size_fixed = offsetof( struct KERB_QUERY_TKT_CACHE_EX_RESPONSE32, Tickets[list->count] );
     for (i = 0; i < list->count; i++)
     {
-        size += list->tickets[i].RealmName.MaximumLength;
+        size += list->tickets[i].ServerRealm.MaximumLength;
         size += list->tickets[i].ServerName.MaximumLength;
     }
     if (!resp || size > *out_size)
@@ -1218,7 +1298,7 @@ static NTSTATUS copy_tickets_to_client32( struct ticket_list *list, struct KERB_
     for (i = 0; i < list->count; i++)
     {
         copy_ticket_ustr_64to32( &list->tickets[i].ServerName, &resp->Tickets[i].ServerName, &client_str );
-        copy_ticket_ustr_64to32( &list->tickets[i].RealmName, &resp->Tickets[i].RealmName, &client_str );
+        copy_ticket_ustr_64to32( &list->tickets[i].ServerRealm, &resp->Tickets[i].ServerRealm, &client_str );
         resp->Tickets[i].StartTime = list->tickets[i].StartTime;
         resp->Tickets[i].EndTime = list->tickets[i].EndTime;
         resp->Tickets[i].RenewTime = list->tickets[i].RenewTime;
@@ -1237,17 +1317,12 @@ static NTSTATUS wow64_query_ticket_cache( void *args )
     } const *params32 = args;
     struct ticket_list list = { 0 };
     NTSTATUS status;
-    ULONG i;
 
     status = kerberos_fill_ticket_list( &list );
     if (status == STATUS_SUCCESS)
         status = copy_tickets_to_client32( &list, ULongToPtr(params32->resp), ULongToPtr(params32->out_size) );
 
-    for (i = 0; i < list.count; i++)
-    {
-        free( list.tickets[i].RealmName.Buffer );
-        free( list.tickets[i].ServerName.Buffer );
-    }
+    free_tickets_in_list( &list );
     return status;
 
 }
@@ -1319,7 +1394,7 @@ static NTSTATUS wow64_verify_signature( void *args )
     return verify_signature( &params );
 }
 
-unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
     process_attach,
     wow64_accept_context,
@@ -1334,6 +1409,8 @@ unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_unseal_message,
     wow64_verify_signature,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
 
 #endif /* _WIN64 */
 

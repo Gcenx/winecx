@@ -692,8 +692,7 @@ static WCHAR *edit_line_history( struct console *console, unsigned int index )
     }
     else if(console->edit_line.current_history)
     {
-        if ((ptr = malloc( (lstrlenW(console->edit_line.current_history) + 1) * sizeof(WCHAR) )))
-            lstrcpyW( ptr, console->edit_line.current_history );
+        ptr = wcsdup( console->edit_line.current_history );
     }
     return ptr;
 }
@@ -715,6 +714,7 @@ static void edit_line_move_to_history( struct console *console, int index )
         }
         else
         {
+            free( line );
             ctx->status = STATUS_NO_MEMORY;
             return;
         }
@@ -864,7 +864,7 @@ static void edit_line_transpose_words( struct console *console )
     {
         unsigned int len_r = right_offset - ctx->cursor;
         unsigned int len_l = ctx->cursor - left_offset;
-        char *tmp = malloc( len_r * sizeof(WCHAR) );
+        WCHAR *tmp = malloc( len_r * sizeof(WCHAR) );
         if (!tmp)
         {
             ctx->status = STATUS_NO_MEMORY;
@@ -1463,6 +1463,29 @@ static NTSTATUS read_console( struct console *console, unsigned int ioctl, size_
     return process_console_input( console );
 }
 
+static BOOL map_to_ctrlevent( struct console *console, const INPUT_RECORD *record,
+                              unsigned int* event)
+{
+    if (record->EventType == KEY_EVENT)
+    {
+        if (record->Event.KeyEvent.uChar.UnicodeChar == 'C' - 64 &&
+            !(record->Event.KeyEvent.dwControlKeyState & ENHANCED_KEY))
+        {
+            *event = CTRL_C_EVENT;
+            return TRUE;
+        }
+        /* we want to get ctrl-pause/break, but it's already translated by user32 into VK_CANCEL */
+        if (record->Event.KeyEvent.uChar.UnicodeChar == 0 &&
+            record->Event.KeyEvent.wVirtualKeyCode == VK_CANCEL &&
+            record->Event.KeyEvent.dwControlKeyState == LEFT_CTRL_PRESSED)
+        {
+            *event = CTRL_BREAK_EVENT;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 /* add input events to a console input queue */
 NTSTATUS write_console_input( struct console *console, const INPUT_RECORD *records,
                               unsigned int count, BOOL flush )
@@ -1478,38 +1501,36 @@ NTSTATUS write_console_input( struct console *console, const INPUT_RECORD *recor
         console->records = new_rec;
         console->record_size = console->record_size * 2 + count;
     }
-    memcpy( console->records + console->record_count, records, count * sizeof(INPUT_RECORD) );
 
     if (console->mode & ENABLE_PROCESSED_INPUT)
     {
-        unsigned int i = 0;
-        while (i < count)
+        unsigned int i;
+        for (i = 0; i < count; i++)
         {
-            if (records[i].EventType == KEY_EVENT &&
-		records[i].Event.KeyEvent.uChar.UnicodeChar == 'C' - 64 &&
-		!(records[i].Event.KeyEvent.dwControlKeyState & ENHANCED_KEY))
+            unsigned int event;
+
+            if (map_to_ctrlevent( console, &records[i], &event ))
             {
-                if (i != count - 1)
-                    memcpy( &console->records[console->record_count + i],
-                            &console->records[console->record_count + i + 1],
-                            (count - i - 1) * sizeof(INPUT_RECORD) );
-                count--;
                 if (records[i].Event.KeyEvent.bKeyDown)
                 {
                     struct condrv_ctrl_event ctrl_event;
                     IO_STATUS_BLOCK io;
 
-                    ctrl_event.event = CTRL_C_EVENT;
+                    ctrl_event.event = event;
                     ctrl_event.group_id = 0;
                     NtDeviceIoControlFile( console->server, NULL, NULL, NULL, &io, IOCTL_CONDRV_CTRL_EVENT,
                                            &ctrl_event, sizeof(ctrl_event), NULL, 0 );
-
                 }
             }
-            else i++;
+            else
+                console->records[console->record_count++] = records[i];
         }
     }
-    console->record_count += count;
+    else
+    {
+        memcpy( console->records + console->record_count, records, count * sizeof(INPUT_RECORD) );
+        console->record_count += count;
+    }
     return flush ? process_console_input( console ) : STATUS_SUCCESS;
 }
 
@@ -1744,6 +1765,11 @@ static DWORD WINAPI tty_input( void *param )
             switch (ch)
             {
             case 3: /* end of text */
+                if (console->is_unix && (console->mode & ENABLE_PROCESSED_INPUT))
+                {
+                    key_press( console, ch, 'C', LEFT_CTRL_PRESSED );
+                    break;
+                }
                 LeaveCriticalSection( &console_section );
                 goto done;
             case '\n':
@@ -1754,6 +1780,12 @@ static DWORD WINAPI tty_input( void *param )
                 break;
             case 0x1b:
                 i += process_input_escape( console, buf + i + 1, count - i - 1 );
+                break;
+            case 0x1c: /* map ctrl-\ unix-ism into ctrl-break/pause windows-ism for unix consoles */
+                if (console->is_unix)
+                    key_press( console, 0, VK_CANCEL, LEFT_CTRL_PRESSED );
+                else
+                    char_key_press( console, ch, 0 );
                 break;
             case 0x7f:
                 key_press( console, '\b', VK_BACK, 0 );
@@ -2432,20 +2464,37 @@ static NTSTATUS scroll_output( struct screen_buffer *screen_buffer, const struct
     return STATUS_SUCCESS;
 }
 
+static WCHAR *set_title( const WCHAR *in_title, size_t size )
+{
+    WCHAR *title = NULL;
+
+    title = malloc( size + sizeof(WCHAR) );
+    if (!title) return NULL;
+
+    memcpy( title, in_title, size );
+    title[ size / sizeof(WCHAR) ] = 0;
+
+    return title;
+}
+
 static NTSTATUS set_console_title( struct console *console, const WCHAR *in_title, size_t size )
 {
     WCHAR *title = NULL;
 
     TRACE( "%s\n", debugstr_wn(in_title, size / sizeof(WCHAR)) );
 
-    if (size)
-    {
-        if (!(title = malloc( size + sizeof(WCHAR) ))) return STATUS_NO_MEMORY;
-        memcpy( title, in_title, size );
-        title[size / sizeof(WCHAR)] = 0;
-    }
+    if (!(title = set_title( in_title, size )))
+        return STATUS_NO_MEMORY;
+
     free( console->title );
     console->title = title;
+
+    if (!console->title_orig && !(console->title_orig = set_title( in_title, size )))
+    {
+        free( console->title );
+        console->title = NULL;
+        return STATUS_NO_MEMORY;
+    }
 
     if (console->tty_output)
     {
@@ -2680,15 +2729,19 @@ static NTSTATUS console_input_ioctl( struct console *console, unsigned int code,
 
     case IOCTL_CONDRV_GET_TITLE:
         {
+            BOOL current_title;
+            WCHAR *title;
             size_t title_len, str_size;
             struct condrv_title_params *params;
-            if (in_size) return STATUS_INVALID_PARAMETER;
-            title_len = console->title ? wcslen( console->title ) : 0;
+            if (in_size != sizeof(BOOL)) return STATUS_INVALID_PARAMETER;
+            current_title = *(BOOL *)in_data;
+            title = current_title ? console->title : console->title_orig;
+            title_len = title ? wcslen( title ) : 0;
             str_size = min( *out_size - sizeof(*params), title_len * sizeof(WCHAR) );
             *out_size = sizeof(*params) + str_size;
             if (!(params = alloc_ioctl_buffer( *out_size ))) return STATUS_NO_MEMORY;
-            TRACE( "returning title %s\n", debugstr_w(console->title) );
-            if (str_size) memcpy( params->buffer, console->title, str_size );
+            TRACE( "returning %s %s\n", current_title ? "title" : "original title", debugstr_w(title) );
+            if (str_size) memcpy( params->buffer, title, str_size );
             params->title_len = title_len;
             return STATUS_SUCCESS;
         }

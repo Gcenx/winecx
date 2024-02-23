@@ -1,0 +1,4 @@
+MODULE    = msmpeg2vdec.dll
+
+SOURCES = \
+	main.c

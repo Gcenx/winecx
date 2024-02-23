@@ -103,21 +103,32 @@ const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
 
 
 DEFINE_EXPECT(CreateInstance);
+DEFINE_EXPECT(CreateInstance2);
 DEFINE_EXPECT(GetInterfaceSafetyOptions);
 DEFINE_EXPECT(SetInterfaceSafetyOptions);
+DEFINE_EXPECT(GetInterfaceSafetyOptions2);
+DEFINE_EXPECT(SetInterfaceSafetyOptions2);
 DEFINE_EXPECT(InitNew);
+DEFINE_EXPECT(InitNew2);
 DEFINE_EXPECT(Close);
+DEFINE_EXPECT(Close2);
 DEFINE_EXPECT(SetProperty_HACK_TRIDENTEVENTSINK);
 DEFINE_EXPECT(SetProperty_INVOKEVERSIONING);
 DEFINE_EXPECT(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION_FALSE);
 DEFINE_EXPECT(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION_TRUE);
+DEFINE_EXPECT(SetProperty2_HACK_TRIDENTEVENTSINK);
+DEFINE_EXPECT(SetProperty2_INVOKEVERSIONING);
+DEFINE_EXPECT(SetProperty2_ABBREVIATE_GLOBALNAME_RESOLUTION_FALSE);
 DEFINE_EXPECT(SetScriptSite);
+DEFINE_EXPECT(SetScriptSite2);
 DEFINE_EXPECT(GetScriptState);
 DEFINE_EXPECT(SetScriptState_STARTED);
 DEFINE_EXPECT(SetScriptState_CONNECTED);
 DEFINE_EXPECT(SetScriptState_DISCONNECTED);
 DEFINE_EXPECT(AddNamedItem);
+DEFINE_EXPECT(AddNamedItem2);
 DEFINE_EXPECT(ParseScriptText_script);
+DEFINE_EXPECT(ParseScriptText_script2);
 DEFINE_EXPECT(ParseScriptText_execScript);
 DEFINE_EXPECT(GetScriptDispatch);
 DEFINE_EXPECT(funcDisp);
@@ -140,11 +151,12 @@ DEFINE_EXPECT(ChangeType_bstr);
 DEFINE_EXPECT(ChangeType_dispatch);
 DEFINE_EXPECT(GetTypeInfo);
 
-#define TESTSCRIPT_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80746}"
 #define TESTACTIVEX_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80646}"
 
 #define DISPID_SCRIPT_TESTPROP   0x100000
 #define DISPID_SCRIPT_TESTPROP2  0x100001
+#define DISPID_REFTEST_GET       0x100000
+#define DISPID_REFTEST_REF       0x100001
 
 #define DISPID_EXTERNAL_OK             0x300000
 #define DISPID_EXTERNAL_TRACE          0x300001
@@ -160,9 +172,13 @@ DEFINE_EXPECT(GetTypeInfo);
 #define DISPID_EXTERNAL_TEST_VARS      0x30000B
 #define DISPID_EXTERNAL_TESTHOSTCTX    0x30000C
 #define DISPID_EXTERNAL_GETMIMETYPE    0x30000D
+#define DISPID_EXTERNAL_SETVIEWSIZE    0x30000E
+#define DISPID_EXTERNAL_NEWREFTEST     0x30000F
 
-static const GUID CLSID_TestScript =
-    {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x07,0x46}};
+static const GUID CLSID_TestScript[] = {
+    {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x07,0x46}},
+    {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x08,0x46}},
+};
 static const GUID CLSID_TestActiveX =
     {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x06,0x46}};
 
@@ -178,25 +194,40 @@ static HRESULT ax_getopt_hres = S_OK, ax_setopt_dispex_hres = S_OK;
 static HRESULT ax_setopt_disp_caller_hres = S_OK, ax_setopt_disp_data_hres = S_OK;
 static BOOL skip_loadobject_tests;
 
-static IActiveScriptSite *site;
-static SCRIPTSTATE state;
+static IActiveScriptSite *site, *site2;
+static SCRIPTSTATE state, state2;
 
-static BOOL init_key(const char *key_name, const char *def_value, BOOL init)
+static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
+{
+    IUnknown *unk1, *unk2;
+
+    if(iface1 == iface2)
+        return TRUE;
+
+    IUnknown_QueryInterface(iface1, &IID_IHTMLWindow2, (void**)&unk1);
+    IUnknown_Release(unk1);
+    IUnknown_QueryInterface(iface2, &IID_IHTMLWindow2, (void**)&unk2);
+    IUnknown_Release(unk2);
+
+    return unk1 == unk2;
+}
+
+static BOOL init_key(const WCHAR *key_name, const WCHAR *def_value, BOOL init)
 {
     HKEY hkey;
     DWORD res;
 
     if(!init) {
-        RegDeleteKeyA(HKEY_CLASSES_ROOT, key_name);
+        RegDeleteKeyW(HKEY_CLASSES_ROOT, key_name);
         return TRUE;
     }
 
-    res = RegCreateKeyA(HKEY_CLASSES_ROOT, key_name, &hkey);
+    res = RegCreateKeyW(HKEY_CLASSES_ROOT, key_name, &hkey);
     if(res != ERROR_SUCCESS)
         return FALSE;
 
     if(def_value)
-        res = RegSetValueA(hkey, NULL, REG_SZ, def_value, strlen(def_value));
+        res = RegSetValueW(hkey, NULL, REG_SZ, def_value, wcslen(def_value));
 
     RegCloseKey(hkey);
 
@@ -628,6 +659,13 @@ static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DW
     return E_NOTIMPL;
 }
 
+static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
 static HRESULT WINAPI funcDisp_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
@@ -827,6 +865,181 @@ static IDispatchExVtbl testHostContextDisp_no_this_vtbl = {
 
 static IDispatchEx testHostContextDisp_no_this = { &testHostContextDisp_no_this_vtbl };
 
+struct refTestObj
+{
+    IDispatchEx IDispatchEx_iface;
+    LONG ref;
+};
+
+struct refTest
+{
+    IDispatchEx IDispatchEx_iface;
+    LONG ref;
+    struct refTestObj *obj;
+};
+
+static inline struct refTestObj *refTestObj_from_IDispatchEx(IDispatchEx *iface)
+{
+    return CONTAINING_RECORD(iface, struct refTestObj, IDispatchEx_iface);
+}
+
+static inline struct refTest *refTest_from_IDispatchEx(IDispatchEx *iface)
+{
+    return CONTAINING_RECORD(iface, struct refTest, IDispatchEx_iface);
+}
+
+static HRESULT WINAPI refTestObj_QueryInterface(IDispatchEx *iface, REFIID riid, void **ppv)
+{
+    struct refTestObj *This = refTestObj_from_IDispatchEx(iface);
+
+    if(IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IDispatch) || IsEqualGUID(riid, &IID_IDispatchEx))
+        *ppv = &This->IDispatchEx_iface;
+    else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IDispatchEx_AddRef(&This->IDispatchEx_iface);
+    return S_OK;
+}
+
+static ULONG WINAPI refTestObj_AddRef(IDispatchEx *iface)
+{
+    struct refTestObj *This = refTestObj_from_IDispatchEx(iface);
+
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI refTestObj_Release(IDispatchEx *iface)
+{
+    struct refTestObj *This = refTestObj_from_IDispatchEx(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    if(!ref)
+        free(This);
+
+    return ref;
+}
+
+static IDispatchExVtbl refTestObj_vtbl = {
+    refTestObj_QueryInterface,
+    refTestObj_AddRef,
+    refTestObj_Release,
+    DispatchEx_GetTypeInfoCount,
+    DispatchEx_GetTypeInfo,
+    DispatchEx_GetIDsOfNames,
+    DispatchEx_Invoke,
+    DispatchEx_GetDispID,
+    DispatchEx_InvokeEx,
+    DispatchEx_DeleteMemberByName,
+    DispatchEx_DeleteMemberByDispID,
+    DispatchEx_GetMemberProperties,
+    DispatchEx_GetMemberName,
+    DispatchEx_GetNextDispID,
+    DispatchEx_GetNameSpaceParent
+};
+
+static HRESULT WINAPI refTest_QueryInterface(IDispatchEx *iface, REFIID riid, void **ppv)
+{
+    struct refTest *This = refTest_from_IDispatchEx(iface);
+
+    if(IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IDispatch) || IsEqualGUID(riid, &IID_IDispatchEx))
+        *ppv = &This->IDispatchEx_iface;
+    else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IDispatchEx_AddRef(&This->IDispatchEx_iface);
+    return S_OK;
+}
+
+static ULONG WINAPI refTest_AddRef(IDispatchEx *iface)
+{
+    struct refTest *This = refTest_from_IDispatchEx(iface);
+
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI refTest_Release(IDispatchEx *iface)
+{
+    struct refTest *This = refTest_from_IDispatchEx(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    if(!ref) {
+        IDispatchEx_Release(&This->obj->IDispatchEx_iface);
+        free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI refTest_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
+{
+    if(!wcscmp(bstrName, L"get")) {
+        *pid = DISPID_REFTEST_GET;
+        return S_OK;
+    }
+    if(!wcscmp(bstrName, L"ref")) {
+        *pid = DISPID_REFTEST_REF;
+        return S_OK;
+    }
+    ok(0, "unexpected call %s\n", wine_dbgstr_w(bstrName));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI refTest_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    struct refTest *This = refTest_from_IDispatchEx(iface);
+
+    ok(pdp != NULL, "pdp == NULL\n");
+    ok(!pdp->cArgs, "pdp->cArgs = %d\n", pdp->cArgs);
+    ok(pvarRes != NULL, "pvarRes == NULL\n");
+    ok(pei != NULL, "pei == NULL\n");
+    ok(pspCaller != NULL, "pspCaller == NULL\n");
+
+    switch(id) {
+    case DISPID_REFTEST_GET: {
+        ok(wFlags == DISPATCH_METHOD, "DISPID_REFTEST_GET wFlags = %x\n", wFlags);
+        V_VT(pvarRes) = VT_DISPATCH;
+        V_DISPATCH(pvarRes) = (IDispatch*)&This->obj->IDispatchEx_iface;
+        IDispatchEx_AddRef(&This->obj->IDispatchEx_iface);
+        break;
+    }
+    case DISPID_REFTEST_REF:
+        ok(wFlags == DISPATCH_PROPERTYGET, "DISPID_REFTEST_REF wFlags = %x\n", wFlags);
+        V_VT(pvarRes) = VT_I4;
+        V_I4(pvarRes) = This->obj->ref;
+        break;
+
+    default:
+        ok(0, "id = %ld", id);
+        V_VT(pvarRes) = VT_EMPTY;
+        break;
+    }
+
+    return S_OK;
+}
+
+static IDispatchExVtbl refTest_vtbl = {
+    refTest_QueryInterface,
+    refTest_AddRef,
+    refTest_Release,
+    DispatchEx_GetTypeInfoCount,
+    DispatchEx_GetTypeInfo,
+    DispatchEx_GetIDsOfNames,
+    DispatchEx_Invoke,
+    refTest_GetDispID,
+    refTest_InvokeEx,
+    DispatchEx_DeleteMemberByName,
+    DispatchEx_DeleteMemberByDispID,
+    DispatchEx_GetMemberProperties,
+    DispatchEx_GetMemberName,
+    DispatchEx_GetNextDispID,
+    DispatchEx_GetNameSpaceParent
+};
+
 static HRESULT WINAPI externalDisp_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
 {
     if(!lstrcmpW(bstrName, L"ok")) {
@@ -883,6 +1096,14 @@ static HRESULT WINAPI externalDisp_GetDispID(IDispatchEx *iface, BSTR bstrName, 
     }
     if(!lstrcmpW(bstrName, L"getExpectedMimeType")) {
         *pid = DISPID_EXTERNAL_GETMIMETYPE;
+        return S_OK;
+    }
+    if(!lstrcmpW(bstrName, L"setViewSize")) {
+        *pid = DISPID_EXTERNAL_SETVIEWSIZE;
+        return S_OK;
+    }
+    if(!lstrcmpW(bstrName, L"newRefTest")) {
+        *pid = DISPID_EXTERNAL_NEWREFTEST;
         return S_OK;
     }
 
@@ -1145,6 +1366,44 @@ static HRESULT WINAPI externalDisp_InvokeEx(IDispatchEx *iface, DISPID id, LCID 
         V_BSTR(pvarRes) = get_mime_type_display_name(V_BSTR(pdp->rgvarg));
         V_VT(pvarRes) = V_BSTR(pvarRes) ? VT_BSTR : VT_NULL;
         return S_OK;
+
+    case DISPID_EXTERNAL_SETVIEWSIZE: {
+        RECT rect = { 0 };
+
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 2, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pei != NULL, "pei == NULL\n");
+        ok(V_VT(&pdp->rgvarg[1]) == VT_I4, "width VT = %d\n", V_VT(&pdp->rgvarg[1]));
+        ok(V_VT(&pdp->rgvarg[0]) == VT_I4, "height VT = %d\n", V_VT(&pdp->rgvarg[0]));
+
+        rect.right = V_I4(&pdp->rgvarg[1]);
+        rect.bottom = V_I4(&pdp->rgvarg[0]);
+        return IOleDocumentView_SetRect(view, &rect);
+    }
+
+    case DISPID_EXTERNAL_NEWREFTEST: {
+        struct refTest *obj = malloc(sizeof(*obj));
+
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pdp->cArgs, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pei != NULL, "pei == NULL\n");
+
+        obj->IDispatchEx_iface.lpVtbl = &refTest_vtbl;
+        obj->ref = 1;
+        obj->obj = malloc(sizeof(*obj->obj));
+        obj->obj->IDispatchEx_iface.lpVtbl = &refTestObj_vtbl;
+        obj->obj->ref = 1;
+
+        V_VT(pvarRes) = VT_DISPATCH;
+        V_DISPATCH(pvarRes) = (IDispatch*)&obj->IDispatchEx_iface;
+        return S_OK;
+    }
 
     default:
         ok(0, "unexpected call\n");
@@ -1927,9 +2186,9 @@ static IObjectSafety AXObjectSafety = { &AXObjectSafetyVtbl };
 
 static BOOL set_safe_reg(BOOL safe_call, BOOL safe_data)
 {
-    return init_key("CLSID\\"TESTACTIVEX_CLSID"\\Implemented Categories\\{7dd95801-9882-11cf-9fa9-00aa006c42c4}",
+    return init_key(L"CLSID\\"TESTACTIVEX_CLSID"\\Implemented Categories\\{7dd95801-9882-11cf-9fa9-00aa006c42c4}",
                     NULL, safe_call)
-        && init_key("CLSID\\"TESTACTIVEX_CLSID"\\Implemented Categories\\{7dd95802-9882-11cf-9fa9-00aa006c42c4}",
+        && init_key(L"CLSID\\"TESTACTIVEX_CLSID"\\Implemented Categories\\{7dd95802-9882-11cf-9fa9-00aa006c42c4}",
                     NULL, safe_data);
 }
 
@@ -3336,6 +3595,252 @@ static const IActiveScriptVtbl ActiveScriptVtbl = {
 
 static IActiveScript ActiveScript = { &ActiveScriptVtbl };
 
+static HRESULT WINAPI ObjectSafety2_GetInterfaceSafetyOptions(IObjectSafety *iface, REFIID riid,
+        DWORD *pdwSupportedOptions, DWORD *pdwEnabledOptions)
+{
+    CHECK_EXPECT(GetInterfaceSafetyOptions2);
+
+    ok(IsEqualGUID(&IID_IActiveScriptParse, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
+    ok(pdwSupportedOptions != NULL, "pdwSupportedOptions == NULL\n");
+    ok(pdwEnabledOptions != NULL, "pdwEnabledOptions == NULL\n");
+
+    *pdwSupportedOptions = INTERFACESAFE_FOR_UNTRUSTED_DATA | INTERFACE_USES_DISPEX | INTERFACE_USES_SECURITY_MANAGER;
+    *pdwEnabledOptions = INTERFACE_USES_DISPEX;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI ObjectSafety2_SetInterfaceSafetyOptions(IObjectSafety *iface, REFIID riid,
+        DWORD dwOptionSetMask, DWORD dwEnabledOptions)
+{
+    CHECK_EXPECT(SetInterfaceSafetyOptions2);
+
+    ok(IsEqualGUID(&IID_IActiveScriptParse, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
+
+    ok(dwOptionSetMask == (INTERFACESAFE_FOR_UNTRUSTED_DATA | INTERFACE_USES_DISPEX | INTERFACE_USES_SECURITY_MANAGER),
+       "dwOptionSetMask = %08lx\n", dwOptionSetMask);
+    ok(dwEnabledOptions == (INTERFACESAFE_FOR_UNTRUSTED_DATA | INTERFACE_USES_DISPEX | INTERFACE_USES_SECURITY_MANAGER),
+       "dwEnabledOptions = %08lx\n", dwOptionSetMask);
+
+    return S_OK;
+}
+
+static const IObjectSafetyVtbl ObjectSafety2Vtbl = {
+    ObjectSafety_QueryInterface,
+    ObjectSafety_AddRef,
+    ObjectSafety_Release,
+    ObjectSafety2_GetInterfaceSafetyOptions,
+    ObjectSafety2_SetInterfaceSafetyOptions
+};
+
+static IObjectSafety ObjectSafety2 = { &ObjectSafety2Vtbl };
+
+static HRESULT WINAPI ActiveScriptProperty2_SetProperty(IActiveScriptProperty *iface, DWORD dwProperty,
+        VARIANT *pvarIndex, VARIANT *pvarValue)
+{
+    switch(dwProperty) {
+    case SCRIPTPROP_HACK_TRIDENTEVENTSINK:
+        CHECK_EXPECT(SetProperty2_HACK_TRIDENTEVENTSINK);
+        ok(V_VT(pvarValue) == VT_BOOL, "V_VT(pvarValue) = %d\n", V_VT(pvarValue));
+        ok(V_BOOL(pvarValue) == VARIANT_TRUE, "V_BOOL(pvarValue) = %x\n", V_BOOL(pvarValue));
+        break;
+    case SCRIPTPROP_INVOKEVERSIONING:
+        CHECK_EXPECT(SetProperty2_INVOKEVERSIONING);
+        ok(V_VT(pvarValue) == VT_I4, "V_VT(pvarValue) = %d\n", V_VT(pvarValue));
+        ok(V_I4(pvarValue) == 1, "V_I4(pvarValue) = %ld\n", V_I4(pvarValue));
+        break;
+    case SCRIPTPROP_ABBREVIATE_GLOBALNAME_RESOLUTION:
+        CHECK_EXPECT(SetProperty2_ABBREVIATE_GLOBALNAME_RESOLUTION_FALSE);
+        ok(V_VT(pvarValue) == VT_BOOL, "V_VT(pvarValue) = %d\n", V_VT(pvarValue));
+        ok(!V_BOOL(pvarValue), "ABBREVIATE_GLOBALNAME_RESOLUTION is TRUE\n");
+        break;
+    case 0x70000003: /* Undocumented property set by IE10 */
+        return E_NOTIMPL;
+    default:
+        ok(0, "unexpected property %08lx\n", dwProperty);
+        return E_NOTIMPL;
+    }
+
+    ok(!pvarIndex, "pvarIndex != NULL\n");
+    ok(pvarValue != NULL, "pvarValue == NULL\n");
+
+    return S_OK;
+}
+
+static const IActiveScriptPropertyVtbl ActiveScriptProperty2Vtbl = {
+    ActiveScriptProperty_QueryInterface,
+    ActiveScriptProperty_AddRef,
+    ActiveScriptProperty_Release,
+    ActiveScriptProperty_GetProperty,
+    ActiveScriptProperty2_SetProperty
+};
+
+static IActiveScriptProperty ActiveScriptProperty2 = { &ActiveScriptProperty2Vtbl };
+
+static HRESULT WINAPI ActiveScriptParse2_InitNew(IActiveScriptParse *iface)
+{
+    CHECK_EXPECT(InitNew2);
+    return S_OK;
+}
+
+static HRESULT WINAPI ActiveScriptParse2_ParseScriptText(IActiveScriptParse *iface, LPCOLESTR pstrCode,
+        LPCOLESTR pstrItemName, IUnknown *punkContext, LPCOLESTR pstrDelimiter, CTXARG_T dwSourceContextCookie,
+        ULONG ulStartingLine, DWORD dwFlags, VARIANT *pvarResult, EXCEPINFO *pexcepinfo)
+{
+    ok(pvarResult != NULL, "pvarResult == NULL\n");
+    ok(pexcepinfo != NULL, "pexcepinfo == NULL\n");
+
+    if(!lstrcmpW(pstrCode, L"second script")) {
+        CHECK_EXPECT(ParseScriptText_script2);
+        ok(!lstrcmpW(pstrItemName, L"window"), "pstrItemName = %s\n", wine_dbgstr_w(pstrItemName));
+        ok(!lstrcmpW(pstrDelimiter, L"</SCRIPT>"), "pstrDelimiter = %s\n", wine_dbgstr_w(pstrDelimiter));
+        ok(dwFlags == (SCRIPTTEXT_ISVISIBLE | SCRIPTTEXT_HOSTMANAGESSOURCE), "dwFlags = %08lx\n", dwFlags);
+        return S_OK;
+    }
+
+    ok(0, "unexpected script %s\n", wine_dbgstr_w(pstrCode));
+    return E_FAIL;
+}
+
+static const IActiveScriptParseVtbl ActiveScriptParse2Vtbl = {
+    ActiveScriptParse_QueryInterface,
+    ActiveScriptParse_AddRef,
+    ActiveScriptParse_Release,
+    ActiveScriptParse2_InitNew,
+    ActiveScriptParse_AddScriptlet,
+    ActiveScriptParse2_ParseScriptText
+};
+
+static IActiveScriptParse ActiveScriptParse2 = { &ActiveScriptParse2Vtbl };
+
+static HRESULT WINAPI ActiveScript2_QueryInterface(IActiveScript *iface, REFIID riid, void **ppv)
+{
+    *ppv = NULL;
+
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IActiveScript, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IActiveScriptParse, riid)) {
+        *ppv = &ActiveScriptParse2;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IActiveScriptParseProcedure2, riid)) {
+        *ppv = &ActiveScriptParseProcedure;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IActiveScriptProperty, riid)) {
+        *ppv = &ActiveScriptProperty2;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IObjectSafety, riid)) {
+        *ppv = &ObjectSafety2;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IActiveScriptDebug, riid))
+        return E_NOINTERFACE;
+
+    trace("QI(%s)\n", wine_dbgstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static HRESULT WINAPI ActiveScript2_SetScriptSite(IActiveScript *iface, IActiveScriptSite *pass)
+{
+    HRESULT hres;
+
+    CHECK_EXPECT(SetScriptSite2);
+    ok(pass != NULL, "pass == NULL\n");
+    ok(pass != site, "pass == site\n");
+
+    hres = IActiveScriptSite_OnStateChange(pass, (state2 = SCRIPTSTATE_INITIALIZED));
+    ok(hres == S_OK, "OnStateChange failed: %08lx\n", hres);
+
+    site2 = pass;
+    IActiveScriptSite_AddRef(site2);
+    return S_OK;
+}
+
+static HRESULT WINAPI ActiveScript2_SetScriptState(IActiveScript *iface, SCRIPTSTATE ss)
+{
+    HRESULT hres = IActiveScriptSite_OnStateChange(site2, (state2 = ss));
+    ok(hres == S_OK, "OnStateChange failed: %08lx\n", hres);
+    return S_OK;
+}
+
+static HRESULT WINAPI ActiveScript2_GetScriptState(IActiveScript *iface, SCRIPTSTATE *pssState)
+{
+    *pssState = state2;
+    return S_OK;
+}
+
+static HRESULT WINAPI ActiveScript2_Close(IActiveScript *iface)
+{
+    CHECK_EXPECT(Close2);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ActiveScript2_AddNamedItem(IActiveScript *iface, LPCOLESTR pstrName, DWORD dwFlags)
+{
+    IHTMLWindow2 *window, *window2;
+    IUnknown *unk = NULL;
+    HRESULT hres;
+
+    CHECK_EXPECT(AddNamedItem2);
+    ok(!wcscmp(pstrName, L"window"), "pstrName = %s\n", wine_dbgstr_w(pstrName));
+    ok(dwFlags == (SCRIPTITEM_ISVISIBLE | SCRIPTITEM_ISSOURCE | SCRIPTITEM_GLOBALMEMBERS), "dwFlags = %lx\n", dwFlags);
+
+    hres = IActiveScriptSite_GetItemInfo(site2, L"window", SCRIPTINFO_IUNKNOWN, &unk, NULL);
+    ok(hres == S_OK, "GetItemInfo failed: %08lx\n", hres);
+    ok(unk != NULL, "unk == NULL\n");
+
+    /* Native is pretty broken here, it gives a different IUnknown than first site's SCRIPTINFO_IUNKNOWN,
+     * and querying for IDispatchEx gives different interfaces on both these *and* our window_dispex!
+     * That said, querying for IHTMLWindow2 *does* give the same interface for both?!?
+     */
+    hres = IDispatchEx_QueryInterface(window_dispex, &IID_IHTMLWindow2, (void**)&window);
+    ok(hres == S_OK, "Could not get IHTMLWindow2 interface: %08lx\n", hres);
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLWindow2, (void**)&window2);
+    ok(hres == S_OK, "Could not get IHTMLWindow2 interface: %08lx\n", hres);
+    ok(window == window2, "first site window != second site window\n");
+    IHTMLWindow2_Release(window2);
+    IHTMLWindow2_Release(window);
+
+    IUnknown_Release(unk);
+    return S_OK;
+}
+
+static HRESULT WINAPI ActiveScript2_GetScriptDispatch(IActiveScript *iface, LPCOLESTR pstrItemName, IDispatch **ppdisp)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IActiveScriptVtbl ActiveScript2Vtbl = {
+    ActiveScript2_QueryInterface,
+    ActiveScript_AddRef,
+    ActiveScript_Release,
+    ActiveScript2_SetScriptSite,
+    ActiveScript_GetScriptSite,
+    ActiveScript2_SetScriptState,
+    ActiveScript2_GetScriptState,
+    ActiveScript2_Close,
+    ActiveScript2_AddNamedItem,
+    ActiveScript_AddTypeLib,
+    ActiveScript2_GetScriptDispatch,
+    ActiveScript_GetCurrentScriptThreadID,
+    ActiveScript_GetScriptThreadID,
+    ActiveScript_GetScriptThreadState,
+    ActiveScript_InterruptScriptThread,
+    ActiveScript_Clone
+};
+
+static IActiveScript ActiveScript2 = { &ActiveScript2Vtbl };
+
 static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID riid, void **ppv)
 {
     *ppv = NULL;
@@ -3388,7 +3893,25 @@ static const IClassFactoryVtbl ClassFactoryVtbl = {
     ClassFactory_LockServer
 };
 
-static IClassFactory script_cf = { &ClassFactoryVtbl };
+static HRESULT WINAPI ClassFactory2_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **ppv)
+{
+    CHECK_EXPECT(CreateInstance2);
+
+    ok(!outer, "outer = %p\n", outer);
+    ok(IsEqualGUID(&IID_IActiveScript, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
+    *ppv = &ActiveScript2;
+    return S_OK;
+}
+
+static const IClassFactoryVtbl ClassFactory2Vtbl = {
+    ClassFactory_QueryInterface,
+    ClassFactory_AddRef,
+    ClassFactory_Release,
+    ClassFactory2_CreateInstance,
+    ClassFactory_LockServer
+};
+
+static IClassFactory script_cf[] = { { &ClassFactoryVtbl }, { &ClassFactory2Vtbl } };
 
 typedef struct {
     IInternetProtocolEx IInternetProtocolEx_iface;
@@ -3399,6 +3922,7 @@ typedef struct {
     IInternetProtocolSink *sink;
     BINDINFO bind_info;
 
+    HANDLE delay_event;
     BSTR content_type;
     IStream *stream;
     char *data;
@@ -3409,12 +3933,17 @@ typedef struct {
     IUri *uri;
 } ProtocolHandler;
 
+static ProtocolHandler *delay_with_signal_handler;
+
 static DWORD WINAPI delay_proc(void *arg)
 {
     PROTOCOLDATA protocol_data = {PI_FORCE_ASYNC};
     ProtocolHandler *protocol_handler = arg;
 
-    Sleep(protocol_handler->delay);
+    if(protocol_handler->delay_event)
+        WaitForSingleObject(protocol_handler->delay_event, INFINITE);
+    else
+        Sleep(protocol_handler->delay);
     protocol_handler->delay = -1;
     IInternetProtocolSink_Switch(protocol_handler->sink, &protocol_data);
     return 0;
@@ -3459,7 +3988,7 @@ static void report_data(ProtocolHandler *This)
 
         IHttpNegotiate_Release(http_negotiate);
 
-        if(This->delay) {
+        if(This->delay || This->delay_event) {
             IInternetProtocolEx_AddRef(&This->IInternetProtocolEx_iface);
             QueueUserWorkItem(delay_proc, This, 0);
             return;
@@ -3560,7 +4089,7 @@ static void stream_write(const WCHAR *name, const WCHAR *data)
     hres = IStream_Write(protocol_handler->stream, data, lstrlenW(data)*sizeof(WCHAR), NULL);
     ok(hres == S_OK, "Write failed: %08lx\n", hres);
 
-    U(large_zero).QuadPart = 0;
+    large_zero.QuadPart = 0;
     hres = IStream_Seek(protocol_handler->stream, large_zero, STREAM_SEEK_SET, NULL);
     ok(hres == S_OK, "Seek failed: %08lx\n", hres);
 
@@ -3604,6 +4133,8 @@ static ULONG WINAPI Protocol_Release(IInternetProtocolEx *iface)
     LONG ref = InterlockedDecrement(&This->ref);
 
     if(!ref) {
+        if(This->delay_event)
+            CloseHandle(This->delay_event);
         if(This->sink)
             IInternetProtocolSink_Release(This->sink);
         if(This->stream)
@@ -3736,10 +4267,10 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
         switch(This->bind_info.stgmedData.tymed) {
         case TYMED_HGLOBAL:
             This->size = This->bind_info.cbstgmedData;
-            This->data = U(This->bind_info.stgmedData).hGlobal;
+            This->data = This->bind_info.stgmedData.hGlobal;
             break;
         case TYMED_ISTREAM:
-            This->stream = U(This->bind_info.stgmedData).pstm;
+            This->stream = This->bind_info.stgmedData.pstm;
             IStream_AddRef(This->stream);
             break;
         default:
@@ -3785,8 +4316,20 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
 
     hres = IUri_GetQuery(uri, &query);
     if(SUCCEEDED(hres)) {
-        if(!lstrcmpW(query, L"?delay"))
+        if(!wcscmp(query, L"?delay"))
             This->delay = 1000;
+        else if(!wcscmp(query, L"?delay_with_signal")) {
+            if(delay_with_signal_handler) {
+                ProtocolHandler *delayed = delay_with_signal_handler;
+                delay_with_signal_handler = NULL;
+                SetEvent(delayed->delay_event);
+                This->delay = 30;
+            }else {
+                delay_with_signal_handler = This;
+                This->delay_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+                ok(This->delay_event != NULL, "CreateEvent failed: %08lx\n", GetLastError());
+            }
+        }
         else if(!wcsncmp(query, L"?content-type=", sizeof("?content-type=")-1))
             This->content_type = SysAllocString(query + sizeof("?content-type=")-1);
         SysFreeString(query);
@@ -3901,8 +4444,49 @@ static IClassFactory protocol_cf = { &ProtocolCFVtbl };
 static const char simple_script_str[] =
     "<html><head></head><body>"
     "<div id=\"divid\"></div>"
-    "<script language=\"TestScript\">simple script</script>"
+    "<script language=\"TestScript1\">simple script</script>"
     "</body></html>";
+
+static void test_insert_script_elem(IHTMLDocument2 *doc, const WCHAR *code, const WCHAR *lang)
+{
+    IHTMLDOMNode *node, *body_node, *inserted_node;
+    IHTMLScriptElement *script;
+    IHTMLElement *elem, *body;
+    HRESULT hres;
+    BSTR bstr;
+
+    bstr = SysAllocString(L"script");
+    hres = IHTMLDocument2_createElement(doc, bstr, &elem);
+    ok(hres == S_OK, "createElement failed: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    bstr = SysAllocString(lang);
+    hres = IHTMLElement_put_language(elem, bstr);
+    ok(hres == S_OK, "put_language failed: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    bstr = SysAllocString(code);
+    hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLScriptElement, (void**)&script);
+    ok(hres == S_OK, "Could not get IHTMLScriptElement iface: %08lx\n", hres);
+    hres = IHTMLScriptElement_put_text(script, bstr);
+    ok(hres == S_OK, "put_text failed: %08lx\n", hres);
+    IHTMLScriptElement_Release(script);
+    SysFreeString(bstr);
+
+    hres = IHTMLDocument2_get_body(doc, &body);
+    ok(hres == S_OK, "get_body failed: %08lx\n", hres);
+    hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLDOMNode, (void**)&node);
+    ok(hres == S_OK, "Could not get IHTMLDOMNode iface: %08lx\n", hres);
+    hres = IHTMLElement_QueryInterface(body, &IID_IHTMLDOMNode, (void**)&body_node);
+    ok(hres == S_OK, "Could not get IHTMLDOMNode iface: %08lx\n", hres);
+    hres = IHTMLDOMNode_appendChild(body_node, node, &inserted_node);
+    ok(hres == S_OK, "appendChild failed: %08lx\n", hres);
+    IHTMLDOMNode_Release(inserted_node);
+    IHTMLDOMNode_Release(body_node);
+    IHTMLDOMNode_Release(node);
+    IHTMLElement_Release(body);
+    IHTMLElement_Release(elem);
+}
 
 static void test_exec_script(IHTMLDocument2 *doc, const WCHAR *codew, const WCHAR *langw)
 {
@@ -3913,6 +4497,8 @@ static void test_exec_script(IHTMLDocument2 *doc, const WCHAR *codew, const WCHA
 
     hres = IHTMLDocument2_get_parentWindow(doc, &window);
     ok(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
+
+    ok(iface_cmp((IUnknown *)window, (IUnknown *)window_dispex), "window != dispex_window\n");
 
     code = SysAllocString(codew);
     lang = SysAllocString(langw);
@@ -3938,7 +4524,10 @@ static void test_exec_script(IHTMLDocument2 *doc, const WCHAR *codew, const WCHA
 
 static void test_simple_script(void)
 {
+    IHTMLDocument2 *doc_node;
+    IHTMLWindow2 *window;
     IHTMLDocument2 *doc;
+    HRESULT hres;
 
     doc = create_document();
     if(!doc)
@@ -3974,20 +4563,64 @@ static void test_simple_script(void)
     CHECK_CALLED(ParseScriptText_script);
     CHECK_CALLED(SetScriptState_CONNECTED);
 
-    test_exec_script(doc, L"execScript call", L"TestScript");
+    SET_EXPECT(CreateInstance2);
+    SET_EXPECT(GetInterfaceSafetyOptions2);
+    SET_EXPECT(SetInterfaceSafetyOptions2);
+    SET_EXPECT(SetProperty2_INVOKEVERSIONING);
+    SET_EXPECT(SetProperty2_HACK_TRIDENTEVENTSINK);
+    SET_EXPECT(InitNew2);
+    SET_EXPECT(SetScriptSite2);
+    SET_EXPECT(AddNamedItem2);
+    SET_EXPECT(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION_FALSE);
+    SET_EXPECT(SetProperty2_ABBREVIATE_GLOBALNAME_RESOLUTION_FALSE);
+    SET_EXPECT(ParseScriptText_script2);
+
+    test_insert_script_elem(doc, L"second script", L"TestScript2");
+
+    CHECK_CALLED(CreateInstance2);
+    CHECK_CALLED(GetInterfaceSafetyOptions2);
+    CHECK_CALLED(SetInterfaceSafetyOptions2);
+    CHECK_CALLED(SetProperty2_INVOKEVERSIONING);
+    CHECK_CALLED(SetProperty2_HACK_TRIDENTEVENTSINK);
+    CHECK_CALLED(InitNew2);
+    CHECK_CALLED(SetScriptSite2);
+    CHECK_CALLED(AddNamedItem2);
+    CHECK_CALLED(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION_FALSE);
+    CHECK_CALLED(SetProperty2_ABBREVIATE_GLOBALNAME_RESOLUTION_FALSE);
+    CHECK_CALLED(ParseScriptText_script2);
+
+    test_exec_script(doc, L"execScript call", L"TestScript1");
 
     if(site)
         IActiveScriptSite_Release(site);
+    if(site2)
+        IActiveScriptSite_Release(site2);
     if(window_dispex)
         IDispatchEx_Release(window_dispex);
 
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
+
+    hres = IHTMLWindow2_get_document(window, &doc_node);
+    ok(hres == S_OK, "get_document failed: %08lx\n", hres);
+
     SET_EXPECT(SetScriptState_DISCONNECTED);
     SET_EXPECT(Close);
+    SET_EXPECT(Close2);
 
     IHTMLDocument2_Release(doc);
 
     CHECK_CALLED(SetScriptState_DISCONNECTED);
     CHECK_CALLED(Close);
+    CHECK_CALLED(Close2);
+
+    hres = IHTMLWindow2_get_document(window, &doc);
+    ok(hres == S_OK, "get_document failed: %08lx\n", hres);
+    ok(doc != doc_node, "doc == doc_node\n");
+
+    IHTMLDocument2_Release(doc_node);
+    IHTMLDocument2_Release(doc);
+    IHTMLWindow2_Release(window);
 }
 
 static void run_from_moniker(IMoniker *mon)
@@ -4193,16 +4826,33 @@ static void run_js_tests(void)
 
 static BOOL init_registry(BOOL init)
 {
-    return init_key("TestScript\\CLSID", TESTSCRIPT_CLSID, init)
-        && init_key("CLSID\\"TESTSCRIPT_CLSID"\\Implemented Categories\\{F0B7A1A1-9847-11CF-8F20-00805F2CD064}",
-                    NULL, init)
-        && init_key("CLSID\\"TESTSCRIPT_CLSID"\\Implemented Categories\\{F0B7A1A2-9847-11CF-8F20-00805F2CD064}",
-                    NULL, init);
+    static const WCHAR fmt[] = L"CLSID\\%s\\Implemented Categories\\{%08lX-9847-11CF-8F20-00805F2CD064}";
+    WCHAR *clsid, buf[ARRAY_SIZE(fmt) + 40];
+    BOOL ret = TRUE;
+    HRESULT hres;
+    unsigned i;
+
+    for(i = 0; i < ARRAY_SIZE(CLSID_TestScript) && ret; i++) {
+        hres = StringFromCLSID(&CLSID_TestScript[i], &clsid);
+        ok(hres == S_OK, "StringFromCLSID failed: %08lx\n", hres);
+
+        swprintf(buf, ARRAY_SIZE(buf), L"TestScript%u\\CLSID", i + 1);
+        if((ret = init_key(buf, clsid, init))) {
+            swprintf(buf, ARRAY_SIZE(buf), fmt, clsid, 0xf0b7a1a1);
+            if((ret = init_key(buf, NULL, init))) {
+                swprintf(buf, ARRAY_SIZE(buf), fmt, clsid, 0xf0b7a1a2);
+                ret = init_key(buf, NULL, init);
+            }
+        }
+        CoTaskMemFree(clsid);
+    }
+    return ret;
 }
 
 static BOOL register_script_engine(void)
 {
     DWORD regid;
+    unsigned i;
     HRESULT hres;
 
     if(!init_registry(TRUE)) {
@@ -4210,9 +4860,11 @@ static BOOL register_script_engine(void)
         return FALSE;
     }
 
-    hres = CoRegisterClassObject(&CLSID_TestScript, (IUnknown *)&script_cf,
-                                 CLSCTX_INPROC_SERVER, REGCLS_MULTIPLEUSE, &regid);
-    ok(hres == S_OK, "Could not register script engine: %08lx\n", hres);
+    for(i = 0; i < ARRAY_SIZE(CLSID_TestScript); i++) {
+        hres = CoRegisterClassObject(&CLSID_TestScript[i], (IUnknown *)&script_cf[i],
+                                     CLSCTX_INPROC_SERVER, REGCLS_MULTIPLEUSE, &regid);
+        ok(hres == S_OK, "Could not register TestScript%u engine: %08lx\n", i + 1, hres);
+    }
 
     return TRUE;
 }
@@ -4299,7 +4951,7 @@ START_TEST(script)
                 test_simple_script();
                 init_registry(FALSE);
             }else {
-                skip("Could not register TestScript engine\n");
+                skip("Could not register TestScript engines\n");
             }
             run_js_tests();
         }else {

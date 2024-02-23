@@ -36,9 +36,6 @@
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
-#ifdef HAVE_SYS_SYSCALL_H
-# include <sys/syscall.h>
-#endif
 #ifdef __APPLE__
 # include <mach/mach_init.h>
 # include <mach/mach_port.h>
@@ -56,7 +53,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winternl.h"
 #include "wine/debug.h"
@@ -66,7 +62,6 @@
 #include "msync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msync);
-
 
 #ifdef __APPLE__
 
@@ -388,7 +383,7 @@ static inline void server_remove_wait( semaphore_t sem, unsigned int msgh_id,
         ERR("Failed to send server remove wait: %#x\n", mr);
 }
 
-static inline NTSTATUS destroyed_wait( ULONGLONG *end )
+static NTSTATUS destroyed_wait( ULONGLONG *end )
 {
     if (end)
     {
@@ -411,30 +406,31 @@ static inline int is_destroyed( struct msync **objs, int count)
 }
 
 static inline NTSTATUS msync_wait_single( struct msync *wait_obj,
-                                          ULONGLONG *end )
+                                          ULONGLONG *end, int tid )
 {
     int ret, val = 0;
     void *addr = wait_obj->shm;
     ULONGLONG ns_timeleft = 0;
 
-    if (wait_obj->type == MSYNC_MUTEX)
+    do 
     {
-        val = __atomic_load_n( (int *)addr, __ATOMIC_ACQUIRE );
-        if (!val)
-            val = GetCurrentThreadId();
-        else if (val == ~0)
-            val = GetCurrentThreadId();
-    }
+        if (wait_obj->type == MSYNC_MUTEX)
+        {
+            val = __atomic_load_n( (int *)addr, __ATOMIC_ACQUIRE );
+            if (!val || val == ~0)
+                val = tid;
+        }
 
-    if (__atomic_load_n( (int *)addr, __ATOMIC_ACQUIRE ) != val)
-        return STATUS_PENDING;
+        if (__atomic_load_n( (int *)addr, __ATOMIC_ACQUIRE ) != val)
+            return STATUS_PENDING;
 
-    if (end)
-    {
-        ns_timeleft = update_timeout( *end ) * 100;
-        if (!ns_timeleft) return STATUS_TIMEOUT;
-    }
-    ret = __ulock_wait2( UL_COMPARE_AND_WAIT_SHARED | ULF_NO_ERRNO, addr, val, ns_timeleft, 0 );
+        if (end)
+        {
+            ns_timeleft = update_timeout( *end ) * 100;
+            if (!ns_timeleft) return STATUS_TIMEOUT;
+        }
+        ret = __ulock_wait2( UL_COMPARE_AND_WAIT_SHARED | ULF_NO_ERRNO, addr, val, ns_timeleft, 0 );
+    } while (ret == -EINTR);
 
     if (ret == -ETIMEDOUT)
         return STATUS_TIMEOUT;
@@ -483,9 +479,8 @@ static inline int check_shm_contention( struct msync **wait_objs,
 }
 
 static NTSTATUS msync_wait_multiple( struct msync **wait_objs,
-                                     int count, ULONGLONG *end )
+                                     int count, ULONGLONG *end, int tid )
 {
-    int tid;
     semaphore_t *sem;
     kern_return_t kr;
     unsigned int msgh_id;
@@ -493,10 +488,8 @@ static NTSTATUS msync_wait_multiple( struct msync **wait_objs,
 
     count = resize_wait_objs( wait_objs, objs, count );
 
-    if (count == 1 && __ulock_wait2) return msync_wait_single( objs[0], end );
+    if (count == 1 && __ulock_wait2) return msync_wait_single( objs[0], end, tid );
     if (!count) return destroyed_wait( end );
-
-    tid = GetCurrentThreadId();
 
     if (check_shm_contention( objs, count, tid ))
         return STATUS_PENDING;
@@ -548,9 +541,6 @@ int do_msync(void)
 
     return do_msync_cached;
 #else
-    static int once;
-    if (!once++)
-        FIXME("mach semaphores not supported on this platform.\n");
     return 0;
 #endif
 }
@@ -1058,6 +1048,9 @@ NTSTATUS msync_reset_event( HANDLE handle, LONG *prev )
     if ((ret = get_object( handle, &obj ))) return ret;
     event = obj->shm;
 
+    if (obj->type != MSYNC_MANUAL_EVENT && obj->type != MSYNC_AUTO_EVENT)
+        return STATUS_OBJECT_TYPE_MISMATCH;
+
     current = __atomic_exchange_n( &event->signaled, 0, __ATOMIC_SEQ_CST );
 
     if (prev) *prev = current;
@@ -1080,6 +1073,9 @@ NTSTATUS msync_pulse_event( HANDLE handle, LONG *prev )
 
     if ((ret = get_object( handle, &obj ))) return ret;
     event = obj->shm;
+
+    if (obj->type != MSYNC_MANUAL_EVENT && obj->type != MSYNC_AUTO_EVENT)
+        return STATUS_OBJECT_TYPE_MISMATCH;
 
     /* This isn't really correct; an application could miss the write.
      * Unfortunately we can't really do much better. Fortunately this is rarely
@@ -1204,7 +1200,7 @@ NTSTATUS msync_query_mutex( HANDLE handle, void *info, ULONG *ret_len )
 
 #ifdef __APPLE__
 
-static NTSTATUS do_single_wait( struct msync *obj, ULONGLONG *end, BOOLEAN alertable )
+static NTSTATUS do_single_wait( struct msync *obj, ULONGLONG *end, BOOLEAN alertable, int tid )
 {
     NTSTATUS status;
     struct msync *wait_objs[2];
@@ -1225,14 +1221,14 @@ static NTSTATUS do_single_wait( struct msync *obj, ULONGLONG *end, BOOLEAN alert
 
         wait_objs[1] = &apc_obj;
 
-        status = msync_wait_multiple( wait_objs, 2, end );
+        status = msync_wait_multiple( wait_objs, 2, end, tid );
 
         if (__atomic_load_n( apc_addr, __ATOMIC_SEQ_CST ))
             return STATUS_USER_APC;
     }
     else
     {
-        status = msync_wait_multiple( wait_objs, 1, end );
+        status = msync_wait_multiple( wait_objs, 1, end, tid );
     }
     return status;
 }
@@ -1242,6 +1238,7 @@ static NTSTATUS __msync_wait_objects( DWORD count, const HANDLE *handles,
 {
     static const LARGE_INTEGER zero = {0};
 
+    __thread static int current_tid = 0;
     __thread static struct msync *objs[MAXIMUM_WAIT_OBJECTS + 1];
     struct msync apc_obj;
     int has_msync = 0, has_server = 0;
@@ -1251,6 +1248,8 @@ static NTSTATUS __msync_wait_objects( DWORD count, const HANDLE *handles,
     DWORD waitcount;
     ULONGLONG end;
     int i, ret;
+
+    current_tid = current_tid ? current_tid : GetCurrentThreadId();
 
     /* Grab the APC idx if we don't already have it. */
     if (alertable && !ntdll_get_thread_data()->msync_apc_addr)
@@ -1370,7 +1369,7 @@ static NTSTATUS __msync_wait_objects( DWORD count, const HANDLE *handles,
                         struct mutex *mutex = obj->shm;
                         int tid;
 
-                        if (mutex->tid == GetCurrentThreadId())
+                        if (mutex->tid == current_tid)
                         {
                             TRACE("Woken up by handle %p [%d].\n", handles[i], i);
                             mutex->count++;
@@ -1378,13 +1377,13 @@ static NTSTATUS __msync_wait_objects( DWORD count, const HANDLE *handles,
                         }
 
                         tid = 0;
-                        if (__atomic_compare_exchange_n(&mutex->tid, &tid, GetCurrentThreadId(), 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
+                        if (__atomic_compare_exchange_n(&mutex->tid, &tid, current_tid, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
                         {
                             TRACE("Woken up by handle %p [%d].\n", handles[i], i);
                             mutex->count = 1;
                             return i;
                         }
-                        else if (tid == ~0 && __atomic_compare_exchange_n(&mutex->tid, &tid, GetCurrentThreadId(), 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
+                        else if (tid == ~0 && __atomic_compare_exchange_n(&mutex->tid, &tid, current_tid, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
                         {
                             TRACE("Woken up by abandoned mutex %p [%d].\n", handles[i], i);
                             mutex->count = 1;
@@ -1446,7 +1445,7 @@ static NTSTATUS __msync_wait_objects( DWORD count, const HANDLE *handles,
                 return STATUS_TIMEOUT;
             }
 
-            ret = msync_wait_multiple( objs, waitcount, timeout ? &end : NULL );
+            ret = msync_wait_multiple( objs, waitcount, timeout ? &end : NULL, current_tid );
 
             if (ret == STATUS_TIMEOUT)
             {
@@ -1497,12 +1496,12 @@ tryagain:
                 {
                     struct mutex *mutex = obj->shm;
 
-                    if (mutex->tid == GetCurrentThreadId())
+                    if (mutex->tid == current_tid)
                         continue;
 
                     while (__atomic_load_n( &mutex->tid, __ATOMIC_SEQ_CST ))
                     {
-                        status = do_single_wait( obj, timeout ? &end : NULL, alertable );
+                        status = do_single_wait( obj, timeout ? &end : NULL, alertable, current_tid );
                         if (status != STATUS_PENDING)
                             break;
                     }
@@ -1514,7 +1513,7 @@ tryagain:
 
                     while (!__atomic_load_n( &event->signaled, __ATOMIC_SEQ_CST ))
                     {
-                        status = do_single_wait( obj, timeout ? &end : NULL, alertable );
+                        status = do_single_wait( obj, timeout ? &end : NULL, alertable, current_tid );
                         if (status != STATUS_PENDING)
                             break;
                     }
@@ -1540,7 +1539,7 @@ tryagain:
                     struct mutex *mutex = obj->shm;
                     int tid = __atomic_load_n( &mutex->tid, __ATOMIC_SEQ_CST );
 
-                    if (tid && tid != ~0 && tid != GetCurrentThreadId())
+                    if (tid && tid != ~0 && tid != current_tid)
                         goto tryagain;
                 }
                 else if (obj)
@@ -1563,11 +1562,11 @@ tryagain:
                 {
                     struct mutex *mutex = obj->shm;
                     int tid = __atomic_load_n( &mutex->tid, __ATOMIC_SEQ_CST );
-                    if (tid == GetCurrentThreadId())
+                    if (tid == current_tid)
                         break;
                     if (tid && tid != ~0)
                         goto tooslow;
-                    if (__sync_val_compare_and_swap( &mutex->tid, tid, GetCurrentThreadId() ) != tid)
+                    if (__sync_val_compare_and_swap( &mutex->tid, tid, current_tid ) != tid)
                         goto tooslow;
                     if (tid == ~0)
                         abandoned = TRUE;

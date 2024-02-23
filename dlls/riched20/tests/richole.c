@@ -3884,6 +3884,8 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   struct testoleobj *testobj;
   IOleClientSite *clientsite;
   REOBJECT reobj;
+  BOOL bad_getsel;
+  DWORD gle;
 
   create_interfaces(&hwnd, &reole, &doc, &selection);
   if (callback)
@@ -3891,6 +3893,19 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
     LRESULT sendres = SendMessageA(hwnd, EM_SETOLECALLBACK, 0, (LPARAM)&callback->IRichEditOleCallback_iface);
     ok( !!sendres, "EM_SETOLECALLBACK should succeed\n" );
   }
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"a");
+  SendMessageA(hwnd, EM_SETSEL, 0, -1);
+  *bufferA = '\0';
+  SetLastError(0xdeadbeef);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, 0, (LPARAM)bufferA);
+  gle = GetLastError();
+  ok((result > 0 && gle == 0xdeadbeef) ||
+     broken(result == 0 && gle == ERROR_INVALID_PARAMETER /* Hindi */),
+     "EM_GETSELTEXT returned %ld gle=%lu\n", result, gle);
+  bad_getsel = (gle != 0xdeadbeef);
+  if (bad_getsel)
+      trace("EM_GETSELTEXT is broken, some tests will be ignored\n");
 
   SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
 
@@ -4071,9 +4086,13 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   expected_stringA = "abc d efg";
   memset(bufferA, 0, sizeof(bufferA));
   SendMessageA(hwnd, EM_SETSEL, 0, -1);
-  result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
-  ok(result == strlen(expected_stringA), "Got wrong length: %ld.\n", result);
-  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  SetLastError(0xdeadbeef);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, 0, (LPARAM)bufferA);
+  gle = GetLastError();
+  ok(result == strlen(expected_stringA) || broken(bad_getsel && result == 0),
+     "Got wrong length: %ld (gle %lu)\n", result, gle);
+  ok(!strcmp(bufferA, expected_stringA) || broken(bad_getsel && !*bufferA),
+     "Got wrong content: %s (gle %lu)\n", bufferA, gle);
 
   memset(bufferA, 0, sizeof(bufferA));
   textrange.lpstrText = bufferA;
@@ -4154,9 +4173,13 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   expected_stringA = "abc d efg";
   memset(bufferA, 0, sizeof(bufferA));
   SendMessageA(hwnd, EM_SETSEL, 0, -1);
-  result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
-  ok(result == strlen(expected_stringA), "Got wrong length: %ld.\n", result);
-  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  SetLastError(0xdeadbeef);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, 0, (LPARAM)bufferA);
+  gle = GetLastError();
+  ok(result == strlen(expected_stringA) || broken(bad_getsel && result == 0),
+     "Got wrong length: %ld (gle %lu)\n", result, gle);
+  ok(!strcmp(bufferA, expected_stringA) || broken(bad_getsel && !*bufferA),
+     "Got wrong content: %s (gle %lu)\n", bufferA, gle);
 
   memset(bufferA, 0, sizeof(bufferA));
   textrange.lpstrText = bufferA;
@@ -4910,6 +4933,35 @@ static void test_character_movement(void)
   ITextRange_Release(range);
 }
 
+static BOOL open_clipboard(HWND hwnd)
+{
+    DWORD start = GetTickCount();
+    while (1)
+    {
+        BOOL ret = OpenClipboard(hwnd);
+        if (ret || GetLastError() != ERROR_ACCESS_DENIED)
+            return ret;
+        if (GetTickCount() - start > 100)
+        {
+            char classname[256];
+            DWORD le = GetLastError();
+            HWND clipwnd = GetOpenClipboardWindow();
+            /* Provide a hint as to the source of interference:
+             * - The class name would typically be CLIPBRDWNDCLASS if the
+             *   clipboard was opened by a Windows application using the
+             *   ole32 API.
+             * - And it would be __wine_clipboard_manager if it was opened in
+             *   response to a native application.
+             */
+            GetClassNameA(clipwnd, classname, ARRAY_SIZE(classname));
+            trace("%p (%s) opened the clipboard\n", clipwnd, classname);
+            SetLastError(le);
+            return ret;
+        }
+        Sleep(15);
+    }
+}
+
 #define CLIPBOARD_RANGE_CONTAINS(range, start, end, expected) _clipboard_range_contains(range, start, end, expected, __LINE__, 0);
 #define TODO_CLIPBOARD_RANGE_CONTAINS(range, start, end, expected) _clipboard_range_contains(range, start, end, expected, __LINE__, 1);
 static void _clipboard_range_contains(ITextRange *range, LONG start, LONG end, const char *expected, int line, int todo)
@@ -4924,7 +4976,7 @@ static void _clipboard_range_contains(ITextRange *range, LONG start, LONG end, c
   hr = ITextRange_Copy(range, NULL);
   ok_(__FILE__,line)(hr == S_OK, "Copy failed: 0x%08lx\n", hr);
 
-  clipboard_open = OpenClipboard(NULL);
+  clipboard_open = open_clipboard(NULL);
   ok_(__FILE__,line)(clipboard_open, "OpenClipboard failed: %ld\n", GetLastError());
   global = GetClipboardData(CF_TEXT);
   ok_(__FILE__,line)(global != NULL, "GetClipboardData failed: %p\n", global);

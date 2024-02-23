@@ -23,7 +23,6 @@
 #define COBJMACROS
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "explorer_private.h"
 #include "resource.h"
 
@@ -50,9 +49,6 @@ static int pathbox_height;
 static int default_width;
 static int default_height;
 
-
-static const WCHAR EXPLORER_CLASS[] = {'E','x','p','l','o','r','e','r','W','C','l','a','s','s',0};
-static const WCHAR PATH_BOX_NAME[] = {'\0'};
 
 HINSTANCE explorer_hInstance;
 
@@ -114,8 +110,7 @@ static ULONG WINAPI IExplorerBrowserEventsImpl_fnRelease(IExplorerBrowserEvents 
 {
     IExplorerBrowserEventsImpl *This = impl_from_IExplorerBrowserEvents(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
-    if(!ref)
-        HeapFree(GetProcessHeap(),0,This);
+    if(!ref) free(This);
     return ref;
 }
 
@@ -133,7 +128,7 @@ static BOOL create_combobox_item(IShellFolder *folder, LPCITEMIDLIST child_pidl,
         hres = StrRetToStrW(&strret, child_pidl, &item->pszText);
     if(FAILED(hres))
     {
-        WINE_WARN("Could not get name for pidl\n");
+        WARN( "Could not get name for pidl\n" );
         return FALSE;
     }
 
@@ -200,8 +195,8 @@ static void update_path_box(explorer_info *info)
             hres = IEnumIDList_Next(ids,1,&curr_pidl,NULL);
             if(FAILED(hres) || hres == S_FALSE)
                 break;
-            if(!create_combobox_item(desktop,curr_pidl,info->icon_list,&item))
-                WINE_WARN("Could not create a combobox item\n");
+            if (!create_combobox_item( desktop, curr_pidl, info->icon_list, &item ))
+                WARN( "Could not create a combobox item\n" );
             else
             {
                 LPITEMIDLIST full_pidl = ILCombine(desktop_pidl,curr_pidl);
@@ -217,8 +212,7 @@ static void update_path_box(explorer_info *info)
                     hres = IShellFolder_BindToObject(desktop,curr_pidl,NULL,
                                                      &IID_IShellFolder,
                                                      (void**)&curr_folder);
-                    if(FAILED(hres))
-                        WINE_WARN("Could not get an IShellFolder\n");
+                    if (FAILED(hres)) WARN( "Could not get an IShellFolder\n" );
                     while(!ILIsEmpty(next_pidl))
                     {
                         LPITEMIDLIST first = ILCloneFirst(next_pidl);
@@ -226,7 +220,7 @@ static void update_path_box(explorer_info *info)
                         if(!create_combobox_item(curr_folder,first,
                                                  info->icon_list,&item))
                         {
-                            WINE_WARN("Could not create a combobox item\n");
+                            WARN( "Could not create a combobox item\n" );
                             break;
                         }
                         ++item.iIndent;
@@ -239,7 +233,7 @@ static void update_path_box(explorer_info *info)
                                                          (void**)&temp);
                         if(FAILED(hres))
                         {
-                            WINE_WARN("Could not get an IShellFolder\n");
+                            WARN( "Could not get an IShellFolder\n" );
                             break;
                         }
                         IShellFolder_Release(curr_folder);
@@ -260,8 +254,7 @@ static void update_path_box(explorer_info *info)
         ILFree(curr_pidl);
         IEnumIDList_Release(ids);
     }
-    else
-        WINE_WARN("Could not enumerate the desktop\n");
+    else WARN( "Could not enumerate the desktop\n" );
     SendMessageW(info->path_box,CBEM_SETITEMW,0,(LPARAM)&main_item);
     CoTaskMemFree(main_item.pszText);
 }
@@ -334,8 +327,7 @@ static IExplorerBrowserEventsVtbl vt_IExplorerBrowserEvents =
 
 static IExplorerBrowserEvents *make_explorer_events(explorer_info *info)
 {
-    IExplorerBrowserEventsImpl *ret
-        = HeapAlloc(GetProcessHeap(), 0, sizeof(IExplorerBrowserEventsImpl));
+    IExplorerBrowserEventsImpl *ret = malloc( sizeof(IExplorerBrowserEventsImpl) );
     ret->IExplorerBrowserEvents_iface.lpVtbl = &vt_IExplorerBrowserEvents;
     ret->info = info;
     ret->ref = 1;
@@ -447,10 +439,10 @@ static void make_explorer_window(parameters_struct *params)
     default_width = MulDiv(DEFAULT_WIDTH, dpix, USER_DEFAULT_SCREEN_DPI);
     default_height = MulDiv(DEFAULT_HEIGHT, dpiy, USER_DEFAULT_SCREEN_DPI);
 
-    info = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(explorer_info));
+    info = calloc( 1, sizeof(explorer_info) );
     if(!info)
     {
-        WINE_ERR("Could not allocate an explorer_info struct\n");
+        ERR( "Could not allocate an explorer_info struct\n" );
         IShellWindows_Release(sw);
         free(path);
         return;
@@ -459,15 +451,15 @@ static void make_explorer_window(parameters_struct *params)
                             &IID_IExplorerBrowser,(LPVOID*)&info->browser);
     if(FAILED(hres))
     {
-        WINE_ERR("Could not obtain an instance of IExplorerBrowser\n");
-        HeapFree(GetProcessHeap(),0,info);
+        ERR( "Could not obtain an instance of IExplorerBrowser\n" );
+        free(info);
         IShellWindows_Release(sw);
         free(path);
         return;
     }
     info->rebar_height=0;
     info->main_window
-        = CreateWindowW(EXPLORER_CLASS,explorer_title,WS_OVERLAPPEDWINDOW,
+        = CreateWindowW(L"ExplorerWClass",explorer_title,WS_OVERLAPPEDWINDOW,
                         CW_USEDEFAULT,CW_USEDEFAULT,default_width,
                         default_height,NULL,NULL,explorer_hInstance,NULL);
 
@@ -524,7 +516,7 @@ static void make_explorer_window(parameters_struct *params)
     band_info.cyMinChild=nav_toolbar_height;
     band_info.cxMinChild=0;
     SendMessageW(rebar,RB_INSERTBANDW,-1,(LPARAM)&band_info);
-    info->path_box = CreateWindowW(WC_COMBOBOXEXW,PATH_BOX_NAME,
+    info->path_box = CreateWindowW(WC_COMBOBOXEXW,L"",
                                    WS_CHILD | WS_VISIBLE | CBS_DROPDOWN,
                                    0,0,default_width,pathbox_height,rebar,NULL,
                                    explorer_hInstance,NULL);
@@ -577,7 +569,7 @@ static LRESULT explorer_on_end_edit(explorer_info *info,NMCBEENDEDITW *edit_info
 {
     LPITEMIDLIST pidl = NULL;
 
-    WINE_TRACE("iWhy=%x\n",edit_info->iWhy);
+    TRACE( "iWhy=%x\n", edit_info->iWhy );
     switch(edit_info->iWhy)
     {
     case CBENF_DROPDOWN:
@@ -626,7 +618,7 @@ static LRESULT update_rebar_size(explorer_info* info,NMRBAUTOSIZE *size_info)
 
 static LRESULT explorer_on_notify(explorer_info* info,NMHDR* notification)
 {
-    WINE_TRACE("code=%i\n",notification->code);
+    TRACE( "code=%i\n", notification->code );
     switch(notification->code)
     {
     case CBEN_BEGINEDIT:
@@ -710,7 +702,7 @@ static LRESULT CALLBACK explorer_wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, L
         = (explorer_info*)GetWindowLongPtrW(hwnd,EXPLORER_INFO_INDEX);
     IExplorerBrowser *browser = NULL;
 
-    WINE_TRACE("(hwnd=%p,uMsg=%u,wParam=%Ix,lParam=%Ix)\n",hwnd,uMsg,wParam,lParam);
+    TRACE( "(hwnd=%p,uMsg=%u,wParam=%Ix,lParam=%Ix)\n", hwnd, uMsg, wParam, lParam );
     if(info)
         browser = info->browser;
     switch(uMsg)
@@ -727,7 +719,7 @@ static LRESULT CALLBACK explorer_wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, L
         IExplorerBrowser_Release(browser);
         ILFree(info->pidl);
         IImageList_Release(info->icon_list);
-        HeapFree(GetProcessHeap(),0,info);
+        free(info);
         SetWindowLongPtrW(hwnd,EXPLORER_INFO_INDEX,0);
         PostQuitMessage(0);
         break;
@@ -776,7 +768,7 @@ static void register_explorer_window_class(void)
     window_class.hCursor = NULL;
     window_class.hbrBackground = (HBRUSH)COLOR_BACKGROUND;
     window_class.lpszMenuName = NULL;
-    window_class.lpszClassName = EXPLORER_CLASS;
+    window_class.lpszClassName = L"ExplorerWClass";
     window_class.hIconSm = NULL;
     RegisterClassExW(&window_class);
 }
@@ -839,56 +831,63 @@ static void copy_path_root(LPWSTR root, LPWSTR path)
  */
 static void parse_command_line(LPWSTR commandline,parameters_struct *parameters)
 {
-    static const WCHAR arg_n[] = {'/','n'};
-    static const WCHAR arg_e[] = {'/','e',','};
-    static const WCHAR arg_cd[] = {'/','c','d',','};
-    static const WCHAR arg_root[] = {'/','r','o','o','t',','};
-    static const WCHAR arg_select[] = {'/','s','e','l','e','c','t',','};
-    static const WCHAR arg_desktop[] = {'/','d','e','s','k','t','o','p'};
-    static const WCHAR arg_desktop_quotes[] = {'"','/','d','e','s','k','t','o','p'};
+    static const WCHAR arg_n[] = L"/n";
+    static const WCHAR arg_e[] = L"/e,";
+    static const WCHAR arg_cd[] = L"/cd,";
+    static const WCHAR arg_root[] = L"/root,";
+    static const WCHAR arg_select[] = L"/select,";
+    static const WCHAR arg_desktop[] = L"/desktop";
+    static const WCHAR arg_desktop_quotes[] = L"\"/desktop";
+    const size_t len_n = wcslen(arg_n);
+    const size_t len_e = wcslen(arg_e);
+    const size_t len_cd = wcslen(arg_cd);
+    const size_t len_root = wcslen(arg_root);
+    const size_t len_select = wcslen(arg_select);
+    const size_t len_desktop = wcslen(arg_desktop);
+    const size_t len_desktop_quotes = wcslen(arg_desktop_quotes);
 
     LPWSTR p = commandline;
 
     while (*p)
     {
         while (iswspace(*p)) p++;
-        if (wcsncmp(p, arg_n, ARRAY_SIZE( arg_n ))==0)
+        if (wcsncmp(p, arg_n, len_n )==0)
         {
             parameters->explorer_mode = FALSE;
-            p += ARRAY_SIZE( arg_n );
+            p += len_n;
         }
-        else if (wcsncmp(p, arg_e, ARRAY_SIZE( arg_e ))==0)
+        else if (wcsncmp(p, arg_e, len_e )==0)
         {
             parameters->explorer_mode = TRUE;
-            p += ARRAY_SIZE( arg_e );
+            p += len_e;
         }
-        else if (wcsncmp(p, arg_cd, ARRAY_SIZE( arg_cd ))==0)
+        else if (wcsncmp(p, arg_cd, len_cd )==0)
         {
-            p += ARRAY_SIZE( arg_cd );
+            p += len_cd;
             p = copy_path_string(parameters->root,p);
         }
-        else if (wcsncmp(p, arg_root, ARRAY_SIZE( arg_root ))==0)
+        else if (wcsncmp(p, arg_root, len_root )==0)
         {
-            p += ARRAY_SIZE( arg_root );
+            p += len_root;
             p = copy_path_string(parameters->root,p);
         }
-        else if (wcsncmp(p, arg_select, ARRAY_SIZE( arg_select ))==0)
+        else if (wcsncmp(p, arg_select, len_select )==0)
         {
-            p += ARRAY_SIZE( arg_select );
+            p += len_select;
             p = copy_path_string(parameters->selection,p);
             if (!parameters->root[0])
                 copy_path_root(parameters->root,
                                parameters->selection);
         }
-        else if (wcsncmp(p, arg_desktop, ARRAY_SIZE( arg_desktop ))==0)
+        else if (wcsncmp(p, arg_desktop, len_desktop )==0)
         {
-            p += ARRAY_SIZE( arg_desktop );
+            p += len_desktop;
             manage_desktop( p );  /* the rest of the command line is handled by desktop mode */
         }
         /* workaround for Worms Armageddon that hardcodes a /desktop option with quotes */
-        else if (wcsncmp(p, arg_desktop_quotes, ARRAY_SIZE( arg_desktop_quotes ))==0)
+        else if (wcsncmp(p, arg_desktop_quotes, len_desktop_quotes )==0)
         {
-            p += ARRAY_SIZE( arg_desktop_quotes );
+            p += len_desktop_quotes;
             manage_desktop( p );  /* the rest of the command line is handled by desktop mode */
         }
         else
@@ -916,7 +915,7 @@ int WINAPI wWinMain(HINSTANCE hinstance,
     hres = OleInitialize(NULL);
     if(FAILED(hres))
     {
-        WINE_ERR("Could not initialize COM\n");
+        ERR( "Could not initialize COM\n" );
         ExitProcess(EXIT_FAILURE);
     }
     if(parameters.root[0] && !PathIsDirectoryW(parameters.root))
@@ -926,7 +925,7 @@ int WINAPI wWinMain(HINSTANCE hinstance,
     init_info.dwICC = ICC_USEREX_CLASSES | ICC_BAR_CLASSES | ICC_COOL_CLASSES;
     if(!InitCommonControlsEx(&init_info))
     {
-        WINE_ERR("Could not initialize Comctl\n");
+        ERR( "Could not initialize Comctl\n" );
         ExitProcess(EXIT_FAILURE);
     }
     register_explorer_window_class();

@@ -428,6 +428,17 @@ static void release_named_item_list(JScript *This)
     }
 }
 
+static HRESULT exec_global_code(script_ctx_t *ctx, bytecode_t *code, jsval_t *r)
+{
+    IServiceProvider *prev_caller = ctx->jscaller->caller;
+    HRESULT hres;
+
+    ctx->jscaller->caller = SP_CALLER_UNINITIALIZED;
+    hres = exec_source(ctx, EXEC_GLOBAL, code, &code->global_code, NULL, NULL, NULL, 0, NULL, r);
+    ctx->jscaller->caller = prev_caller;
+    return hres;
+}
+
 static void exec_queued_code(JScript *This)
 {
     bytecode_t *iter;
@@ -436,7 +447,7 @@ static void exec_queued_code(JScript *This)
 
     LIST_FOR_EACH_ENTRY(iter, &This->queued_code, bytecode_t, entry) {
         enter_script(This->ctx, &ei);
-        hres = exec_source(This->ctx, EXEC_GLOBAL, iter, &iter->global_code, NULL, NULL, NULL, 0, NULL, NULL);
+        hres = exec_global_code(This->ctx, iter, NULL);
         leave_script(This->ctx, hres);
         if(FAILED(hres))
             break;
@@ -704,6 +715,13 @@ static ULONG WINAPI JScript_Release(IActiveScript *iface)
     return ref;
 }
 
+static int weak_refs_compare(const void *key, const struct rb_entry *entry)
+{
+    const struct weak_refs_entry *weak_refs_entry = RB_ENTRY_VALUE(entry, const struct weak_refs_entry, entry);
+    ULONG_PTR a = (ULONG_PTR)key, b = (ULONG_PTR)LIST_ENTRY(weak_refs_entry->list.next, struct weakmap_entry, weak_refs_entry)->key;
+    return (a > b) - (a < b);
+}
+
 static HRESULT WINAPI JScript_SetScriptSite(IActiveScript *iface,
                                             IActiveScriptSite *pass)
 {
@@ -737,6 +755,7 @@ static HRESULT WINAPI JScript_SetScriptSite(IActiveScript *iface,
         ctx->acc = jsval_undefined();
         list_init(&ctx->named_items);
         list_init(&ctx->objects);
+        rb_init(&ctx->weak_refs, weak_refs_compare);
         heap_pool_init(&ctx->tmp_heap);
 
         hres = create_jscaller(ctx);
@@ -1103,7 +1122,7 @@ static HRESULT WINAPI JScriptParse_ParseScriptText(IActiveScriptParse *iface,
     if(dwFlags & SCRIPTTEXT_ISEXPRESSION) {
         jsval_t r;
 
-        hres = exec_source(This->ctx, EXEC_GLOBAL, code, &code->global_code, NULL, NULL, NULL, 0, NULL, &r);
+        hres = exec_global_code(This->ctx, code, &r);
         if(SUCCEEDED(hres)) {
             if(pvarResult)
                 hres = jsval_to_variant(r, pvarResult);
@@ -1122,7 +1141,7 @@ static HRESULT WINAPI JScriptParse_ParseScriptText(IActiveScriptParse *iface,
     if(!pvarResult && !is_started(This->ctx)) {
         list_add_tail(&This->queued_code, &code->entry);
     }else {
-        hres = exec_source(This->ctx, EXEC_GLOBAL, code, &code->global_code, NULL, NULL, NULL, 0, NULL, NULL);
+        hres = exec_global_code(This->ctx, code, NULL);
         if(code->is_persistent)
             list_add_tail(&This->persistent_code, &code->entry);
         else

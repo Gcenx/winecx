@@ -106,46 +106,7 @@
 #if defined(HAVE_SYS_EPOLL_H) && defined(HAVE_EPOLL_CREATE)
 # include <sys/epoll.h>
 # define USE_EPOLL
-#elif defined(linux) && defined(__i386__) && defined(HAVE_STDINT_H)
-# define USE_EPOLL
-# define EPOLLIN POLLIN
-# define EPOLLOUT POLLOUT
-# define EPOLLERR POLLERR
-# define EPOLLHUP POLLHUP
-# define EPOLL_CTL_ADD 1
-# define EPOLL_CTL_DEL 2
-# define EPOLL_CTL_MOD 3
-
-typedef union epoll_data
-{
-  void *ptr;
-  int fd;
-  uint32_t u32;
-  uint64_t u64;
-} epoll_data_t;
-
-struct epoll_event
-{
-  uint32_t events;
-  epoll_data_t data;
-};
-
-static inline int epoll_create( int size )
-{
-    return syscall( 254 /*NR_epoll_create*/, size );
-}
-
-static inline int epoll_ctl( int epfd, int op, int fd, const struct epoll_event *event )
-{
-    return syscall( 255 /*NR_epoll_ctl*/, epfd, op, fd, event );
-}
-
-static inline int epoll_wait( int epfd, struct epoll_event *events, int maxevents, int timeout )
-{
-    return syscall( 256 /*NR_epoll_wait*/, epfd, events, maxevents, timeout );
-}
-
-#endif /* linux && __i386__ && HAVE_STDINT_H */
+#endif /* HAVE_SYS_EPOLL_H && HAVE_EPOLL_CREATE */
 
 #if defined(HAVE_PORT_H) && defined(HAVE_PORT_CREATE)
 # include <port.h>
@@ -162,10 +123,10 @@ static inline int epoll_wait( int epfd, struct epoll_event *events, int maxevent
 /* closed_fd is used to keep track of the unix fd belonging to a closed fd object */
 struct closed_fd
 {
-    struct list entry;       /* entry in inode closed list */
-    int         unix_fd;     /* the unix file descriptor */
-    int         unlink;      /* whether to unlink on close: -1 - implicit FILE_DELETE_ON_CLOSE, 1 - explicit disposition */
-    char       *unix_name;   /* name to unlink on close, points to parent fd unix_name */
+    struct list     entry;      /* entry in inode closed list */
+    int             unix_fd;    /* the unix file descriptor */
+    unsigned int    disp_flags; /* the disposition flags */
+    char           *unix_name;  /* name to unlink on close, points to parent fd unix_name */
 };
 
 struct fd
@@ -177,6 +138,8 @@ struct fd
     struct closed_fd    *closed;      /* structure to store the unix fd at destroy time */
     struct object       *user;        /* object using this file descriptor */
     struct list          locks;       /* list of locks on this fd */
+    client_ptr_t         map_addr;    /* default mapping address for PE files */
+    mem_size_t           map_size;    /* mapping size for PE files */
     unsigned int         access;      /* file access (FILE_READ_DATA etc.) */
     unsigned int         options;     /* file options (FILE_DELETE_ON_CLOSE, FILE_SYNCHRONOUS...) */
     unsigned int         sharing;     /* file sharing mode */
@@ -1115,9 +1078,19 @@ static void device_destroy( struct object *obj )
     list_remove( &device->entry );  /* remove it from the hash table */
 }
 
-
 /****************************************************************/
 /* inode functions */
+
+static void unlink_closed_fd( struct inode *inode, struct closed_fd *fd )
+{
+    /* make sure it is still the same file */
+    struct stat st;
+    if (!stat( fd->unix_name, &st ) && st.st_dev == inode->device->dev && st.st_ino == inode->ino)
+    {
+        if (S_ISDIR(st.st_mode)) rmdir( fd->unix_name );
+        else unlink( fd->unix_name );
+    }
+}
 
 /* close all pending file descriptors in the closed list */
 static void inode_close_pending( struct inode *inode, int keep_unlinks )
@@ -1134,7 +1107,9 @@ static void inode_close_pending( struct inode *inode, int keep_unlinks )
             close( fd->unix_fd );
             fd->unix_fd = -1;
         }
-        if (!keep_unlinks || !fd->unlink)  /* get rid of it unless there's an unlink pending on that file */
+
+        /* get rid of it unless there's an unlink pending on that file */
+        if (!keep_unlinks || !(fd->disp_flags & FILE_DISPOSITION_DELETE))
         {
             list_remove( ptr );
             free( fd->unix_name );
@@ -1167,16 +1142,8 @@ static void inode_destroy( struct object *obj )
         struct closed_fd *fd = LIST_ENTRY( ptr, struct closed_fd, entry );
         list_remove( ptr );
         if (fd->unix_fd != -1) close( fd->unix_fd );
-        if (fd->unlink)
-        {
-            /* make sure it is still the same file */
-            struct stat st;
-            if (!stat( fd->unix_name, &st ) && st.st_dev == inode->device->dev && st.st_ino == inode->ino)
-            {
-                if (S_ISDIR(st.st_mode)) rmdir( fd->unix_name );
-                else unlink( fd->unix_name );
-            }
-        }
+        if (fd->disp_flags & FILE_DISPOSITION_DELETE)
+            unlink_closed_fd( inode, fd );
         free( fd->unix_name );
         free( fd );
     }
@@ -1223,8 +1190,18 @@ static void inode_add_closed_fd( struct inode *inode, struct closed_fd *fd )
     {
         list_add_head( &inode->closed, &fd->entry );
     }
-    else if (fd->unlink)  /* close the fd but keep the structure around for unlink */
+    else if ((fd->disp_flags & FILE_DISPOSITION_DELETE) &&
+        (fd->disp_flags & FILE_DISPOSITION_POSIX_SEMANTICS))
     {
+        /* close the fd and unlink it at once */
+        if (fd->unix_fd != -1) close( fd->unix_fd );
+        unlink_closed_fd( inode, fd );
+        free( fd->unix_name );
+        free( fd );
+    }
+    else if (fd->disp_flags & FILE_DISPOSITION_DELETE)
+    {
+        /* close the fd but keep the structure around for unlink */
         if (fd->unix_fd != -1) close( fd->unix_fd );
         fd->unix_fd = -1;
         list_add_head( &inode->closed, &fd->entry );
@@ -1572,7 +1549,7 @@ static void fd_dump( struct object *obj, int verbose )
 {
     struct fd *fd = (struct fd *)obj;
     fprintf( stderr, "Fd unix_fd=%d user=%p options=%08x", fd->unix_fd, fd->user, fd->options );
-    if (fd->inode) fprintf( stderr, " inode=%p unlink=%d", fd->inode, fd->closed->unlink );
+    if (fd->inode) fprintf( stderr, " inode=%p disp_flags=%x", fd->inode, fd->closed->disp_flags );
     fprintf( stderr, "\n" );
 }
 
@@ -1584,6 +1561,7 @@ static void fd_destroy( struct object *obj )
     free_async_queue( &fd->write_q );
     free_async_queue( &fd->wait_q );
 
+    if (fd->map_addr) free_map_addr( fd->map_addr, fd->map_size );
     if (fd->completion) release_object( fd->completion );
     remove_fd_locks( fd );
     list_remove( &fd->inode_entry );
@@ -1691,7 +1669,7 @@ static inline void unmount_fd( struct fd *fd )
     fd->unix_fd = -1;
     fd->no_fd_status = STATUS_VOLUME_DISMOUNTED;
     fd->closed->unix_fd = -1;
-    fd->closed->unlink = 0;
+    fd->closed->disp_flags = 0;
 
     /* stop using Unix locks on this fd (existing locks have been removed by close) */
     fd->fs_locks = 0;
@@ -1708,6 +1686,8 @@ static struct fd *alloc_fd_object(void)
     fd->user       = NULL;
     fd->inode      = NULL;
     fd->closed     = NULL;
+    fd->map_addr   = 0;
+    fd->map_size   = 0;
     fd->access     = 0;
     fd->options    = 0;
     fd->sharing    = 0;
@@ -1754,6 +1734,8 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     fd->user       = user;
     fd->inode      = NULL;
     fd->closed     = NULL;
+    fd->map_addr   = 0;
+    fd->map_size   = 0;
     fd->access     = 0;
     fd->options    = options;
     fd->sharing    = 0;
@@ -1818,7 +1800,7 @@ struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sha
             goto failed;
         }
         closed->unix_fd = fd->unix_fd;
-        closed->unlink = 0;
+        closed->disp_flags = 0;
         closed->unix_name = fd->unix_name;
         fd->closed = closed;
         fd->inode = (struct inode *)grab_object( orig->inode );
@@ -2012,7 +1994,7 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
     }
 
     closed_fd->unix_fd = fd->unix_fd;
-    closed_fd->unlink = 0;
+    closed_fd->disp_flags = 0;
     closed_fd->unix_name = fd->unix_name;
     fstat( fd->unix_fd, &st );
     *mode = st.st_mode;
@@ -2061,7 +2043,8 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
             goto error;
         }
 
-        fd->closed->unlink = (options & FILE_DELETE_ON_CLOSE) ? -1 : 0;
+        fd->closed->disp_flags = (options & FILE_DELETE_ON_CLOSE) ?
+            FILE_DISPOSITION_DELETE : 0;
         if (flags & O_TRUNC)
         {
             if (S_ISDIR(st.st_mode))
@@ -2152,6 +2135,20 @@ int get_unix_fd( struct fd *fd )
 {
     if (fd->unix_fd == -1) set_error( fd->no_fd_status );
     return fd->unix_fd;
+}
+
+/* retrieve the suggested mapping address for the fd */
+client_ptr_t get_fd_map_address( struct fd *fd )
+{
+    return fd->map_addr;
+}
+
+/* set the suggested mapping address for the fd */
+void set_fd_map_address( struct fd *fd, client_ptr_t addr, mem_size_t size )
+{
+    assert( !fd->map_addr );
+    fd->map_addr = addr;
+    fd->map_size = size;
 }
 
 /* check if two file descriptors point to the same file */
@@ -2522,7 +2519,7 @@ static int is_dir_empty( int fd )
 }
 
 /* set disposition for the fd */
-static void set_fd_disposition( struct fd *fd, int unlink )
+static void set_fd_disposition( struct fd *fd, unsigned int flags )
 {
     struct stat st;
 
@@ -2538,7 +2535,7 @@ static void set_fd_disposition( struct fd *fd, int unlink )
         return;
     }
 
-    if (unlink)
+    if (flags & FILE_DISPOSITION_DELETE)
     {
         struct fd *fd_ptr;
 
@@ -2558,7 +2555,8 @@ static void set_fd_disposition( struct fd *fd, int unlink )
         }
         if (S_ISREG( st.st_mode ))  /* can't unlink files we don't have permission to write */
         {
-            if (!(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
+            if (!(flags & FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE) &&
+                !(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
             {
                 set_error( STATUS_CANNOT_DELETE );
                 return;
@@ -2583,18 +2581,22 @@ static void set_fd_disposition( struct fd *fd, int unlink )
         }
     }
 
-    fd->closed->unlink = unlink ? 1 : 0;
-    if (fd->options & FILE_DELETE_ON_CLOSE)
-        fd->closed->unlink = -1;
+    if (flags & FILE_DISPOSITION_ON_CLOSE)
+        fd->options &= ~FILE_DELETE_ON_CLOSE;
+
+    fd->closed->disp_flags =
+        (flags & (FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS)) |
+        ((fd->options & FILE_DELETE_ON_CLOSE) ? FILE_DISPOSITION_DELETE : 0);
 }
 
 /* set new name for the fd */
 static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, data_size_t len,
-                         struct unicode_str nt_name, int create_link, int replace )
+                         struct unicode_str nt_name, int create_link, unsigned int flags )
 {
     struct inode *inode;
     struct stat st, st2;
     char *name;
+    const unsigned int replace = flags & FILE_RENAME_REPLACE_IF_EXISTS;
 
     if (!fd->inode || !fd->unix_name)
     {
@@ -2652,6 +2654,14 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
 
         /* can't replace directories or special files */
         if (!S_ISREG( st.st_mode ))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto failed;
+        }
+
+        /* read-only files cannot be replaced */
+        if (!(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) &&
+            !(flags & FILE_RENAME_IGNORE_READONLY_ATTRIBUTE))
         {
             set_error( STATUS_ACCESS_DENIED );
             goto failed;
@@ -3014,7 +3024,7 @@ DECL_HANDLER(set_fd_disp_info)
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, DELETE );
     if (fd)
     {
-        set_fd_disposition( fd, req->unlink );
+        set_fd_disposition( fd, req->flags );
         release_object( fd );
     }
 }
@@ -3046,7 +3056,7 @@ DECL_HANDLER(set_fd_name_info)
     if ((fd = get_handle_fd_obj( current->process, req->handle, 0 )))
     {
         set_fd_name( fd, root_fd, (const char *)get_req_data() + req->namelen,
-                     get_req_data_size() - req->namelen, nt_name, req->link, req->replace );
+                     get_req_data_size() - req->namelen, nt_name, req->link, req->flags );
         release_object( fd );
     }
     if (root_fd) release_object( root_fd );

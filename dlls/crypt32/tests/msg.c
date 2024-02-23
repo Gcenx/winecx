@@ -1105,12 +1105,10 @@ static void test_signed_msg_open(void)
     certInfo.Issuer.cbData = 0;
     certInfo.SerialNumber.cbData = 0;
     signer.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
-    U(signer.SignerId).IssuerSerialNumber.Issuer.cbData =
-     sizeof(encodedCommonName);
-    U(signer.SignerId).IssuerSerialNumber.Issuer.pbData = encodedCommonName;
-    U(signer.SignerId).IssuerSerialNumber.SerialNumber.cbData =
-     sizeof(serialNum);
-    U(signer.SignerId).IssuerSerialNumber.SerialNumber.pbData = serialNum;
+    signer.SignerId.IssuerSerialNumber.Issuer.cbData = sizeof(encodedCommonName);
+    signer.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonName;
+    signer.SignerId.IssuerSerialNumber.SerialNumber.cbData = sizeof(serialNum);
+    signer.SignerId.IssuerSerialNumber.SerialNumber.pbData = serialNum;
     msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING, 0, CMSG_SIGNED, &signInfo,
      NULL, NULL);
     ok(msg != NULL, "CryptMsgOpenToEncode failed: %lx\n", GetLastError());
@@ -1258,6 +1256,18 @@ static void test_signed_msg_update(void)
      CRYPT_DELETEKEYSET);
 }
 
+static const BYTE unsignedEmptyBareContent[] = {
+0x30,0x0b,0x02,0x01,0x01,0x31,0x00,0x30,0x02,0x06,0x00,0x31,0x00 };
+static const BYTE unsignedEmptyContent[] = {
+0x30,0x1a,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,0xa0,0x0d,
+0x30,0x0b,0x02,0x01,0x01,0x31,0x00,0x30,0x02,0x06,0x00,0x31,0x00 };
+static const BYTE detachedUnsignedBareContent[] = {
+0x30,0x14,0x02,0x01,0x01,0x31,0x00,0x30,0x0b,0x06,0x09,0x2a,0x86,0x48,0x86,
+0xf7,0x0d,0x01,0x07,0x01,0x31,0x00 };
+static const BYTE detachedUnsignedContent[] = {
+0x30,0x23,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,0xa0,0x16,
+0x30,0x14,0x02,0x01,0x01,0x31,0x00,0x30,0x0b,0x06,0x09,0x2a,0x86,0x48,0x86,
+0xf7,0x0d,0x01,0x07,0x01,0x31,0x00 };
 static const BYTE signedEmptyBareContent[] = {
 0x30,0x50,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,
 0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x02,0x06,0x00,0x31,0x37,0x30,0x35,0x02,
@@ -1592,6 +1602,32 @@ static void test_signed_msg_encoding(void)
     HCRYPTKEY key;
     DWORD size;
 
+    msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING,
+     CMSG_DETACHED_FLAG, CMSG_SIGNED, &signInfo, NULL, NULL);
+    ok(msg != NULL, "CryptMsgOpenToEncode failed: %lx\n", GetLastError());
+
+    check_param("detached unsigned empty bare content", msg,
+     CMSG_BARE_CONTENT_PARAM, unsignedEmptyBareContent,
+     sizeof(unsignedEmptyBareContent));
+    check_param("detached unsigned empty content", msg, CMSG_CONTENT_PARAM,
+     unsignedEmptyContent, sizeof(unsignedEmptyContent));
+    ret = CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
+    ok(ret, "CryptMsgUpdate failed: %lx\n", GetLastError());
+    check_param("detached unsigned bare content", msg, CMSG_BARE_CONTENT_PARAM,
+     detachedUnsignedBareContent, sizeof(detachedUnsignedBareContent));
+    check_param("detached unsigned content", msg, CMSG_CONTENT_PARAM,
+     detachedUnsignedContent, sizeof(detachedUnsignedContent));
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_COMPUTED_HASH_PARAM, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_INDEX,
+     "Expected CRYPT_E_INVALID_INDEX, got %lx\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_ENCODED_SIGNER, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_INDEX,
+     "Expected CRYPT_E_INVALID_INDEX, got %lx\n", GetLastError());
+
+    CryptMsgClose(msg);
+
     certInfo.SerialNumber.cbData = sizeof(serialNum);
     certInfo.SerialNumber.pbData = serialNum;
     certInfo.Issuer.cbData = sizeof(encodedCommonName);
@@ -1642,8 +1678,8 @@ static void test_signed_msg_encoding(void)
     certInfo.SerialNumber.cbData = 0;
     certInfo.Issuer.cbData = 0;
     signer.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
-    U(signer.SignerId).KeyId.cbData = sizeof(serialNum);
-    U(signer.SignerId).KeyId.pbData = serialNum;
+    signer.SignerId.KeyId.cbData = sizeof(serialNum);
+    signer.SignerId.KeyId.pbData = serialNum;
     msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING, 0, CMSG_SIGNED, &signInfo,
      NULL, NULL);
     ok(msg != NULL, "CryptMsgOpenToEncode failed: %lx\n", GetLastError());
@@ -1866,12 +1902,10 @@ static void test_signed_msg_get_param(void)
     certInfo.SerialNumber.cbData = 0;
     certInfo.Issuer.cbData = 0;
     signer.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
-    U(signer.SignerId).IssuerSerialNumber.Issuer.cbData =
-     sizeof(encodedCommonName);
-    U(signer.SignerId).IssuerSerialNumber.Issuer.pbData = encodedCommonName;
-    U(signer.SignerId).IssuerSerialNumber.SerialNumber.cbData =
-     sizeof(serialNum);
-    U(signer.SignerId).IssuerSerialNumber.SerialNumber.pbData = serialNum;
+    signer.SignerId.IssuerSerialNumber.Issuer.cbData = sizeof(encodedCommonName);
+    signer.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonName;
+    signer.SignerId.IssuerSerialNumber.SerialNumber.cbData = sizeof(serialNum);
+    signer.SignerId.IssuerSerialNumber.SerialNumber.pbData = serialNum;
     ret = CryptAcquireContextA(&signer.hCryptProv, cspNameA, NULL,
      PROV_RSA_FULL, CRYPT_NEWKEYSET);
     if (!ret && GetLastError() == NTE_EXISTS)
@@ -1911,8 +1945,8 @@ static void test_signed_msg_get_param(void)
      * the CMS version.
      */
     signer.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
-    U(signer.SignerId).KeyId.cbData = sizeof(serialNum);
-    U(signer.SignerId).KeyId.pbData = serialNum;
+    signer.SignerId.KeyId.cbData = sizeof(serialNum);
+    signer.SignerId.KeyId.pbData = serialNum;
     ret = CryptAcquireContextA(&signer.hCryptProv, cspNameA, NULL,
      PROV_RSA_FULL, CRYPT_NEWKEYSET);
     if (!ret && GetLastError() == NTE_EXISTS)
@@ -2520,32 +2554,32 @@ static void compare_cms_signer_info(const CMSG_CMS_SIGNER_INFO *got,
     {
         if (got->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER)
         {
-            ok(U(got->SignerId).IssuerSerialNumber.Issuer.cbData ==
-             U(expected->SignerId).IssuerSerialNumber.Issuer.cbData,
+            ok(got->SignerId.IssuerSerialNumber.Issuer.cbData ==
+             expected->SignerId.IssuerSerialNumber.Issuer.cbData,
              "Expected issuer size %ld, got %ld\n",
-             U(expected->SignerId).IssuerSerialNumber.Issuer.cbData,
-             U(got->SignerId).IssuerSerialNumber.Issuer.cbData);
-            ok(!memcmp(U(got->SignerId).IssuerSerialNumber.Issuer.pbData,
-             U(expected->SignerId).IssuerSerialNumber.Issuer.pbData,
-             U(got->SignerId).IssuerSerialNumber.Issuer.cbData),
+             expected->SignerId.IssuerSerialNumber.Issuer.cbData,
+             got->SignerId.IssuerSerialNumber.Issuer.cbData);
+            ok(!memcmp(got->SignerId.IssuerSerialNumber.Issuer.pbData,
+             expected->SignerId.IssuerSerialNumber.Issuer.pbData,
+             got->SignerId.IssuerSerialNumber.Issuer.cbData),
              "Unexpected issuer\n");
-            ok(U(got->SignerId).IssuerSerialNumber.SerialNumber.cbData ==
-             U(expected->SignerId).IssuerSerialNumber.SerialNumber.cbData,
+            ok(got->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+             expected->SignerId.IssuerSerialNumber.SerialNumber.cbData,
              "Expected serial number size %ld, got %ld\n",
-             U(expected->SignerId).IssuerSerialNumber.SerialNumber.cbData,
-             U(got->SignerId).IssuerSerialNumber.SerialNumber.cbData);
-            ok(!memcmp(U(got->SignerId).IssuerSerialNumber.SerialNumber.pbData,
-             U(expected->SignerId).IssuerSerialNumber.SerialNumber.pbData,
-             U(got->SignerId).IssuerSerialNumber.SerialNumber.cbData),
+             expected->SignerId.IssuerSerialNumber.SerialNumber.cbData,
+             got->SignerId.IssuerSerialNumber.SerialNumber.cbData);
+            ok(!memcmp(got->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+             expected->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+             got->SignerId.IssuerSerialNumber.SerialNumber.cbData),
              "Unexpected serial number\n");
         }
         else
         {
-            ok(U(got->SignerId).KeyId.cbData == U(expected->SignerId).KeyId.cbData,
+            ok(got->SignerId.KeyId.cbData == expected->SignerId.KeyId.cbData,
              "expected key id size %ld, got %ld\n",
-             U(expected->SignerId).KeyId.cbData, U(got->SignerId).KeyId.cbData);
-            ok(!memcmp(U(expected->SignerId).KeyId.pbData,
-             U(got->SignerId).KeyId.pbData, U(got->SignerId).KeyId.cbData),
+             expected->SignerId.KeyId.cbData, got->SignerId.KeyId.cbData);
+            ok(!memcmp(expected->SignerId.KeyId.pbData,
+             got->SignerId.KeyId.pbData, got->SignerId.KeyId.cbData),
              "unexpected key id\n");
         }
     }
@@ -2785,12 +2819,10 @@ static void test_decode_msg_get_param(void)
 
         signer.dwVersion = 1;
         signer.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
-        U(signer.SignerId).IssuerSerialNumber.Issuer.cbData =
-         sizeof(encodedCommonName);
-        U(signer.SignerId).IssuerSerialNumber.Issuer.pbData = encodedCommonName;
-        U(signer.SignerId).IssuerSerialNumber.SerialNumber.cbData =
-         sizeof(serialNum);
-        U(signer.SignerId).IssuerSerialNumber.SerialNumber.pbData = serialNum;
+        signer.SignerId.IssuerSerialNumber.Issuer.cbData = sizeof(encodedCommonName);
+        signer.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonName;
+        signer.SignerId.IssuerSerialNumber.SerialNumber.cbData = sizeof(serialNum);
+        signer.SignerId.IssuerSerialNumber.SerialNumber.pbData = serialNum;
         signer.HashAlgorithm.pszObjId = oid_rsa_md5;
         CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, buf, &size);
         compare_cms_signer_info((CMSG_CMS_SIGNER_INFO *)buf, &signer);
@@ -2871,8 +2903,8 @@ static void test_decode_msg_get_param(void)
 
         signer.dwVersion = CMSG_SIGNED_DATA_V3;
         signer.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
-        U(signer.SignerId).KeyId.cbData = sizeof(serialNum);
-        U(signer.SignerId).KeyId.pbData = serialNum;
+        signer.SignerId.KeyId.cbData = sizeof(serialNum);
+        signer.SignerId.KeyId.pbData = serialNum;
         signer.HashAlgorithm.pszObjId = oid_rsa_md5;
         CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, buf, &size);
         compare_cms_signer_info((CMSG_CMS_SIGNER_INFO *)buf, &signer);

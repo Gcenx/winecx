@@ -147,6 +147,11 @@ static const char manifest3[] =
 "        name=\"testsurrogate\""
 "        runtimeVersion=\"v2.0.50727\""
 "    />"
+"    <clrSurrogate "
+"        clsid=\"{96666666-8888-7777-6666-555555555556}\""
+"        name=\"testsurrogate\""
+"        runtimeVersion=\"v2.0.50728\""
+"    />"
 "    <clrClass "
 "        clsid=\"{22345678-1234-5678-1234-111122223333}\""
 "        name=\"clrclass\""
@@ -506,6 +511,23 @@ static const char settings_manifest3[] =
 "   </asmv3:application>"
 "</assembly>";
 
+static const char settings_manifest4[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <application/>"
+"   <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">"
+"       <windowsSettings>"
+"           <dpiAware xmlns=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\">true</dpiAware>"
+"       </windowsSettings>"
+"   </application>"
+"   <application/>"
+"   <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">"
+"       <windowsSettings>"
+"           <dpiAwareness xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">true</dpiAwareness>"
+"       </windowsSettings>"
+"   </application>"
+"</assembly>";
+
 static const char two_dll_manifest_dll[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v3\" manifestVersion=\"1.0\">"
 "  <assemblyIdentity type=\"win32\" name=\"sxs_dll\" version=\"1.0.0.0\" processorArchitecture=\"x86\" publicKeyToken=\"0000000000000000\"/>"
@@ -537,6 +559,8 @@ static const char builtin_dll_manifest[] =
 "   </dependency>"
 "</assembly>";
 
+static const char empty_assembly_manifest[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\" />";
 
 DEFINE_GUID(VISTA_COMPAT_GUID,      0xe2011457, 0x1546, 0x43c5, 0xa5, 0xfe, 0x00, 0x8d, 0xee, 0xe3, 0xd3, 0xf0);
 DEFINE_GUID(WIN7_COMPAT_GUID,       0x35138b9a, 0x5d96, 0x4fbd, 0x8e, 0x2d, 0xa2, 0x44, 0x02, 0x25, 0xf9, 0x3a);
@@ -615,6 +639,50 @@ static BOOL create_wide_manifest(const char *filename, const char *manifest, BOO
     ret = create_manifest_file(filename, (char *)&wmanifest[offset], (strlen(manifest)+1-offset) * sizeof(WCHAR), NULL, NULL);
     HeapFree(GetProcessHeap(), 0, wmanifest);
     return ret;
+}
+
+static HANDLE create_temp_manifest_file(const char *manifest, WCHAR *pathname)
+{
+    WCHAR tmp_path[MAX_PATH];
+    DWORD size, tmp_path_len;
+    HANDLE file, file_w;
+    UINT unique;
+
+    tmp_path_len = GetTempPathW(ARRAY_SIZE(tmp_path), tmp_path);
+    ok(tmp_path_len != 0, "GetTempPathW returned error %lu\n", GetLastError());
+    ok(tmp_path_len < ARRAY_SIZE(tmp_path), "GetTempPathW return value %lu should be less than %Iu\n",
+       tmp_path_len, ARRAY_SIZE(tmp_path));
+
+    memset(pathname, 0, MAX_PATH * sizeof(WCHAR));
+    unique = GetTempFileNameW(tmp_path, L"tst", 0, pathname);
+    ok(unique != 0, "GetTempFileNameW returned error %lu\n", GetLastError());
+
+    /* Open file handle that will be deleted on close or process termination */
+    file = CreateFileW(pathname,
+                       GENERIC_READ | DELETE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       NULL,
+                       CREATE_ALWAYS,
+                       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+                       NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile returned error %lu\n", GetLastError());
+
+    /* Re-open file with write access */
+    file_w = CreateFileW(pathname,
+                         GENERIC_WRITE,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL,
+                         TRUNCATE_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL,
+                         NULL);
+    ok(file_w != INVALID_HANDLE_VALUE, "CreateFile returned error %lu\n", GetLastError());
+
+    WriteFile(file_w, manifest, strlen(manifest), &size, NULL);
+
+    /* Close file handle that was open for write to avoid sharing violation */
+    CloseHandle(file_w);
+
+    return file;
 }
 
 typedef struct {
@@ -1410,8 +1478,8 @@ static void test_find_activatable_class(HANDLE handle, const WCHAR *classid, enu
     ok_(__FILE__, line)(data.lpData != NULL, "got lpData %p\n", data.lpData);
 
     header = (struct strsection_header *)data.lpSectionBase;
-    ok_(__FILE__, line)(header->magic == 0x64487353, "got wrong magic 0x%08lx\n", header->magic);
     ok_(__FILE__, line)(data.lpSectionBase != NULL, "got lpSectionBase %p\n", data.lpSectionBase);
+    ok_(__FILE__, line)(header->magic == 0x64487353, "got wrong magic 0x%08lx\n", header->magic);
     ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "got ulSectionTotalLength %lu\n", data.ulSectionTotalLength);
     ok_(__FILE__, line)(data.lpSectionGlobalData == (BYTE *)header + header->global_offset,
                         "got lpSectionGlobalData %p\n", data.lpSectionGlobalData);
@@ -1548,6 +1616,29 @@ struct clrclass_data {
     DWORD res2[2];
 };
 
+static void validate_guid_index(const ACTCTX_SECTION_KEYED_DATA *data, int line)
+{
+#define GUIDSECTION_MAGIC  0x64487347 /* dHsG */
+    struct guidsection_header *header;
+    struct guid_index *index;
+    unsigned int i;
+
+    header = (struct guidsection_header *)data->lpSectionBase;
+
+    ok_(__FILE__, line)(header->magic == GUIDSECTION_MAGIC, "Unexpected magic %#lx.\n", header->magic);
+    ok_(__FILE__, line)(header->size == sizeof(*header), "Unexpected size %ld.\n", header->size);
+    ok_(__FILE__, line)(header->index_offset >= sizeof(*header), "Unexpected index offset %lu.\n", header->index_offset);
+
+    index = (struct guid_index *)((BYTE *)data->lpSectionBase + header->index_offset);
+    for (i = 0; i < header->count; ++i)
+    {
+        ok_(__FILE__, line)(index[i].data_len <= data->ulSectionTotalLength, "Unexpected data length.\n");
+        ok_(__FILE__, line)(index[i].data_offset <= data->ulSectionTotalLength - index[i].data_len,
+                "Unexpected data offset %ld, section total length %lu, data length %lu.\n",
+                index[i].data_offset, data->ulSectionTotalLength, index[i].data_len);
+    }
+}
+
 static void test_find_com_redirection(HANDLE handle, const GUID *clsid, const GUID *tlid, const WCHAR *progid, ULONG exid, int line)
 {
     struct comclassredirect_data *comclass, *comclass2;
@@ -1662,15 +1753,16 @@ static void test_find_com_redirection(HANDLE handle, const GUID *clsid, const GU
     }
 
     header = (struct guidsection_header*)data.lpSectionBase;
+    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
     ok_(__FILE__, line)(data.lpSectionGlobalData == ((BYTE*)header + header->names_offset), "data.lpSectionGlobalData == NULL\n");
     ok_(__FILE__, line)(data.ulSectionGlobalDataLength == header->names_len, "data.ulSectionGlobalDataLength=%lu\n",
        data.ulSectionGlobalDataLength);
-    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
     ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "data.ulSectionTotalLength=%lu\n",
        data.ulSectionTotalLength);
     ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
     ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%lu, expected %lu\n",
        data.ulAssemblyRosterIndex, exid);
+    validate_guid_index(&data, line);
 
     /* generated guid for this class works as key guid in search */
     memset(&data2, 0xfe, sizeof(data2));
@@ -1757,6 +1849,8 @@ static void test_find_ifaceps_redirection(HANDLE handle, const GUID *iid, const 
     ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
     ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%lu, expected %lu\n",
        data.ulAssemblyRosterIndex, exid);
+
+    validate_guid_index(&data, line);
 }
 
 struct clrsurrogate_data
@@ -1771,7 +1865,7 @@ struct clrsurrogate_data
 };
 
 static void test_find_surrogate(HANDLE handle, const GUID *clsid, const WCHAR *name, const WCHAR *version,
-    ULONG exid, int line)
+        ULONG exid, int line)
 {
     struct clrsurrogate_data *surrogate;
     ACTCTX_SECTION_KEYED_DATA data;
@@ -1827,6 +1921,8 @@ static void test_find_surrogate(HANDLE handle, const GUID *clsid, const WCHAR *n
     ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
     ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%lu, expected %lu\n",
        data.ulAssemblyRosterIndex, exid);
+
+    validate_guid_index(&data, line);
 }
 
 static void test_find_progid_redirection(HANDLE handle, const GUID *clsid, const char *progid, ULONG exid, int line)
@@ -1867,12 +1963,14 @@ static void test_find_progid_redirection(HANDLE handle, const GUID *clsid, const
         comclass = (struct comclassredirect_data*)data2.lpData;
         ok_(__FILE__, line)(IsEqualGUID(guid, &comclass->alias), "got wrong alias referenced from progid %s, %s\n", progid, wine_dbgstr_guid(guid));
         ok_(__FILE__, line)(IsEqualGUID(clsid, &comclass->clsid), "got wrong class referenced from progid %s, %s\n", progid, wine_dbgstr_guid(clsid));
+
+        validate_guid_index(&data2, line);
     }
 
     header = (struct strsection_header*)data.lpSectionBase;
+    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
     ok_(__FILE__, line)(data.lpSectionGlobalData == (BYTE*)header + header->global_offset, "data.lpSectionGlobalData == NULL\n");
     ok_(__FILE__, line)(data.ulSectionGlobalDataLength == header->global_len, "data.ulSectionGlobalDataLength=%lu\n", data.ulSectionGlobalDataLength);
-    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
     ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "data.ulSectionTotalLength=%lu\n", data.ulSectionTotalLength);
     ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
     ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%lu, expected %lu\n",
@@ -2032,6 +2130,7 @@ static void test_typelib_section(void)
     section = (struct guidsection_header*)data.lpSectionBase;
     ok(section->count == 4, "got %ld\n", section->count);
     ok(section->size == sizeof(*section), "got %ld\n", section->size);
+    validate_guid_index(&data, __LINE__);
 
     /* For both GUIDs same section is returned */
     ok(data.lpSectionBase == data2.lpSectionBase, "got %p, %p\n", data.lpSectionBase, data2.lpSectionBase);
@@ -2436,6 +2535,17 @@ static void test_actctx(void)
         ReleaseActCtx(handle);
     }
 
+    /* Empty <assembly/> element. */
+    create_manifest_file("empty_assembly.manifest", empty_assembly_manifest, -1, NULL, NULL);
+    handle = test_create("empty_assembly.manifest");
+    ok(handle != INVALID_HANDLE_VALUE, "Failed to create activation context.\n");
+    DeleteFileA("empty_assembly.manifest");
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        test_basic_info(handle, __LINE__);
+        ReleaseActCtx(handle);
+    }
+
     test_wndclass_section();
     test_dllredirect_section();
     test_typelib_section();
@@ -2690,17 +2800,118 @@ static void test_CreateActCtx(void)
 {
     static const DWORD flags[] = {LOAD_LIBRARY_AS_DATAFILE, LOAD_LIBRARY_AS_IMAGE_RESOURCE,
                                   LOAD_LIBRARY_AS_IMAGE_RESOURCE | LOAD_LIBRARY_AS_DATAFILE};
-    CHAR path[MAX_PATH], dir[MAX_PATH], dll[MAX_PATH];
+    static const struct
+    {
+        DWORD size, flags, error;
+    } test[] =
+    {
+        { FIELD_OFFSET(ACTCTXW, lpSource), 0, ERROR_INVALID_PARAMETER },
+        { FIELD_OFFSET(ACTCTXW, wProcessorArchitecture), 0, 0 },
+        { FIELD_OFFSET(ACTCTXW, lpAssemblyDirectory), ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID, ERROR_INVALID_PARAMETER },
+        { FIELD_OFFSET(ACTCTXW, lpResourceName), ACTCTX_FLAG_RESOURCE_NAME_VALID, ERROR_INVALID_PARAMETER },
+        { FIELD_OFFSET(ACTCTXW, hModule), ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID, ERROR_INVALID_PARAMETER },
+    };
+    char path[MAX_PATH], dir[MAX_PATH], dll[MAX_PATH], source[MAX_PATH];
+    WCHAR pathW[MAX_PATH], dirW[MAX_PATH], sourceW[MAX_PATH];
     ACTCTXA actctx;
+    ACTCTXW ctxW;
     HANDLE handle;
     int i;
 
     GetTempPathA(ARRAY_SIZE(path), path);
+    strcpy(dir, path);
     strcat(path, "main_wndcls.manifest");
 
     write_manifest("testdep1.manifest", manifest_wndcls1);
     write_manifest("testdep2.manifest", manifest_wndcls2);
     write_manifest("main_wndcls.manifest", manifest_wndcls_main);
+
+    GetModuleFileNameA(NULL, source, ARRAY_SIZE(source));
+    GetModuleFileNameW(NULL, sourceW, ARRAY_SIZE(sourceW));
+
+    GetTempPathW(ARRAY_SIZE(pathW), pathW);
+    wcscpy(dirW, pathW);
+    wcscat(pathW, L"main_wndcls.manifest");
+
+    memset(&ctxW, 0, sizeof(ctxW));
+    ctxW.cbSize = sizeof(ctxW);
+    ctxW.dwFlags = ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID | ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
+    ctxW.lpSource = pathW;
+    ctxW.lpAssemblyDirectory = dirW;
+    ctxW.lpResourceName = (LPWSTR)124;
+    ctxW.hModule = GetModuleHandleW(NULL);
+    handle = CreateActCtxW(&ctxW);
+    ok(handle != INVALID_HANDLE_VALUE, "CreateActCtx error %lu\n", GetLastError());
+    ReleaseActCtx(handle);
+
+    for (i = 0; i < ARRAY_SIZE(test); i++)
+    {
+        winetest_push_context("%i", i);
+        ctxW.cbSize = test[i].size;
+        ctxW.dwFlags = test[i].flags;
+        SetLastError(0xdeadbeef);
+        handle = CreateActCtxW(&ctxW);
+        if (!test[i].error)
+        {
+            ok(handle != INVALID_HANDLE_VALUE, "CreateActCtx error %lu\n", GetLastError());
+            ReleaseActCtx(handle);
+        }
+        else
+        {
+            ok(handle == INVALID_HANDLE_VALUE, "CreateActCtx should fail\n");
+            ok(test[i].error == GetLastError(), "expected %lu, got %lu\n", test[i].error, GetLastError());
+        }
+
+        ctxW.cbSize += sizeof(void *);
+        if ((ctxW.dwFlags & (ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID)) == ACTCTX_FLAG_RESOURCE_NAME_VALID)
+            ctxW.lpSource = sourceW; /* source without hModule must point to valid PE */
+        SetLastError(0xdeadbeef);
+        handle = CreateActCtxW(&ctxW);
+        ok(handle != INVALID_HANDLE_VALUE, "CreateActCtx error %lu\n", GetLastError());
+        ReleaseActCtx(handle);
+
+        winetest_pop_context();
+    }
+
+    memset(&actctx, 0, sizeof(actctx));
+    actctx.cbSize = sizeof(actctx);
+    actctx.dwFlags = ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID | ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
+    actctx.lpSource = path;
+    actctx.lpAssemblyDirectory = dir;
+    actctx.lpResourceName = (LPSTR)124;
+    actctx.hModule = GetModuleHandleW(NULL);
+    handle = CreateActCtxA(&actctx);
+    ok(handle != INVALID_HANDLE_VALUE, "CreateActCtx error %lu\n", GetLastError());
+    ReleaseActCtx(handle);
+
+    for (i = 0; i < ARRAY_SIZE(test); i++)
+    {
+        winetest_push_context("%i", i);
+        actctx.cbSize = test[i].size;
+        actctx.dwFlags = test[i].flags;
+        SetLastError(0xdeadbeef);
+        handle = CreateActCtxA(&actctx);
+        if (!test[i].error)
+        {
+            ok(handle != INVALID_HANDLE_VALUE, "CreateActCtx error %lu\n", GetLastError());
+            ReleaseActCtx(handle);
+        }
+        else
+        {
+            ok(handle == INVALID_HANDLE_VALUE, "CreateActCtx should fail\n");
+            ok(test[i].error == GetLastError(), "expected %lu, got %lu\n", test[i].error, GetLastError());
+        }
+
+        actctx.cbSize += sizeof(void *);
+        if ((actctx.dwFlags & (ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID)) == ACTCTX_FLAG_RESOURCE_NAME_VALID)
+            actctx.lpSource = source; /* source without hModule must point to valid PE */
+        SetLastError(0xdeadbeef);
+        handle = CreateActCtxA(&actctx);
+        ok(handle != INVALID_HANDLE_VALUE, "CreateActCtx error %lu\n", GetLastError());
+        ReleaseActCtx(handle);
+
+        winetest_pop_context();
+    }
 
     memset(&actctx, 0, sizeof(ACTCTXA));
     actctx.cbSize = sizeof(ACTCTXA);
@@ -2747,17 +2958,6 @@ todo_wine {
     delete_manifest_file("main_wndcls.manifest");
     delete_manifest_file("testdep1.manifest");
     delete_manifest_file("testdep2.manifest");
-
-    /* ACTCTX_FLAG_HMODULE_VALID but hModule is not set */
-    memset(&actctx, 0, sizeof(ACTCTXA));
-    actctx.cbSize = sizeof(ACTCTXA);
-    actctx.dwFlags = ACTCTX_FLAG_HMODULE_VALID;
-    SetLastError(0xdeadbeef);
-    handle = CreateActCtxA(&actctx);
-    ok(handle == INVALID_HANDLE_VALUE, "got handle %p\n", handle);
-    todo_wine
-    ok(GetLastError() == ERROR_SXS_CANT_GEN_ACTCTX || broken(GetLastError() == ERROR_NOT_ENOUGH_MEMORY) /* XP, win2k3 */,
-        "got error %ld\n", GetLastError());
 
     /* create from HMODULE - resource doesn't exist, lpSource is set */
     memset(&actctx, 0, sizeof(ACTCTXA));
@@ -2858,6 +3058,27 @@ todo_wine {
 
         winetest_pop_context();
     }
+}
+
+static void test_CreateActCtx_share_mode(void)
+{
+    WCHAR tmp_manifest_pathname[MAX_PATH];
+    HANDLE handle, manifest_file;
+    ACTCTXW actctx;
+
+    manifest_file = create_temp_manifest_file(manifest1, tmp_manifest_pathname);
+
+    memset(&actctx, 0, sizeof(ACTCTXW));
+    actctx.cbSize = sizeof(ACTCTXW);
+    actctx.lpSource = tmp_manifest_pathname;
+
+    handle = CreateActCtxW(&actctx);
+    ok(handle != INVALID_HANDLE_VALUE, "CreateActCtxW returned error %lu\n", GetLastError());
+    ok(handle != NULL, "CreateActCtxW returned %p\n", handle);
+
+    ReleaseActCtx(handle);
+
+    CloseHandle(manifest_file);
 }
 
 static BOOL init_funcs(void)
@@ -3302,6 +3523,23 @@ static void test_settings(void)
     ok( !ret, "QueryActCtxSettingsW succeeded\n" );
     ok( GetLastError() == ERROR_SXS_KEY_NOT_FOUND, "wrong error %lu\n", GetLastError() );
     ReleaseActCtx(handle);
+
+    /* lookup occurs in first non empty node */
+    create_manifest_file( "manifest_settings4.manifest", settings_manifest4, -1, NULL, NULL );
+    handle = test_create("manifest_settings4.manifest");
+    ok( handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %lu\n", GetLastError() );
+    DeleteFileA( "manifest_settings4.manifest" );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwareW, buffer, 80, &size );
+    ok( ret, "QueryActCtxSettingsW failed\n" );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwarenessW, buffer, 80, &size );
+    ok( !ret, "QueryActCtxSettingsW succeeded\n" );
+    ReleaseActCtx(handle);
 }
 
 typedef struct
@@ -3614,6 +3852,423 @@ cleanup:
     }
 }
 
+struct manifest_res_spec
+{
+    const char *name;
+    LANGID lang;
+    const char *override_manifest;
+};
+
+struct manifest_res_spec_list
+{
+    size_t count;
+    const struct manifest_res_spec *items;
+};
+
+static void add_sxs_dll_manifest(const char *pathname,
+                                 const struct manifest_res_spec_list *res_lists,
+                                 size_t num_lists,
+                                 const char *manifest)
+{
+    HANDLE update_h;
+    BOOL ret;
+    size_t i, j;
+
+    update_h = BeginUpdateResourceA(pathname, FALSE);
+    ok(update_h != NULL, "BeginUpdateResourceA returned error %lu.\n", GetLastError());
+
+    for (i = 0; i < num_lists; i++)
+    {
+        for (j = 0; j < res_lists[i].count; j++)
+        {
+            const struct manifest_res_spec *res_spec = &res_lists[i].items[j];
+            const char *cur_manifest = res_spec->override_manifest ? res_spec->override_manifest : manifest;
+            ret = UpdateResourceA(update_h,
+                                  MAKEINTRESOURCEA(RT_MANIFEST),
+                                  res_spec->name,
+                                  res_spec->lang,
+                                  (void *)cur_manifest,
+                                  strlen(cur_manifest));
+            ok(ret, "UpdateResourceA returned error %lu.\n", GetLastError());
+        }
+    }
+
+    ret = EndUpdateResourceA(update_h, FALSE);
+    ok(ret, "EndUpdateResourceA returned error %lu.\n", GetLastError());
+}
+
+struct multiple_manifest_test
+{
+    struct manifest_res_spec manifest_inline; /* optional */
+    const struct manifest_res_spec *manifests; /* optional */
+    DWORD expected_error;
+};
+
+#define subtest_manifest_res(d,e,t,l) subtest_manifest_res_(__LINE__,d,e,t,l)
+static DWORD subtest_manifest_res_(int line, const char *manifest_exe, const char *manifest_dll,
+                                   const struct multiple_manifest_test *test_data, LANGID lang)
+{
+    char path_tmp[MAX_PATH] = "", path_dll[MAX_PATH] = "", path_manifest_exe[MAX_PATH] = "";
+    static const char path_tmp_suffix[] = "winek32t\\";
+    WCHAR locale_name[LOCALE_NAME_MAX_LENGTH] = {0};
+    struct manifest_res_spec_list res_lists[2];
+    char path_tmp_lang[MAX_PATH] = "";
+    static volatile LONG last_uniqid;
+    DWORD err, prefix_len;
+    ACTCTXA actctx;
+    HANDLE handle;
+    BOOL ret;
+    int r;
+
+    prefix_len = GetTempPathA(MAX_PATH - ARRAY_SIZE(path_tmp_suffix), path_tmp);
+    ok_(__FILE__, line)(prefix_len > 0, "GetTempPathA returned error %lu.\n", GetLastError());
+
+    memcpy(&path_tmp[prefix_len], path_tmp_suffix, sizeof(path_tmp_suffix) - sizeof(*path_tmp_suffix));
+    ret = CreateDirectoryA(path_tmp, NULL);
+    ok_(__FILE__, line)(ret || GetLastError() == ERROR_ALREADY_EXISTS,
+       "CreateDirectoryA returned error %lu.\n", GetLastError());
+
+    if (lang)
+    {
+        r = LCIDToLocaleName(MAKELCID(lang, SORT_DEFAULT),
+                             locale_name, ARRAY_SIZE(locale_name), LOCALE_ALLOW_NEUTRAL_NAMES);
+        ok(r > 0, "lang 0x%04x, error %lu.\n", lang, GetLastError());
+    }
+
+    if (locale_name[0])
+    {
+        r = snprintf(path_tmp_lang, ARRAY_SIZE(path_tmp_lang), "%s%ls\\", path_tmp, locale_name);
+        ok_(__FILE__, line)(r > 0 && r < ARRAY_SIZE(path_tmp_lang), "got %d\n", r);
+
+        ret = CreateDirectoryA(path_tmp_lang, NULL);
+        ok_(__FILE__, line)(ret || GetLastError() == ERROR_ALREADY_EXISTS,
+           "CreateDirectoryA returned error %lu.\n", GetLastError());
+    }
+    else
+    {
+        r = snprintf(path_tmp_lang, ARRAY_SIZE(path_tmp_lang), "%s", path_tmp);
+        ok_(__FILE__, line)(r > 0 && r < ARRAY_SIZE(path_tmp_lang), "got %d\n", r);
+    }
+
+    r = snprintf(path_dll, ARRAY_SIZE(path_dll), "%s%s", path_tmp_lang, "sxs_dll.dll");
+    ok_(__FILE__, line)(r > 0 && r < ARRAY_SIZE(path_dll), "got %d\n", r);
+
+    r = snprintf(path_manifest_exe, ARRAY_SIZE(path_manifest_exe), "%sexe%08lx.manifest",
+                 path_tmp, InterlockedIncrement(&last_uniqid));
+    ok_(__FILE__, line)(r > 0 && r < ARRAY_SIZE(path_manifest_exe), "got %d\n", r);
+    create_manifest_file(path_manifest_exe, manifest_exe, -1, NULL, NULL);
+
+    extract_resource("dummy.dll", "TESTDLL", path_dll);
+
+    res_lists[0].count = test_data->manifest_inline.name ? 1 : 0;
+    res_lists[0].items = &test_data->manifest_inline;
+
+    if (test_data->manifests)
+    {
+        size_t n = 0;
+
+        while (test_data->manifests[n].name)
+            n++;
+
+        res_lists[1].count = n;
+        res_lists[1].items = test_data->manifests;
+    }
+    else
+    {
+        res_lists[1].count = 0;
+        res_lists[1].items = NULL;
+    }
+
+    add_sxs_dll_manifest(path_dll, res_lists, ARRAY_SIZE(res_lists), manifest_dll);
+
+    memset(&actctx, 0, sizeof(actctx));
+    actctx.cbSize = sizeof(actctx);
+    actctx.lpSource = path_manifest_exe;
+    actctx.lpAssemblyDirectory = path_tmp;
+    actctx.dwFlags = ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID;
+
+    SetLastError(0xccccccccUL);
+    handle = CreateActCtxA(&actctx);
+    if (handle == INVALID_HANDLE_VALUE)
+    {
+        err = GetLastError();
+        ok_(__FILE__, line)(err != ERROR_SUCCESS, "got %#lx.\n", err);
+    }
+    else
+    {
+        err = ERROR_SUCCESS;
+        ok_(__FILE__, line)(handle != NULL, "CreateActCtxA returned %p (error %lu)\n", handle, err);
+        ReleaseActCtx(handle);
+    }
+    ok_(__FILE__, line)(err == test_data->expected_error,
+                        "expected error %lu, got %lu\n", test_data->expected_error, err);
+
+    ret = DeleteFileA(path_manifest_exe);
+    ok_(__FILE__, line)(ret, "DeleteFileA(%s) returned error %lu\n.",
+                        debugstr_a(path_manifest_exe), GetLastError());
+
+    ret = DeleteFileA(path_dll);
+    ok_(__FILE__, line)(ret, "DeleteFileA(%s) returned error %lu\n.", debugstr_a(path_dll), GetLastError());
+
+    if (locale_name[0])
+    {
+        ret = RemoveDirectoryA(path_tmp_lang);
+        ok_(__FILE__, line)(ret, "RemoveDirectoryA(%s) returned error %lu\n.",
+                            debugstr_a(path_tmp_lang), GetLastError());
+    }
+
+    ret = RemoveDirectoryA(path_tmp);
+    ok_(__FILE__, line)(ret, "RemoveDirectoryA(%s) returned error %lu %s\n.",
+                        debugstr_a(path_tmp), GetLastError(), debugstr_a(path_tmp_lang));
+
+    return err;
+}
+
+/* Test loading DLL with dependency assembly in manifest resource */
+static void test_manifest_resources(void)
+{
+    static const struct manifest_res_spec wrong_manifest_resources_numbered[] = {
+        { (char *)2, MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), wrong_manifest1 },
+        { (char *)2, MAKELANGID(LANG_FRENCH,SUBLANG_DEFAULT), wrong_manifest1 },
+        { (char *)3, 0, wrong_manifest1 },
+        { (char *)0x1234, 0, wrong_manifest1 },
+        { NULL },
+    };
+    static const struct manifest_res_spec correct_manifest_resources_numbered[] = {
+        { (char *)2, MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT) },
+        { (char *)2, MAKELANGID(LANG_FRENCH,SUBLANG_DEFAULT) },
+        { (char *)3, 0 },
+        { (char *)0x1234, 0 },
+        { NULL },
+    };
+    static const struct manifest_res_spec wrong_manifest_resources_gte_3[] = {
+        { (char *)3, 0, wrong_manifest1 },
+        { (char *)3, MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), wrong_manifest1 },
+        { NULL },
+    };
+    static const struct manifest_res_spec correct_manifest_resources_gte_3[] = {
+        { (char *)3, 0 },
+        { (char *)3, MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT) },
+        { NULL },
+    };
+    static const struct manifest_res_spec wrong_manifest_resources_named[] = {
+        { "foo", 0, wrong_manifest1 },
+        { "bar", MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), wrong_manifest1 },
+        { NULL },
+    };
+    static const struct manifest_res_spec correct_manifest_resources_named[] = {
+        { "foo", 0 },
+        { "bar", MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT) },
+        { NULL },
+    };
+    struct multiple_manifest_test tests[] = {
+        /* Test well-known manifest resource IDs */
+        { { (char *)CREATEPROCESS_MANIFEST_RESOURCE_ID }, NULL, ERROR_SUCCESS },
+        { { (char *)ISOLATIONAWARE_MANIFEST_RESOURCE_ID }, NULL, ERROR_SUCCESS },
+        { { (char *)ISOLATIONAWARE_NOSTATICIMPORT_MANIFEST_RESOURCE_ID }, NULL, ERROR_SUCCESS },
+
+        /* Test remaining reserved manifest resource IDs */
+        { { (char *)4 }, NULL, ERROR_SUCCESS },
+        { { (char *)5 }, NULL, ERROR_SUCCESS },
+        { { (char *)6 }, NULL, ERROR_SUCCESS },
+        { { (char *)7 }, NULL, ERROR_SUCCESS },
+        { { (char *)8 }, NULL, ERROR_SUCCESS },
+        { { (char *)9 }, NULL, ERROR_SUCCESS },
+        { { (char *)10 }, NULL, ERROR_SUCCESS },
+        { { (char *)11 }, NULL, ERROR_SUCCESS },
+        { { (char *)12 }, NULL, ERROR_SUCCESS },
+        { { (char *)13 }, NULL, ERROR_SUCCESS },
+        { { (char *)14 }, NULL, ERROR_SUCCESS },
+        { { (char *)15 }, NULL, ERROR_SUCCESS },
+        { { (char *)MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID }, NULL, ERROR_SUCCESS },
+
+        /* Test arbitrary resource IDs */
+        { { (char *)0x1234 }, NULL, ERROR_SUCCESS },
+        { { (char *)0x89ab }, NULL, ERROR_SUCCESS },
+        { { (char *)0xffff }, NULL, ERROR_SUCCESS },
+
+        /* Test arbitrary LANGID */
+        { { (char *)2, MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT) }, NULL, ERROR_SUCCESS },
+        { { (char *)2, MAKELANGID(LANG_FRENCH,SUBLANG_DEFAULT) }, NULL, ERROR_SUCCESS },
+        { { (char *)2, 0x1234 }, NULL, ERROR_SUCCESS },
+        { { (char *)2, 0xffff }, NULL, ERROR_SUCCESS },
+
+        /* Test multiple manifest resources coexisting inside a module */
+        { { (char *)2, 0 }, wrong_manifest_resources_numbered, ERROR_SUCCESS },
+        { { (char *)2, 0, wrong_manifest1 }, correct_manifest_resources_numbered,
+          ERROR_SXS_CANT_GEN_ACTCTX },
+
+        /* Test that smaller resource ID takes precedence regardless of language ID */
+        { { (char *)2, MAKELANGID(LANG_INVARIANT,SUBLANG_NEUTRAL) },
+          wrong_manifest_resources_gte_3, ERROR_SUCCESS },
+        { { (char *)2, MAKELANGID(LANG_INVARIANT,SUBLANG_NEUTRAL), wrong_manifest1 },
+          correct_manifest_resources_gte_3, ERROR_SXS_CANT_GEN_ACTCTX },
+
+        /* Test multiple manifest resources (ID / name) coexisting inside a module */
+        { { (char *)2, 0 }, wrong_manifest_resources_named, ERROR_SUCCESS },
+        { { (char *)2, 0, wrong_manifest1 },
+          correct_manifest_resources_named, ERROR_SXS_CANT_GEN_ACTCTX },
+
+        /* Test name-only RT_MANIFEST resources */
+        { { NULL }, correct_manifest_resources_named, ERROR_SXS_CANT_GEN_ACTCTX },
+    };
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        winetest_push_context("tests[%Iu] (%p 0x%04x)", i,
+                              tests[i].manifest_inline.name, tests[i].manifest_inline.lang);
+        subtest_manifest_res(two_dll_manifest_exe, two_dll_manifest_dll, &tests[i], 0);
+        winetest_pop_context();
+    }
+}
+
+#define LANGID_PREC_MAX_COUNT 5
+
+static void get_langid_precedence(LANGID *langs_arr, size_t *lang_count)
+{
+    LANGID src_langs[LANGID_PREC_MAX_COUNT];
+    LANGID user_ui_lang;
+    size_t i, j, n = 0;
+
+    user_ui_lang = GetUserDefaultUILanguage();
+
+    src_langs[0] = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL);
+    src_langs[1] = user_ui_lang;
+    src_langs[2] = MAKELANGID(PRIMARYLANGID(user_ui_lang), SUBLANG_NEUTRAL);
+    src_langs[3] = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
+    src_langs[4] = 0x1;  /* least number that is a valid LANGID */
+
+    for (i = 0; i < ARRAY_SIZE(src_langs); i++)
+    {
+        LANGID item = src_langs[i];
+        BOOL is_item_duplicate = FALSE;
+
+        for (j = 0; j < n; j++)
+        {
+            if (langs_arr[j] == item)
+            {
+                is_item_duplicate = TRUE;
+                break;
+            }
+        }
+
+        if (!is_item_duplicate)
+        {
+            langs_arr[n++] = item;
+        }
+    }
+
+    *lang_count = n;
+}
+
+static void subtest_valid_manifest_resources_locale(LANGID actctx_lang)
+{
+    static const char manifest_exe_fmt[] =
+        "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+        "<dependency>"
+        "<dependentAssembly>"
+        "<assemblyIdentity type=\"win32\" name=\"sxs_dll\" version=\"1.0.0.0\""
+        " processorArchitecture=\"" ARCH "\" publicKeyToken=\"0000000000000000\" language=\"%ls\"/>"
+        "</dependentAssembly>"
+        "</dependency>"
+        "</assembly>";
+    static const char manifest_dll_fmt[] =
+        "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v3\" manifestVersion=\"1.0\">"
+        "<assemblyIdentity type=\"win32\" name=\"sxs_dll\" version=\"1.0.0.0\""
+        " processorArchitecture=\"" ARCH "\" publicKeyToken=\"0000000000000000\" language=\"%ls\"/>"
+        "</assembly>";
+    static const char manifest_dll_nofmt[] =
+        "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v3\" manifestVersion=\"1.0\">"
+        "<assemblyIdentity type=\"win32\" name=\"sxs_dll\" version=\"1.0.0.0\""
+        " processorArchitecture=\"" ARCH "\" publicKeyToken=\"0000000000000000\"/>"
+        "</assembly>";
+    char manifest_exe[1024], manifest_dll[1024];
+    WCHAR locale_name[LOCALE_NAME_MAX_LENGTH];
+    UINT16 langs_arr[LANGID_PREC_MAX_COUNT];
+    size_t lang_count = 0, i, j;
+    int ret;
+
+    if (actctx_lang == MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL))
+    {
+        wcscpy(locale_name, L"*");
+        strcpy(manifest_dll, manifest_dll_nofmt);
+    }
+    else
+    {
+        actctx_lang = ConvertDefaultLocale(actctx_lang);
+        ok(actctx_lang != MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
+           "unexpected neutral locale\n");
+        ret = LCIDToLocaleName(MAKELCID(actctx_lang, SORT_DEFAULT),
+                               locale_name, ARRAY_SIZE(locale_name), LOCALE_ALLOW_NEUTRAL_NAMES);
+        ok(ret > 0, "error %lu.\n", GetLastError());
+
+        ret = snprintf(manifest_dll, ARRAY_SIZE(manifest_dll), manifest_dll_fmt, locale_name);
+        ok(ret > 0 && ret < ARRAY_SIZE(manifest_dll), "ret %d.\n", ret);
+    }
+
+    ret = snprintf(manifest_exe, ARRAY_SIZE(manifest_exe), manifest_exe_fmt, locale_name);
+    ok(ret > 0 && ret < ARRAY_SIZE(manifest_exe), "ret %d.\n", ret);
+
+    get_langid_precedence(langs_arr, &lang_count);
+
+    for (i = 0; i < lang_count; i++)
+    {
+        struct manifest_res_spec specs[ARRAY_SIZE(langs_arr) + 1];
+        struct multiple_manifest_test test = { { NULL } };
+        size_t num_specs;
+        DWORD err;
+
+        winetest_push_context("langs[%Id:]", i);
+
+        /* Generate manifest spec list from language IDs.
+         *
+         * All manifest spec items point to the wrong manifest, expect for the
+         * current language ID.
+         */
+        num_specs = 0;
+        for (j = i; j < lang_count; j++)
+        {
+            struct manifest_res_spec spec = {(char *)2};
+            spec.lang = langs_arr[j];
+            if (j != i) spec.override_manifest = wrong_manifest1;
+            ok(num_specs < ARRAY_SIZE(specs), "overrun\n");
+            specs[num_specs++] = spec;
+        }
+        memset(&specs[num_specs++], 0, sizeof(*specs));
+
+        test.manifests = specs;
+        test.expected_error = ERROR_SUCCESS;
+        err = subtest_manifest_res(manifest_exe, manifest_dll, &test, actctx_lang);
+
+        if (winetest_debug > 1 && err != ERROR_SUCCESS)
+        {
+            for (j = 0; j < lang_count; j++)
+            {
+                trace("langs[%Id] = 0x%04x %c\n", j, langs_arr[j], j == i ? '<' : ' ');
+            }
+        }
+
+        winetest_pop_context();
+    }
+}
+
+static void test_valid_manifest_resources_locale(void)
+{
+    static const LANGID langs[] = {
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
+        MAKELANGID(LANG_INVARIANT, SUBLANG_NEUTRAL),
+    };
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(langs); i++)
+    {
+        winetest_push_context("[%Iu]lang=0x%04x", i, langs[i]);
+        subtest_valid_manifest_resources_locale(langs[i]);
+        winetest_pop_context();
+    }
+}
+
 static void run_sxs_test(int run)
 {
     switch(run)
@@ -3689,6 +4344,57 @@ static void test_manifest_in_module(void)
     ReleaseActCtx(handle);
 }
 
+static void test_manifest_resource_name_omitted(void)
+{
+    WCHAR pathbuf[MAX_PATH];
+    HANDLE handle;
+    ACTCTXW ctx;
+    DWORD err, len;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cbSize = sizeof(ctx);
+    ctx.dwFlags = ACTCTX_FLAG_HMODULE_VALID;
+    ctx.hModule = GetModuleHandleW(NULL);
+    handle = CreateActCtxW(&ctx);
+    err = GetLastError();
+    ok(handle == INVALID_HANDLE_VALUE, "CreateActCtxW shall fail\n");
+    todo_wine
+    ok(err == ERROR_RESOURCE_TYPE_NOT_FOUND, "got %lu\n", err);
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cbSize = sizeof(ctx);
+    ctx.dwFlags = ACTCTX_FLAG_HMODULE_VALID | ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    ctx.hModule = GetModuleHandleW(NULL);
+    ctx.lpResourceName = NULL;
+    handle = CreateActCtxW(&ctx);
+    err = GetLastError();
+    ok(handle == INVALID_HANDLE_VALUE, "CreateActCtxW shall fail\n");
+    ok(err == ERROR_INVALID_PARAMETER, "got %lu\n", err);
+
+    len = GetModuleFileNameW(NULL, pathbuf, ARRAY_SIZE(pathbuf));
+    ok(len > 0 && len < ARRAY_SIZE(pathbuf), "GetModuleFileNameW returned error %lu\n", GetLastError());
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cbSize = sizeof(ctx);
+    ctx.lpSource = pathbuf;
+    ctx.dwFlags = 0;
+    handle = CreateActCtxW(&ctx);
+    err = GetLastError();
+    ok(handle == INVALID_HANDLE_VALUE, "CreateActCtxW shall fail\n");
+    todo_wine
+    ok(err == ERROR_RESOURCE_TYPE_NOT_FOUND, "got %lu\n", err);
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cbSize = sizeof(ctx);
+    ctx.lpSource = pathbuf;
+    ctx.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    ctx.lpResourceName = NULL;
+    handle = CreateActCtxW(&ctx);
+    err = GetLastError();
+    ok(handle == INVALID_HANDLE_VALUE, "CreateActCtxW shall fail\n");
+    ok(err == ERROR_INVALID_PARAMETER, "got %lu\n", err);
+}
+
 START_TEST(actctx)
 {
     int argc;
@@ -3716,9 +4422,13 @@ START_TEST(actctx)
     }
 
     test_manifest_in_module();
+    test_manifest_resource_name_omitted();
+    test_manifest_resources();
+    test_valid_manifest_resources_locale();
     test_actctx();
     test_create_fail();
     test_CreateActCtx();
+    test_CreateActCtx_share_mode();
     test_findsectionstring();
     test_ZombifyActCtx();
     run_child_process();

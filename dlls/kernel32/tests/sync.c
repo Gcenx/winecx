@@ -2382,6 +2382,7 @@ static struct
     LONG trylock_shared;
 } srwlock_base_errors;
 
+#if defined(__i386__) || defined(__x86_64__)
 #include "pshpack1.h"
 struct
 {
@@ -2389,6 +2390,7 @@ struct
     SRWLOCK lock;
 } unaligned_srwlock;
 #include "poppack.h"
+#endif
 
 /* Sequence of acquire/release to check boundary conditions:
  *  0: init
@@ -2909,6 +2911,22 @@ static void test_srwlock_example(void)
     trace("number of total exclusive accesses is %ld\n", srwlock_protected_value);
 }
 
+static void test_srwlock_quirk(void)
+{
+    union { SRWLOCK *s; LONG *l; } u = { &srwlock_example };
+
+    if (!pInitializeSRWLock) {
+        /* function is not yet in XP, only in newer Windows */
+        win_skip("no srw lock support.\n");
+        return;
+    }
+
+    /* WeCom 4.x checks releasing a lock with value 0x1 results in it becoming 0x0. */
+    *u.l = 1;
+    pReleaseSRWLockExclusive(&srwlock_example);
+    ok(*u.l == 0, "expected 0x0, got %lx\n", *u.l);
+}
+
 static DWORD WINAPI alertable_wait_thread(void *param)
 {
     HANDLE *semaphores = param;
@@ -3340,7 +3358,11 @@ START_TEST(sync)
     test_condvars_base(&unaligned_cv.cv);
     test_condvars_consumer_producer();
     test_srwlock_base(&aligned_srwlock);
+    test_srwlock_quirk();
+#if defined(__i386__) || defined(__x86_64__)
+    /* unaligned locks only work on x86 platforms */
     test_srwlock_base(&unaligned_srwlock.lock);
+#endif
     test_srwlock_example();
     test_alertable_wait();
     test_apc_deadlock();

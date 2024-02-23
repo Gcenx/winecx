@@ -24,6 +24,8 @@
 #include "mfobjects.h"
 #include "mftransform.h"
 #include "wmcodecdsp.h"
+#include "ks.h"
+#include "ksmedia.h"
 
 #include "wine/debug.h"
 
@@ -46,6 +48,17 @@ static const GUID *const aac_decoder_output_types[] =
 {
     &MFAudioFormat_PCM,
     &MFAudioFormat_Float,
+};
+
+static const UINT32 default_channel_mask[7] =
+{
+    0,
+    0,
+    0,
+    SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_BACK_CENTER,
+    KSAUDIO_SPEAKER_QUAD,
+    KSAUDIO_SPEAKER_QUAD | SPEAKER_FRONT_CENTER,
+    KSAUDIO_SPEAKER_5POINT1,
 };
 
 struct aac_decoder
@@ -291,6 +304,21 @@ static HRESULT WINAPI transform_GetOutputAvailableType(IMFTransform *iface, DWOR
 
     *type = NULL;
 
+    if (FAILED(hr = IMFMediaType_GetUINT32(decoder->input_type, &MF_MT_AUDIO_NUM_CHANNELS, &channel_count))
+            || !channel_count)
+        channel_count = 2;
+
+    if (channel_count >= ARRAY_SIZE(default_channel_mask))
+        return MF_E_INVALIDMEDIATYPE;
+
+    if (channel_count > 2 && index >= ARRAY_SIZE(aac_decoder_output_types))
+    {
+        /* If there are more than two channels in the input type GetOutputAvailableType additionally lists
+         * types with 2 channels. */
+        index -= ARRAY_SIZE(aac_decoder_output_types);
+        channel_count = 2;
+    }
+
     if (index >= ARRAY_SIZE(aac_decoder_output_types))
         return MF_E_NO_MORE_TYPES;
     index = ARRAY_SIZE(aac_decoder_output_types) - index - 1;
@@ -318,8 +346,6 @@ static HRESULT WINAPI transform_GetOutputAvailableType(IMFTransform *iface, DWOR
     if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, sample_size)))
         goto done;
 
-    if (FAILED(hr = IMFMediaType_GetUINT32(decoder->input_type, &MF_MT_AUDIO_NUM_CHANNELS, &channel_count)))
-        goto done;
     if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_NUM_CHANNELS, channel_count)))
         goto done;
 
@@ -338,7 +364,10 @@ static HRESULT WINAPI transform_GetOutputAvailableType(IMFTransform *iface, DWOR
         goto done;
     if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_FIXED_SIZE_SAMPLES, 1)))
         goto done;
-    if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_PREFER_WAVEFORMATEX, 1)))
+    if (channel_count < 3 && FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_PREFER_WAVEFORMATEX, 1)))
+        goto done;
+    if (channel_count >= 3 && FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_CHANNEL_MASK,
+            default_channel_mask[channel_count])))
         goto done;
 
 done:
@@ -353,6 +382,7 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
 {
     struct aac_decoder *decoder = impl_from_IMFTransform(iface);
     MF_ATTRIBUTE_TYPE item_type;
+    UINT32 channel_count;
     GUID major, subtype;
     HRESULT hr;
     ULONG i;
@@ -373,6 +403,10 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
         if (IsEqualGUID(&subtype, aac_decoder_input_types[i].guid))
             break;
     if (i == ARRAY_SIZE(aac_decoder_input_types))
+        return MF_E_INVALIDMEDIATYPE;
+
+    if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channel_count))
+            && channel_count >= ARRAY_SIZE(default_channel_mask))
         return MF_E_INVALIDMEDIATYPE;
 
     if (FAILED(IMFMediaType_GetItemType(type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &item_type))
@@ -501,15 +535,14 @@ static HRESULT WINAPI transform_GetInputStatus(IMFTransform *iface, DWORD id, DW
 {
     struct aac_decoder *decoder = impl_from_IMFTransform(iface);
     bool accepts_input;
-    HRESULT hr;
 
     TRACE("iface %p, id %#lx, flags %p.\n", iface, id, flags);
 
     if (!decoder->wg_transform)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    if (FAILED(hr = wg_transform_get_status(decoder->wg_transform, &accepts_input)))
-        return hr;
+    if (!wg_transform_get_status(decoder->wg_transform, &accepts_input))
+        return E_FAIL;
 
     *flags = accepts_input ? MFT_INPUT_STATUS_ACCEPT_DATA : 0;
     return S_OK;

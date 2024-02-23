@@ -3282,7 +3282,7 @@ static void test_SetWindowPos(HWND hwnd, HWND hwnd2)
     ret = SetWindowPos(hwnd_child, NULL, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
     ok(ret, "Got %d\n", ret);
     flush_events( TRUE );
-    todo_wine check_active_state(hwnd2, hwnd2, hwnd2);
+    flaky todo_wine check_active_state(hwnd2, hwnd2, hwnd2);
     DestroyWindow(hwnd_child);
 }
 
@@ -8777,27 +8777,12 @@ static void test_GetWindowModuleFileName(void)
 
     DestroyWindow(hwnd);
 
-    buf2[0] = 0;
     hwnd = (HWND)0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret1 = pGetWindowModuleFileNameA(hwnd, buf1, sizeof(buf1));
     ok(!ret1, "expected 0, got %u\n", ret1);
     ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
        "expected ERROR_INVALID_WINDOW_HANDLE, got %lu\n", GetLastError());
-
-    hwnd = FindWindowA("Shell_TrayWnd", NULL);
-    ok(IsWindow(hwnd) || broken(!hwnd), "got invalid tray window %p\n", hwnd);
-    SetLastError(0xdeadbeef);
-    ret1 = pGetWindowModuleFileNameA(hwnd, buf1, sizeof(buf1));
-    ok(!ret1, "expected 0, got %u\n", ret1);
-    ret1 = GetModuleFileNameA(0, buf1, sizeof(buf1));
-    hwnd = GetDesktopWindow();
-    ok(IsWindow(hwnd), "got invalid desktop window %p\n", hwnd);
-    SetLastError(0xdeadbeef);
-    ret2 = pGetWindowModuleFileNameA(hwnd, buf2, sizeof(buf2));
-    ok(!ret2 ||
-       ret1 == ret2, /* vista */
-       "expected 0 or %u, got %u %s\n", ret1, ret2, buf2);
 }
 
 static void test_hwnd_message(void)
@@ -10195,19 +10180,22 @@ static void simulate_click(int x, int y)
 {
     INPUT input[2];
     UINT events_no;
+    POINT pt;
 
+    GetCursorPos(&pt);
     SetCursorPos(x, y);
     memset(input, 0, sizeof(input));
     input[0].type = INPUT_MOUSE;
-    U(input[0]).mi.dx = x;
-    U(input[0]).mi.dy = y;
-    U(input[0]).mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    input[0].mi.dx = x;
+    input[0].mi.dy = y;
+    input[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
     input[1].type = INPUT_MOUSE;
-    U(input[1]).mi.dx = x;
-    U(input[1]).mi.dy = y;
-    U(input[1]).mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    input[1].mi.dx = x;
+    input[1].mi.dy = y;
+    input[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
     events_no = SendInput(2, input, sizeof(input[0]));
     ok(events_no == 2, "SendInput returned %d\n", events_no);
+    SetCursorPos(pt.x, pt.y);
 }
 
 static WNDPROC def_static_proc;

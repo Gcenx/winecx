@@ -1,9 +1,10 @@
+EXTRADEFS = -D_SETUPAPI_
 MODULE    = setupapi.dll
 IMPORTLIB = setupapi
-IMPORTS   = uuid version advapi32 rpcrt4 kernelbase
+IMPORTS   = uuid advapi32 rpcrt4 kernelbase
 DELAYIMPORTS = cabinet shell32 wintrust ole32 comdlg32 user32
 
-C_SRCS = \
+SOURCES = \
 	devinst.c \
 	dialog.c \
 	dirid.c \
@@ -14,8 +15,7 @@ C_SRCS = \
 	parser.c \
 	query.c \
 	queue.c \
+	setupapi.rc \
 	setupcab.c \
 	stringtable.c \
 	stubs.c
-
-RC_SRCS = setupapi.rc

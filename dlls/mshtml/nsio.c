@@ -45,6 +45,7 @@ static const IID NS_IOSERVICE_CID =
 static const IID IID_nsWineURI =
     {0x5088272e, 0x900b, 0x11da, {0xc6,0x87, 0x00,0x0f,0xea,0x57,0xf2,0x1a}};
 
+static ExternalCycleCollectionParticipant nschannel_ccp;
 static nsIIOService *nsio = NULL;
 
 static const char *request_method_strings[] = {"GET", "PUT", "POST"};
@@ -217,6 +218,9 @@ static BOOL exec_shldocvw_67(HTMLDocumentObj *doc, BSTR url)
     IOleCommandTarget *cmdtrg = NULL;
     HRESULT hres;
 
+    if(!doc->client)
+        return TRUE;
+
     hres = IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&cmdtrg);
     if(SUCCEEDED(hres)) {
         VARIANT varUrl, varRes;
@@ -252,6 +256,7 @@ static nsresult before_async_open(nsChannel *channel, GeckoBrowser *container, B
     hres = IUri_GetDisplayUri(channel->uri->uri, &display_uri);
     if(FAILED(hres))
         return NS_ERROR_FAILURE;
+    IUnknown_AddRef(doc->outer_unk);
 
     if(doc->hostui) {
         OLECHAR *new_url;
@@ -261,7 +266,7 @@ static nsresult before_async_open(nsChannel *channel, GeckoBrowser *container, B
                 FIXME("TranslateUrl returned new URL %s -> %s\n", debugstr_w(display_uri), debugstr_w(new_url));
                 CoTaskMemFree(new_url);
                 *cancel = TRUE;
-                return NS_OK;
+                goto done;
             }
             CoTaskMemFree(new_url);
         }
@@ -270,13 +275,16 @@ static nsresult before_async_open(nsChannel *channel, GeckoBrowser *container, B
     if(!exec_shldocvw_67(doc, display_uri)) {
         SysFreeString(display_uri);
         *cancel = FALSE;
-        return NS_OK;
+        goto done;
     }
 
     hres = hlink_frame_navigate(doc, display_uri, channel, 0, cancel);
     SysFreeString(display_uri);
     if(FAILED(hres))
         *cancel = TRUE;
+
+done:
+    IUnknown_Release(doc->outer_unk);
     return NS_OK;
 }
 
@@ -533,6 +541,14 @@ static nsresult NSAPI nsChannel_QueryInterface(nsIHttpChannel *iface, nsIIDRef r
     }else if(IsEqualGUID(&IID_nsICacheInfoChannel, riid)) {
         TRACE("(%p)->(IID_nsICacheInfoChannel %p)\n", This, result);
         *result = is_http_channel(This) ? &This->nsICacheInfoChannel_iface : NULL;
+    }else if(IsEqualGUID(&IID_nsXPCOMCycleCollectionParticipant, riid)) {
+        TRACE("(%p)->(IID_nsXPCOMCycleCollectionParticipant %p)\n", This, result);
+        *result = &nschannel_ccp;
+        return S_OK;
+    }else if(IsEqualGUID(&IID_nsCycleCollectionISupports, riid)) {
+        TRACE("(%p)->(IID_nsCycleCollectionISupports %p)\n", This, result);
+        *result = &This->nsIHttpChannel_iface;
+        return S_OK;
     }else {
         TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), result);
         *result = NULL;
@@ -549,7 +565,7 @@ static nsresult NSAPI nsChannel_QueryInterface(nsIHttpChannel *iface, nsIIDRef r
 static nsrefcnt NSAPI nsChannel_AddRef(nsIHttpChannel *iface)
 {
     nsChannel *This = impl_from_nsIHttpChannel(iface);
-    nsrefcnt ref = InterlockedIncrement(&This->ref);
+    nsrefcnt ref = ccref_incr(&This->ccref, (nsISupports*)&This->nsIHttpChannel_iface);
 
     TRACE("(%p) ref=%ld\n", This, ref);
 
@@ -559,30 +575,9 @@ static nsrefcnt NSAPI nsChannel_AddRef(nsIHttpChannel *iface)
 static nsrefcnt NSAPI nsChannel_Release(nsIHttpChannel *iface)
 {
     nsChannel *This = impl_from_nsIHttpChannel(iface);
-    LONG ref = InterlockedDecrement(&This->ref);
+    nsrefcnt ref = ccref_decr(&This->ccref, (nsISupports*)&This->nsIHttpChannel_iface, &nschannel_ccp);
 
-    if(!ref) {
-        nsIFileURL_Release(&This->uri->nsIFileURL_iface);
-        if(This->owner)
-            nsISupports_Release(This->owner);
-        if(This->post_data_stream)
-            nsIInputStream_Release(This->post_data_stream);
-        if(This->load_group)
-            nsILoadGroup_Release(This->load_group);
-        if(This->notif_callback)
-            nsIInterfaceRequestor_Release(This->notif_callback);
-        if(This->original_uri)
-            nsIURI_Release(This->original_uri);
-        if(This->referrer)
-            nsIURI_Release(This->referrer);
-
-        free_http_headers(&This->response_headers);
-        free_http_headers(&This->request_headers);
-
-        free(This->content_type);
-        free(This->charset);
-        free(This);
-    }
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -986,7 +981,6 @@ static void start_binding_task_destr(task_t *_task)
     start_binding_task_t *task = (start_binding_task_t*)_task;
 
     IBindStatusCallback_Release(&task->bscallback->bsc.IBindStatusCallback_iface);
-    free(task);
 }
 
 static nsresult async_open(nsChannel *This, HTMLOuterWindow *window, BOOL is_doc_channel, UINT32 load_type,
@@ -1088,7 +1082,7 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
                     TRACE("canceled\n");
                     nsres = NS_BINDING_ABORTED;
                 }
-            }else if(window->browser->doc->mime) {
+            }else if(window->browser->doc && window->browser->doc->mime) {
                 free(This->content_type);
                 This->content_type = strdupWtoA(window->browser->doc->mime);
             }
@@ -1252,10 +1246,7 @@ static nsresult NSAPI nsChannel_SetReferrerWithPolicy(nsIHttpChannel *iface, nsI
     if(aReferrerPolicy)
         FIXME("refferer policy %d not implemented\n", aReferrerPolicy);
 
-    if(This->referrer) {
-        nsIURI_Release(This->referrer);
-        This->referrer = NULL;
-    }
+    unlink_ref(&This->referrer);
     if(!aReferrer)
         return NS_OK;
 
@@ -2257,12 +2248,62 @@ static const nsICacheInfoChannelVtbl nsCacheInfoChannelVtbl = {
     nsCacheInfoChannel_SetAllowStaleCacheContent
 };
 
-static void invalidate_uri(nsWineURI *This)
+static nsresult NSAPI nsChannel_traverse(void *ccp, void *p, nsCycleCollectionTraversalCallback *cb)
 {
-    if(This->uri) {
-        IUri_Release(This->uri);
-        This->uri = NULL;
-    }
+    nsChannel *This = impl_from_nsIHttpChannel(p);
+
+    TRACE("%p\n", This);
+
+    describe_cc_node(&This->ccref, "nsChannel", cb);
+
+    if(This->owner)
+        note_cc_edge(This->owner, "owner", cb);
+    if(This->post_data_stream)
+        note_cc_edge((nsISupports*)This->post_data_stream, "post_data_stream", cb);
+    if(This->load_info)
+        note_cc_edge(This->load_info, "load_info", cb);
+    if(This->load_group)
+        note_cc_edge((nsISupports*)This->load_group, "load_group", cb);
+    if(This->notif_callback)
+        note_cc_edge((nsISupports*)This->notif_callback, "notif_callback", cb);
+    if(This->original_uri)
+        note_cc_edge((nsISupports*)This->original_uri, "original_uri", cb);
+    if(This->referrer)
+        note_cc_edge((nsISupports*)This->referrer, "referrer", cb);
+
+    return NS_OK;
+}
+
+static nsresult NSAPI nsChannel_unlink(void *p)
+{
+    nsChannel *This = impl_from_nsIHttpChannel(p);
+
+    TRACE("%p\n", This);
+
+    unlink_ref(&This->owner);
+    unlink_ref(&This->post_data_stream);
+    unlink_ref(&This->load_info);
+    unlink_ref(&This->load_group);
+    unlink_ref(&This->notif_callback);
+    unlink_ref(&This->original_uri);
+    unlink_ref(&This->referrer);
+    return NS_OK;
+}
+
+static void NSAPI nsChannel_delete_cycle_collectable(void *p)
+{
+    nsChannel *This = impl_from_nsIHttpChannel(p);
+    nsChannel_unlink(p);
+
+    TRACE("(%p)\n", This);
+
+    nsIFileURL_Release(&This->uri->nsIFileURL_iface);
+    free_http_headers(&This->response_headers);
+    free_http_headers(&This->request_headers);
+
+    free(This->content_type);
+    free(This->charset);
+    free(This);
 }
 
 static BOOL ensure_uri_builder(nsWineURI *This)
@@ -2285,7 +2326,7 @@ static BOOL ensure_uri_builder(nsWineURI *This)
         }
     }
 
-    invalidate_uri(This);
+    unlink_ref(&This->uri);
     return TRUE;
 }
 
@@ -2420,11 +2461,8 @@ static nsresult NSAPI nsURI_SetSpec(nsIFileURL *iface, const nsACString *aSpec)
         return NS_ERROR_FAILURE;
     }
 
-    invalidate_uri(This);
-    if(This->uri_builder) {
-        IUriBuilder_Release(This->uri_builder);
-        This->uri_builder = NULL;
-    }
+    unlink_ref(&This->uri);
+    unlink_ref(&This->uri_builder);
 
     This->uri = uri;
     return NS_OK;
@@ -3511,10 +3549,10 @@ static nsresult create_nschannel(nsWineURI *uri, nsChannel **ret)
     channel->nsIUploadChannel_iface.lpVtbl = &nsUploadChannelVtbl;
     channel->nsIHttpChannelInternal_iface.lpVtbl = &nsHttpChannelInternalVtbl;
     channel->nsICacheInfoChannel_iface.lpVtbl = &nsCacheInfoChannelVtbl;
-    channel->ref = 1;
     channel->request_method = METHOD_GET;
     list_init(&channel->response_headers);
     list_init(&channel->request_headers);
+    ccref_init(&channel->ccref, 1);
 
     nsIFileURL_AddRef(&uri->nsIFileURL_iface);
     channel->uri = uri;
@@ -3870,16 +3908,6 @@ static nsresult NSAPI nsIOServiceHook_NewURI(nsIIOServiceHook *iface, const nsAC
     if(!strncmp(spec, "wine:", 5))
         spec += 5;
 
-    if(aBaseURI) {
-        nsres = nsIURI_QueryInterface(aBaseURI, &IID_nsWineURI, (void**)&base_wine_uri);
-        if(NS_SUCCEEDED(nsres)) {
-            if(!ensure_uri(base_wine_uri))
-                return NS_ERROR_UNEXPECTED;
-        }else {
-            WARN("Could not get base nsWineURI: %08lx\n", nsres);
-        }
-    }
-
     if(aOriginCharset && *aOriginCharset && _strnicmp(aOriginCharset, "utf", 3)) {
         BSTR charset;
         int len;
@@ -3897,8 +3925,21 @@ static nsresult NSAPI nsIOServiceHook_NewURI(nsIIOServiceHook *iface, const nsAC
 
     MultiByteToWideChar(cp, 0, spec, -1, new_spec, ARRAY_SIZE(new_spec));
 
+    if(aBaseURI) {
+        nsres = nsIURI_QueryInterface(aBaseURI, &IID_nsWineURI, (void**)&base_wine_uri);
+        if(NS_SUCCEEDED(nsres)) {
+            if(!ensure_uri(base_wine_uri)) {
+                nsIFileURL_Release(&base_wine_uri->nsIFileURL_iface);
+                return NS_ERROR_UNEXPECTED;
+            }
+        }else {
+            WARN("Could not get base nsWineURI: %08lx\n", nsres);
+        }
+    }
+
     if(base_wine_uri) {
         hres = combine_url(base_wine_uri->uri, new_spec, &urlmon_uri);
+        nsIFileURL_Release(&base_wine_uri->nsIFileURL_iface);
     }else {
         hres = create_uri(new_spec, 0, &urlmon_uri);
         if(FAILED(hres))
@@ -3910,8 +3951,6 @@ static nsresult NSAPI nsIOServiceHook_NewURI(nsIIOServiceHook *iface, const nsAC
 
     nsres = create_nsuri(urlmon_uri, &wine_uri);
     IUri_Release(urlmon_uri);
-    if(base_wine_uri)
-        nsIFileURL_Release(&base_wine_uri->nsIFileURL_iface);
     if(NS_FAILED(nsres))
         return nsres;
 
@@ -3983,6 +4022,11 @@ static nsIIOServiceHook nsIOServiceHook = { &nsIOServiceHookVtbl };
 
 void init_nsio(nsIComponentManager *component_manager)
 {
+    static const CCObjCallback nschannel_ccp_callback = {
+        nsChannel_traverse,
+        nsChannel_unlink,
+        nsChannel_delete_cycle_collectable
+    };
     nsIFactory *old_factory = NULL;
     nsresult nsres;
 
@@ -3994,14 +4038,16 @@ void init_nsio(nsIComponentManager *component_manager)
     }
 
     nsres = nsIFactory_CreateInstance(old_factory, NULL, &IID_nsIIOService, (void**)&nsio);
+    nsIFactory_Release(old_factory);
     if(NS_FAILED(nsres)) {
         ERR("Couldn not create nsIOService instance %08lx\n", nsres);
-        nsIFactory_Release(old_factory);
         return;
     }
 
     nsres = nsIIOService_SetHook(nsio, &nsIOServiceHook);
     assert(nsres == NS_OK);
+
+    ccp_init(&nschannel_ccp, &nschannel_ccp_callback);
 }
 
 void release_nsio(void)

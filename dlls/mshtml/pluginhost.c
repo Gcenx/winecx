@@ -1515,15 +1515,8 @@ static ULONG WINAPI PHClientSite_AddRef(IOleClientSite *iface)
 
 static void release_plugin_ifaces(PluginHost *This)
 {
-    if(This->disp) {
-        IDispatch_Release(This->disp);
-        This->disp = NULL;
-    }
-
-    if(This->ip_object) {
-        IOleInPlaceObject_Release(This->ip_object);
-        This->ip_object = NULL;
-    }
+    unlink_ref(&This->disp);
+    unlink_ref(&This->ip_object);
 
     if(This->plugin_unk) {
         IUnknown *unk = This->plugin_unk;
@@ -1970,11 +1963,7 @@ static HRESULT WINAPI PHInPlaceSite_OnInPlaceDeactivate(IOleInPlaceSiteEx *iface
 
     TRACE("(%p)\n", This);
 
-    if(This->ip_object) {
-        IOleInPlaceObject_Release(This->ip_object);
-        This->ip_object = NULL;
-    }
-
+    unlink_ref(&This->ip_object);
     return S_OK;
 }
 
@@ -2238,12 +2227,12 @@ static HRESULT WINAPI PHServiceProvider_QueryService(IServiceProvider *iface, RE
 
     TRACE("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
 
-    if(!This->doc || !This->doc->outer_window) {
+    if(!This->doc || !This->doc->window || !This->doc->window->base.outer_window) {
         *ppv = NULL;
         return E_NOINTERFACE;
     }
 
-    return IServiceProvider_QueryService(&This->doc->outer_window->base.IServiceProvider_iface,
+    return IServiceProvider_QueryService(&This->doc->window->base.outer_window->base.IServiceProvider_iface,
             guidService, riid, ppv);
 }
 
@@ -2672,14 +2661,23 @@ void detach_plugin_host(PluginHost *host)
 
     release_plugin_ifaces(host);
 
-    if(host->element) {
-        host->element->plugin_host = NULL;
-        host->element = NULL;
-    }
-
     list_remove(&host->entry);
     list_init(&host->entry);
     host->doc = NULL;
+
+    if(host->element) {
+        nsIDOMElement *nselem = host->element->element.dom_element;
+        nsIObjectLoadingContent *olc;
+
+        host->element->plugin_host = NULL;
+        host->element = NULL;
+
+        if(NS_SUCCEEDED(nsIDOMElement_QueryInterface(nselem, &IID_nsIObjectLoadingContent, (void**)&olc))) {
+            nsIObjectLoadingContent_StopPluginInstance(olc);
+            nsIObjectLoadingContent_Release(olc);
+        }
+        IOleClientSite_Release(&host->IOleClientSite_iface);
+    }
 }
 
 HRESULT create_plugin_host(HTMLDocumentNode *doc, HTMLPluginContainer *container)

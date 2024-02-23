@@ -33,7 +33,6 @@
 #include "shobjidl.h"
 
 #include "wine/test.h"
-#include "wine/heap.h"
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -269,7 +268,7 @@ static ULONG WINAPI TestCrash_IUnknown_Release(LPUNKNOWN iface)
     UnlockModule();
     if(!cLocks) {
         trace("crashing...\n");
-        *(int**)0xc = 0;
+        RaiseException( EXCEPTION_ACCESS_VIOLATION, EXCEPTION_NONCONTINUABLE, 0, NULL );
     }
     return 1; /* non-heap-based object */
 }
@@ -351,10 +350,12 @@ static const IClassFactoryVtbl TestClassFactory_Vtbl =
 static IClassFactory Test_ClassFactory = { &TestClassFactory_Vtbl };
 
 DEFINE_EXPECT(Invoke);
+DEFINE_EXPECT(Connect);
 DEFINE_EXPECT(CreateStub);
 DEFINE_EXPECT(CreateProxy);
 DEFINE_EXPECT(GetWindow);
-DEFINE_EXPECT(Disconnect);
+DEFINE_EXPECT(RpcStubBuffer_Disconnect);
+DEFINE_EXPECT(RpcProxyBuffer_Disconnect);
 
 static HRESULT WINAPI OleWindow_QueryInterface(IOleWindow *iface, REFIID riid, void **ppv)
 {
@@ -463,7 +464,7 @@ static ULONG WINAPI RpcStubBuffer_Release(IRpcStubBuffer *iface)
     LONG ref = InterlockedDecrement(&This->ref);
     if(!ref) {
         IRpcStubBuffer_Release(This->buffer);
-        heap_free(This);
+        free(This);
     }
     return ref;
 }
@@ -476,7 +477,7 @@ static HRESULT WINAPI RpcStubBuffer_Connect(IRpcStubBuffer *iface, IUnknown *pUn
 
 static void WINAPI RpcStubBuffer_Disconnect(IRpcStubBuffer *iface)
 {
-    CHECK_EXPECT(Disconnect);
+    CHECK_EXPECT(RpcStubBuffer_Disconnect);
 }
 
 static HRESULT WINAPI RpcStubBuffer_Invoke(IRpcStubBuffer *iface, RPCOLEMESSAGE *_prpcmsg,
@@ -533,6 +534,79 @@ static const IRpcStubBufferVtbl RpcStubBufferVtbl = {
     RpcStubBuffer_DebugServerRelease
 };
 
+typedef struct {
+    IRpcProxyBuffer IRpcProxyBuffer_iface;
+    LONG ref;
+    IRpcProxyBuffer *buffer;
+} ProxyBufferWrapper;
+
+static ProxyBufferWrapper *impl_from_IRpcProxyBuffer(IRpcProxyBuffer *iface)
+{
+    return CONTAINING_RECORD(iface, ProxyBufferWrapper, IRpcProxyBuffer_iface);
+}
+
+static HRESULT WINAPI RpcProxyBuffer_QueryInterface(IRpcProxyBuffer *iface, REFIID riid, void **ppv)
+{
+    ProxyBufferWrapper *This = impl_from_IRpcProxyBuffer(iface);
+
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IRpcProxyBuffer, riid)) {
+        *ppv = &This->IRpcProxyBuffer_iface;
+    }else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI RpcProxyBuffer_AddRef(IRpcProxyBuffer *iface)
+{
+    ProxyBufferWrapper *This = impl_from_IRpcProxyBuffer(iface);
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI RpcProxyBuffer_Release(IRpcProxyBuffer *iface)
+{
+    ProxyBufferWrapper *This = impl_from_IRpcProxyBuffer(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+    if(!ref) {
+        IRpcProxyBuffer_Release(This->buffer);
+        free(This);
+    }
+    return ref;
+}
+
+static HRESULT WINAPI RpcProxyBuffer_Connect(IRpcProxyBuffer *iface, IRpcChannelBuffer *pRpcChannelBuffer)
+{
+    ProxyBufferWrapper *This = impl_from_IRpcProxyBuffer(iface);
+    void *dest_context_data;
+    DWORD dest_context;
+    HRESULT hr;
+
+    CHECK_EXPECT(Connect);
+
+    hr = IRpcChannelBuffer_GetDestCtx(pRpcChannelBuffer, &dest_context, &dest_context_data);
+    ok(hr == S_OK, "GetDestCtx failed: %08lx\n", hr);
+    ok(dest_context == MSHCTX_INPROC, "desc_context = %lx\n", dest_context);
+    ok(!dest_context_data, "desc_context_data = %p\n", dest_context_data);
+
+    return IRpcProxyBuffer_Connect(This->buffer, pRpcChannelBuffer);
+}
+
+static void WINAPI RpcProxyBuffer_Disconnect(IRpcProxyBuffer *iface)
+{
+    CHECK_EXPECT(RpcProxyBuffer_Disconnect);
+}
+
+static const IRpcProxyBufferVtbl RpcProxyBufferVtbl = {
+    RpcProxyBuffer_QueryInterface,
+    RpcProxyBuffer_AddRef,
+    RpcProxyBuffer_Release,
+    RpcProxyBuffer_Connect,
+    RpcProxyBuffer_Disconnect,
+};
+
 static IPSFactoryBuffer *ps_factory_buffer;
 
 static HRESULT WINAPI PSFactoryBuffer_QueryInterface(IPSFactoryBuffer *iface, REFIID riid, void **ppv)
@@ -561,8 +635,20 @@ static ULONG WINAPI PSFactoryBuffer_Release(IPSFactoryBuffer *iface)
 static HRESULT WINAPI PSFactoryBuffer_CreateProxy(IPSFactoryBuffer *iface, IUnknown *outer,
     REFIID riid, IRpcProxyBuffer **ppProxy, void **ppv)
 {
+    ProxyBufferWrapper *proxy;
+    HRESULT hr;
+
     CHECK_EXPECT(CreateProxy);
-    return IPSFactoryBuffer_CreateProxy(ps_factory_buffer, outer, riid, ppProxy, ppv);
+    proxy = malloc(sizeof(*proxy));
+    proxy->IRpcProxyBuffer_iface.lpVtbl = &RpcProxyBufferVtbl;
+    proxy->ref = 1;
+
+    hr = IPSFactoryBuffer_CreateProxy(ps_factory_buffer, outer, riid, &proxy->buffer, ppv);
+    ok(hr == S_OK, "CreateProxy failed: %08lx\n", hr);
+
+    *ppProxy = &proxy->IRpcProxyBuffer_iface;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI PSFactoryBuffer_CreateStub(IPSFactoryBuffer *iface, REFIID riid,
@@ -575,7 +661,7 @@ static HRESULT WINAPI PSFactoryBuffer_CreateStub(IPSFactoryBuffer *iface, REFIID
 
     ok(server == (IUnknown*)&Test_OleClientSite, "unexpected server %p\n", server);
 
-    stub = heap_alloc(sizeof(*stub));
+    stub = malloc(sizeof(*stub));
     stub->IRpcStubBuffer_iface.lpVtbl = &RpcStubBufferVtbl;
     stub->ref = 1;
 
@@ -655,7 +741,7 @@ static DWORD CALLBACK host_object_proc(LPVOID p)
             DispatchMessageA(&msg);
     }
 
-    HeapFree(GetProcessHeap(), 0, data);
+    free(data);
 
     CoUninitialize();
 
@@ -667,7 +753,7 @@ static DWORD start_host_object2(struct host_object_data *object_data, HANDLE *th
     DWORD tid = 0;
     struct host_object_data *data;
 
-    data = HeapAlloc(GetProcessHeap(), 0, sizeof(*data));
+    data = malloc(sizeof(*data));
     *data = *object_data;
     data->marshal_event = CreateEventA(NULL, FALSE, FALSE, NULL);
     *thread = CreateThread(NULL, 0, host_object_proc, data, 0, &tid);
@@ -1327,10 +1413,12 @@ static void test_marshal_channel_buffer(void)
 
     SET_EXPECT(CreateStub);
     SET_EXPECT(CreateProxy);
+    SET_EXPECT(Connect);
     hr = IUnknown_QueryInterface(proxy, &IID_IOleWindow, (void**)&ole_window);
     ok(hr == S_OK, "Could not get IOleWindow iface: %08lx\n", hr);
     CHECK_CALLED(CreateStub);
     CHECK_CALLED(CreateProxy);
+    CHECK_CALLED(Connect);
 
     SET_EXPECT(Invoke);
     SET_EXPECT(GetWindow);
@@ -1342,10 +1430,13 @@ static void test_marshal_channel_buffer(void)
 
     IOleWindow_Release(ole_window);
 
-    SET_EXPECT(Disconnect);
+    SET_EXPECT(RpcStubBuffer_Disconnect);
+    SET_EXPECT(RpcProxyBuffer_Disconnect);
     IUnknown_Release(proxy);
     todo_wine
-    CHECK_CALLED(Disconnect);
+    CHECK_CALLED(RpcStubBuffer_Disconnect);
+    todo_wine
+    CHECK_CALLED(RpcProxyBuffer_Disconnect);
 
     hr = CoRevokeClassObject(registration_key);
     ok(hr == S_OK, "CoRevokeClassObject failed: %08lx\n", hr);
@@ -1414,8 +1505,8 @@ static HRESULT WINAPI CustomMarshal_MarshalInterface(IMarshal *iface, IStream *s
 
     hr = IStream_Stat(stream, &stat, STATFLAG_DEFAULT);
     ok_ole_success(hr, IStream_Stat);
-    ok(U(stat.cbSize).LowPart == 0, "stream is not empty (%ld)\n", U(stat.cbSize).LowPart);
-    ok(U(stat.cbSize).HighPart == 0, "stream is not empty (%ld)\n", U(stat.cbSize).HighPart);
+    ok(stat.cbSize.LowPart == 0, "stream is not empty (%ld)\n", stat.cbSize.LowPart);
+    ok(stat.cbSize.HighPart == 0, "stream is not empty (%ld)\n", stat.cbSize.HighPart);
 
     hr = CoGetStandardMarshal(riid, (IUnknown*)iface,
             dwDestContext, NULL, mshlflags, &std_marshal);

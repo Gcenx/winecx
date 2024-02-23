@@ -824,7 +824,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     char *image_path_name_a;
     int image_path_name_len;
 
-    if ((!is_win64 ^ !is_child_64bit) && !needs_wow64()) loader = get_alternate_loader( &wineloader );
+    if (!is_win64 ^ !is_child_64bit) loader = get_alternate_loader( &wineloader );
 
     if (wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL ) &&
         isatty(0) && is_unix_console_handle( params->hStdInput ))
@@ -843,7 +843,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     {
         if (!(pid = fork()))  /* grandchild */
         {
-            if (params->ConsoleFlags ||
+            if ((peb->ProcessParameters && params->ProcessGroupId != peb->ProcessParameters->ProcessGroupId) ||
                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC_NO_WINDOW ||
                 (params->hStdInput == INVALID_HANDLE_VALUE && params->hStdOutput == INVALID_HANDLE_VALUE))
@@ -953,6 +953,44 @@ NTSTATUS WINAPI __wine_unix_spawnvp( char * const argv[], int wait )
 
 
 /***********************************************************************
+ *           unixcall_wine_spawnvp
+ */
+NTSTATUS unixcall_wine_spawnvp( void *args )
+{
+    struct wine_spawnvp_params *params = args;
+
+    return __wine_unix_spawnvp( params->argv, params->wait );
+}
+
+
+#ifdef _WIN64
+/***********************************************************************
+ *		wow64_wine_spawnvp
+ */
+NTSTATUS wow64_wine_spawnvp( void *args )
+{
+    struct
+    {
+        ULONG argv;
+        int   wait;
+    } const *params32 = args;
+
+    ULONG *argv32 = ULongToPtr( params32->argv );
+    unsigned int i, count = 0;
+    char **argv;
+    NTSTATUS ret;
+
+    while (argv32[count]) count++;
+    argv = malloc( (count + 1) * sizeof(*argv) );
+    for (i = 0; i < count; i++) argv[i] = ULongToPtr( argv32[i] );
+    argv[count] = NULL;
+    ret = __wine_unix_spawnvp( argv, params32->wait );
+    free( argv );
+    return ret;
+}
+#endif
+
+/***********************************************************************
  *           fork_and_exec
  *
  * Fork and exec a new Unix binary, checking for errors.
@@ -996,7 +1034,7 @@ static NTSTATUS fork_and_exec( OBJECT_ATTRIBUTES *attr, int unixdir,
         {
             close( fd[0] );
 
-            if (params->ConsoleFlags ||
+            if ((peb->ProcessParameters && params->ProcessGroupId != peb->ProcessParameters->ProcessGroupId) ||
                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC_NO_WINDOW ||
                 (params->hStdInput == INVALID_HANDLE_VALUE && params->hStdOutput == INVALID_HANDLE_VALUE))
@@ -1105,6 +1143,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     int unixdir, socketfd[2] = { -1, -1 };
     pe_image_info_t pe_info;
     CLIENT_ID id;
+    USHORT machine = 0;
     HANDLE parent = 0, debug = 0, token = 0;
     UNICODE_STRING redir, path = {0};
     OBJECT_ATTRIBUTES attr, empty_attr = { sizeof(empty_attr) };
@@ -1147,6 +1186,9 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         case PS_ATTRIBUTE_JOB_LIST:
             jobs_attr = &ps_attr->Attributes[i];
             break;
+        case PS_ATTRIBUTE_MACHINE_TYPE:
+            machine = ps_attr->Attributes[i].Value;
+            break;
         default:
             if (ps_attr->Attributes[i].Attribute & PS_ATTRIBUTE_INPUT)
                 FIXME( "unhandled input attribute %lx\n", ps_attr->Attributes[i].Attribute );
@@ -1155,8 +1197,8 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     }
     if (!process_attr) process_attr = &empty_attr;
 
-    TRACE( "%s image %s cmdline %s parent %p\n", debugstr_us( &path ),
-           debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent );
+    TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
+           debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
 
     unixdir = get_unix_curdir( params );
 
@@ -1173,7 +1215,9 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         }
         goto done;
     }
-    if (!(startup_info = create_startup_info( attr.ObjectName, params, &startup_info_size ))) goto done;
+    if (!machine) machine = pe_info.machine;
+    if (!(startup_info = create_startup_info( attr.ObjectName, process_flags, params, &pe_info, &startup_info_size )))
+        goto done;
     env_size = get_env_size( params, &winedebug );
 
     if ((status = alloc_object_attributes( process_attr, &objattr, &attr_len ))) goto done;
@@ -1222,6 +1266,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         req->flags          = process_flags;
         req->socket_fd      = socketfd[1];
         req->access         = process_access;
+        req->machine        = machine;
         req->info_size      = startup_info_size;
         req->handles_size   = handles_size;
         req->jobs_size      = jobs_size;
@@ -1411,7 +1456,7 @@ void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid )
     if (unix_pid == -1)
         strcpy( path, "/proc/self/status" );
     else
-        sprintf( path, "/proc/%u/status", unix_pid);
+        snprintf( path, sizeof(path), "/proc/%u/status", unix_pid);
     f = fopen( path, "r" );
     if (!f) return;
 
@@ -1528,15 +1573,13 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
                             pbi.BasePriority = reply->priority;
                             pbi.UniqueProcessId = reply->pid;
                             pbi.InheritedFromUniqueProcessId = reply->ppid;
-#ifndef _WIN64
-                            if (is_wow64)
+                            if (is_old_wow64())
                             {
                                 if (reply->machine != native_machine)
                                     pbi.PebBaseAddress = (PEB *)((char *)pbi.PebBaseAddress + 0x1000);
                                 else
                                     pbi.PebBaseAddress = NULL;
                             }
-#endif
                         }
                     }
                     SERVER_END_REQ;
@@ -1672,33 +1715,31 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
 
     case ProcessDebugPort:
         len = sizeof(DWORD_PTR);
-        if (size == len)
+        if (size != len) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) ret = STATUS_ACCESS_VIOLATION;
+        else
         {
-            if (!info) ret = STATUS_ACCESS_VIOLATION;
-            else
-            {
-                HANDLE debug;
+            HANDLE debug;
 
-                SERVER_START_REQ(get_process_debug_info)
-                {
-                    req->handle = wine_server_obj_handle( handle );
-                    ret = wine_server_call( req );
-                    debug = wine_server_ptr_handle( reply->debug );
-                }
-                SERVER_END_REQ;
-                if (ret == STATUS_SUCCESS)
-                {
-                    *(DWORD_PTR *)info = ~0ul;
-                    NtClose( debug );
-                }
-                else if (ret == STATUS_PORT_NOT_SET)
-                {
-                    *(DWORD_PTR *)info = 0;
-                    ret = STATUS_SUCCESS;
-                }
+            SERVER_START_REQ(get_process_debug_info)
+            {
+                req->handle = wine_server_obj_handle( handle );
+                ret = wine_server_call( req );
+                debug = wine_server_ptr_handle( reply->debug );
             }
+            SERVER_END_REQ;
+            if (ret == STATUS_SUCCESS)
+            {
+                *(DWORD_PTR *)info = ~0ul;
+                NtClose( debug );
+            }
+            else if (ret == STATUS_PORT_NOT_SET)
+            {
+                *(DWORD_PTR *)info = 0;
+                ret = STATUS_SUCCESS;
+            }
+            else return ret;
         }
-        else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
 
     case ProcessDebugFlags:
@@ -1733,21 +1774,14 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
 
     case ProcessDebugObjectHandle:
         len = sizeof(HANDLE);
-        if (size == len)
+        if (size != len) return STATUS_INFO_LENGTH_MISMATCH;
+        SERVER_START_REQ(get_process_debug_info)
         {
-            if (!info) ret = STATUS_ACCESS_VIOLATION;
-            else
-            {
-                SERVER_START_REQ(get_process_debug_info)
-                {
-                    req->handle = wine_server_obj_handle( handle );
-                    ret = wine_server_call( req );
-                    *(HANDLE *)info = wine_server_ptr_handle( reply->debug );
-                }
-                SERVER_END_REQ;
-            }
+            req->handle = wine_server_obj_handle( handle );
+            ret = wine_server_call( req );
+            *(HANDLE *)info = wine_server_ptr_handle( reply->debug );
         }
-        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        SERVER_END_REQ;
         break;
 
     case ProcessHandleCount:
@@ -1757,6 +1791,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
             else if (!handle) ret = STATUS_INVALID_HANDLE;
             else
             {
+                FIXME( "ProcessHandleCount (%p,%p,0x%08x,%p) stub\n", handle, info, (int)size, ret_len );
                 memset(info, 0, 4);
                 len = 4;
             }
@@ -1767,6 +1802,11 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
             len = 4;
             ret = STATUS_INFO_LENGTH_MISMATCH;
         }
+        break;
+
+    case ProcessHandleTable:
+        FIXME( "ProcessHandleTable (%p,%p,0x%08x,%p) stub\n", handle, info, (int)size, ret_len );
+        len = 0;
         break;
 
     case ProcessAffinityMask:
@@ -1783,7 +1823,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
             }
             SERVER_END_REQ;
         }
-        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        else return STATUS_INFO_LENGTH_MISMATCH;
         break;
 
     case ProcessSessionInformation:
@@ -1803,10 +1843,9 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
 
     case ProcessWow64Information:
         len = sizeof(ULONG_PTR);
-        if (size != len) ret = STATUS_INFO_LENGTH_MISMATCH;
-        else if (!info) ret = STATUS_ACCESS_VIOLATION;
-        else if (!handle) ret = STATUS_INVALID_HANDLE;
-        else if (handle == GetCurrentProcess()) *(ULONG_PTR *)info = !!NtCurrentTeb()->WowTebOffset;
+        if (size != len) return STATUS_INFO_LENGTH_MISMATCH;
+        if (handle == GetCurrentProcess())
+            *(ULONG_PTR *)info = is_old_wow64() ? (ULONG_PTR)peb : (ULONG_PTR)wow_peb;
         else
         {
             ULONG_PTR val = 0;
@@ -1814,10 +1853,12 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
             SERVER_START_REQ( get_process_info )
             {
                 req->handle = wine_server_obj_handle( handle );
-                if (!(ret = wine_server_call( req ))) val = (reply->machine != native_machine);
+                ret = wine_server_call( req );
+                if (!ret && !is_machine_64bit( reply->machine ) && is_machine_64bit( native_machine ))
+                    val = reply->peb + 0x1000;
             }
             SERVER_END_REQ;
-            *(ULONG_PTR *)info = val;
+            if (!ret) *(ULONG_PTR *)info = val;
         }
         break;
 
@@ -1848,7 +1889,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
         len = sizeof(ULONG);
         if (size != len)
             ret = STATUS_INFO_LENGTH_MISMATCH;
-        else if (is_win64 && !NtCurrentTeb()->WowTebOffset)
+        else if (is_win64 && !is_wow64())
             *(ULONG *)info = MEM_EXECUTE_OPTION_DISABLE |
                              MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION |
                              MEM_EXECUTE_OPTION_PERMANENT;
@@ -1910,6 +1951,25 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
                 SERVER_END_REQ;
             }
             else ret = STATUS_ACCESS_VIOLATION;
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+
+    case ProcessCycleTime:
+        len = sizeof(PROCESS_CYCLE_TIME_INFORMATION);
+        if (size == len)
+        {
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
+            else
+            {
+                PROCESS_CYCLE_TIME_INFORMATION cycles;
+
+                FIXME( "ProcessCycleTime (%p,%p,0x%08x,%p) stub\n", handle, info, (int)size, ret_len );
+                cycles.AccumulatedCycles = 0;
+                cycles.CurrentCycleCount = 0;
+
+                memcpy(info, &cycles, sizeof(PROCESS_CYCLE_TIME_INFORMATION));
+            }
         }
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
@@ -1992,7 +2052,7 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
         break;
 
     case ProcessExecuteFlags:
-        if ((is_win64 && !NtCurrentTeb()->WowTebOffset) || size != sizeof(ULONG)) return STATUS_INVALID_PARAMETER;
+        if ((is_win64 && !is_wow64()) || size != sizeof(ULONG)) return STATUS_INVALID_PARAMETER;
         if (execute_flags & MEM_EXECUTE_OPTION_PERMANENT) return STATUS_ACCESS_DENIED;
         else
         {

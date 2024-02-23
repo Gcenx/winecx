@@ -75,7 +75,7 @@ struct proxy_manager
     OXID_INFO oxid_info;      /* string binding, ipid of rem unknown and other information (RO) */
     OID oid;                  /* object ID (RO) */
     struct list interfaces;   /* imported interfaces (CS cs) */
-    LONG refs;                /* proxy reference count (LOCK) */
+    LONG refs;                /* proxy reference count (LOCK); 0 if about to be removed from list */
     CRITICAL_SECTION cs;      /* thread safety for this object and children */
     ULONG sorflags;           /* STDOBJREF flags (RO) */
     IRemUnknown *remunk;      /* proxy to IRemUnknown used for lifecycle management (CS cs) */
@@ -698,7 +698,7 @@ HRESULT WINAPI CoReleaseMarshalData(IStream *stream)
 }
 
 static HRESULT std_unmarshal_interface(MSHCTX dest_context, void *dest_context_data,
-        IStream *stream, REFIID riid, void **ppv)
+        IStream *stream, REFIID riid, void **ppv, BOOL dest_context_known)
 {
     struct stub_manager *stubmgr = NULL;
     struct OR_STANDARD obj;
@@ -757,6 +757,8 @@ static HRESULT std_unmarshal_interface(MSHCTX dest_context, void *dest_context_d
         {
             if (!stub_manager_notify_unmarshal(stubmgr, &obj.std.ipid))
                 hres = CO_E_OBJNOTCONNECTED;
+            if (SUCCEEDED(hres) && !dest_context_known)
+                hres = ipid_get_dest_context(&obj.std.ipid, &dest_context, &dest_context_data);
         }
         else
         {
@@ -803,7 +805,7 @@ HRESULT WINAPI CoUnmarshalInterface(IStream *stream, REFIID riid, void **ppv)
     hr = get_unmarshaler_from_stream(stream, &marshal, &iid);
     if (hr == S_FALSE)
     {
-        hr = std_unmarshal_interface(0, NULL, stream, &iid, (void **)&object);
+        hr = std_unmarshal_interface(0, NULL, stream, &iid, (void **)&object, FALSE);
         if (hr != S_OK)
             ERR("StdMarshal UnmarshalInterface failed, hr %#lx\n", hr);
     }
@@ -1887,6 +1889,32 @@ static HRESULT proxy_manager_get_remunknown(struct proxy_manager * This, IRemUnk
     return hr;
 }
 
+/*
+ * Safely increment the reference count of a proxy manager obtained from an
+ * apartment proxy list.
+ *
+ * This function shall be called inside the apartment's critical section.
+ */
+static LONG proxy_manager_addref_if_alive(struct proxy_manager * This)
+{
+    LONG refs = ReadNoFence(&This->refs);
+    LONG old_refs, new_refs;
+
+    do
+    {
+        if (refs == 0)
+        {
+            /* This proxy manager is about to be destroyed */
+            return 0;
+        }
+
+        old_refs = refs;
+        new_refs = refs + 1;
+    } while ((refs = InterlockedCompareExchange(&This->refs, new_refs, old_refs)) != old_refs);
+
+    return new_refs;
+}
+
 /* destroys a proxy manager, freeing the memory it used.
  * Note: this function should not be called from a list iteration in the
  * apartment, due to the fact that it removes itself from the apartment and
@@ -1949,7 +1977,7 @@ static BOOL find_proxy_manager(struct apartment * apt, OXID oxid, OID oid, struc
             /* be careful of a race with ClientIdentity_Release, which would
              * cause us to return a proxy which is in the process of being
              * destroyed */
-            if (IMultiQI_AddRef(&proxy->IMultiQI_iface) != 0)
+            if (proxy_manager_addref_if_alive(proxy) != 0)
             {
                 *proxy_found = proxy;
                 found = TRUE;
@@ -2157,7 +2185,7 @@ static HRESULT WINAPI StdMarshalImpl_UnmarshalInterface(IMarshal *iface, IStream
         return E_NOTIMPL;
     }
 
-    return std_unmarshal_interface(marshal->dest_context, marshal->dest_context_data, stream, riid, ppv);
+    return std_unmarshal_interface(marshal->dest_context, marshal->dest_context_data, stream, riid, ppv, TRUE);
 }
 
 static HRESULT WINAPI StdMarshalImpl_ReleaseMarshalData(IMarshal *iface, IStream *stream)

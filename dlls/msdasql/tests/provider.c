@@ -43,6 +43,32 @@ static char mdbpath[MAX_PATH];
 
 static const VARTYPE intptr_vartype = (sizeof(void *) == 8 ? VT_I8 : VT_I4);
 
+static void free_dbpropset(ULONG count, DBPROPSET *propset)
+{
+    ULONG i, j;
+
+    for (i = 0; i < count; i++)
+    {
+        for (j = 0; j < propset[i].cProperties; j++)
+            VariantClear(&propset[i].rgProperties[j].vValue);
+        CoTaskMemFree(propset[i].rgProperties);
+    }
+    CoTaskMemFree(propset);
+}
+
+static void free_dbpropinfoset(ULONG count, DBPROPINFOSET *propinfoset)
+{
+    ULONG i, j;
+
+    for (i = 0; i < count; i++)
+    {
+        for (j = 0; j < propinfoset[i].cPropertyInfos; j++)
+            VariantClear(&propinfoset[i].rgPropertyInfos[j].vValues);
+        CoTaskMemFree(propinfoset[i].rgPropertyInfos);
+    }
+    CoTaskMemFree(propinfoset);
+}
+
 static void test_msdasql(void)
 {
     HRESULT hr;
@@ -125,12 +151,10 @@ static void test_Properties(void)
             propidlist.rgPropertyIDs[i] = propinfoset->rgPropertyInfos[i].dwPropertyID;
         }
 
-        for (i = 0; i < propinfoset->cPropertyInfos; i++)
-            VariantClear(&propinfoset->rgPropertyInfos[i].vValues);
+        free_dbpropinfoset(infocount, propinfoset);
+        CoTaskMemFree(desc);
 
-        CoTaskMemFree(propinfoset->rgPropertyInfos);
-        CoTaskMemFree(propinfoset);
-
+        /* Test specifying all supported properties */
         hr = IDBProperties_GetProperties(props, 1, &propidlist, &propcnt, &propset);
         ok(hr == S_OK, "got 0x%08lx\n", hr);
         ok(propidlist.cPropertyIDs == 14, "got %lu\n", propidlist.cPropertyIDs);
@@ -161,8 +185,41 @@ static void test_Properties(void)
             ok(V_VT(&propset->rgProperties[i].vValue) == vartype, "%lu wrong type %d\n", i, V_VT(&propset->rgProperties[i].vValue));
         }
 
+        for (i = 0; i < propset->cProperties; i++)
+            ok(propset->rgProperties[i].dwPropertyID == properties[i],
+               "%ld %ld, got %ld\n", i, properties[i], propset->rgProperties[i].dwPropertyID);
+
+        free_dbpropset(propcnt, propset);
+
+        /* Test specifying only one supported properties */
+        propidlist.cPropertyIDs = 1;
+        hr = IDBProperties_GetProperties(props, 1, &propidlist, &propcnt, &propset);
+        ok(hr == S_OK, "got 0x%08lx\n", hr);
+        ok(propset->cProperties == 1, "expected 1, got %lu\n", propset->cProperties);
+        free_dbpropset(propcnt, propset);
+
+        /* Test when cPropertyIDSets is zero, all initialization properties should be returned */
+        hr = IDBProperties_GetProperties(props, 0, &propidlist, &propcnt, &propset);
+        ok(hr == S_OK, "got 0x%08lx\n", hr);
+        ok(propset->cProperties == ARRAY_SIZE(properties), "got %lu\n", propset->cProperties);
+        for (i = 0; i < propset->cProperties; i++)
+             ok(propset->rgProperties[i].dwPropertyID == properties[i],
+                "%ld %ld, got %ld\n", i, properties[i], propset->rgProperties[i].dwPropertyID);
+        free_dbpropset(propcnt, propset);
+
+        /* Test when propidlist.cPropertyIDs is zero, all initialization properties should be returned */
         CoTaskMemFree(propidlist.rgPropertyIDs);
-        CoTaskMemFree(propset);
+        propidlist.guidPropertySet = DBPROPSET_DBINIT;
+        propidlist.cPropertyIDs = 0;
+        propidlist.rgPropertyIDs = NULL;
+
+        hr = IDBProperties_GetProperties(props, 1, &propidlist, &propcnt, &propset);
+        ok(hr == S_OK, "got 0x%08lx\n", hr);
+        ok(propset->cProperties == ARRAY_SIZE(properties), "got %lu\n", propset->cProperties);
+        for (i = 0; i < propset->cProperties; i++)
+            ok(propset->rgProperties[i].dwPropertyID == properties[i],
+               "%ld %ld, got %ld\n", i, properties[i], propset->rgProperties[i].dwPropertyID);
+        free_dbpropset(propcnt, propset);
     }
 
     propid = DBPROP_MULTIPLERESULTS;
@@ -179,7 +236,7 @@ static void test_Properties(void)
     ok(propset->rgProperties[0].dwPropertyID == DBPROP_MULTIPLERESULTS, "got %ld\n", propset->rgProperties[0].dwPropertyID);
     ok(propset->rgProperties[0].dwStatus == DBPROPSTATUS_NOTSUPPORTED, "got %ld\n", propset->rgProperties[0].dwStatus);
 
-    CoTaskMemFree(propset);
+    free_dbpropset(propcnt, propset);
 
     IDBProperties_Release(props);
 }
@@ -324,7 +381,7 @@ static void test_command_properties(ICommandProperties *props)
         }
     }
 
-    CoTaskMemFree(propset);
+    free_dbpropset(count, propset);
 }
 
 static void test_command_interfaces(IUnknown *cmd)
@@ -528,8 +585,7 @@ static void test_rowset_info(IRowset *rowset)
                 propset->rgProperties[i].dwPropertyID, row_props[i]);
     }
 
-    CoTaskMemFree(propset);
-
+    free_dbpropset(propcnt, propset);
     IRowsetInfo_Release(info);
 }
 
@@ -569,6 +625,13 @@ static void test_command_rowset(IUnknown *cmd)
     if (unk)
         IUnknown_Release(unk);
 
+    /* Ensure all rows are deleted - Interactive Test */
+    hr = ICommandText_SetCommandText(command_text, &DBGUID_DEFAULT, L"delete from testing");
+    ok(hr == S_OK, "got 0x%08lx\n", hr);
+
+    hr = ICommandText_Execute(command_text, NULL, &IID_NULL, NULL, NULL, NULL);
+    ok(hr == S_OK, "got 0x%08lx\n", hr);
+
     hr = ICommandText_SetCommandText(command_text, &DBGUID_DEFAULT, L"insert into testing values(1, 'red', 1.0)");
     ok(hr == S_OK, "got 0x%08lx\n", hr);
 
@@ -594,7 +657,7 @@ static void test_command_rowset(IUnknown *cmd)
         DBCOLUMNINFO *dbcolinfo;
         OLECHAR *stringsbuffer;
 
-        todo_wine ok(affected == -1, "got %Id\n", affected);
+        ok(affected == -1 || affected == 1, "got %Iu\n", affected);
 
         hr = IUnknown_QueryInterface(unk, &IID_IRowset, (void**)&rowset);
         ok(hr == S_OK, "got 0x%08lx\n", hr);
@@ -876,18 +939,18 @@ static void test_enumeration(void)
         for( i = 0; i < columns; i++ )
         {
             if (!dbcolumninfo[i].pwszName || !colinfo_data[i].pwszName)
-                ok (dbcolumninfo[i].pwszName == colinfo_data[i].pwszName, "got %p/%p", dbcolumninfo[i].pwszName, colinfo_data[i].pwszName);
+                ok (dbcolumninfo[i].pwszName == colinfo_data[i].pwszName, "got %p/%p\n", dbcolumninfo[i].pwszName, colinfo_data[i].pwszName);
             else
-                ok ( !wcscmp(dbcolumninfo[i].pwszName, colinfo_data[i].pwszName), "got %p/%p",
+                ok ( !wcscmp(dbcolumninfo[i].pwszName, colinfo_data[i].pwszName), "got %p/%p\n",
                      debugstr_w(dbcolumninfo[i].pwszName), debugstr_w(colinfo_data[i].pwszName));
 
-            ok (dbcolumninfo[i].pTypeInfo == colinfo_data[i].pTypeInfo, "got %p/%p", dbcolumninfo[i].pTypeInfo, colinfo_data[i].pTypeInfo);
-            ok (dbcolumninfo[i].iOrdinal == colinfo_data[i].iOrdinal, "got %Id/%Id", dbcolumninfo[i].iOrdinal, colinfo_data[i].iOrdinal);
-            ok (dbcolumninfo[i].dwFlags == colinfo_data[i].dwFlags, "got 0x%08lx/0x%08lx", dbcolumninfo[i].dwFlags, colinfo_data[i].dwFlags);
-            ok (dbcolumninfo[i].ulColumnSize == colinfo_data[i].ulColumnSize, "got %Iu/%Iu", dbcolumninfo[i].ulColumnSize, colinfo_data[i].ulColumnSize);
-            ok (dbcolumninfo[i].wType == colinfo_data[i].wType, "got %d/%d", dbcolumninfo[i].wType, colinfo_data[i].wType);
-            ok (dbcolumninfo[i].bPrecision == colinfo_data[i].bPrecision, "got %d/%d", dbcolumninfo[i].bPrecision, colinfo_data[i].bPrecision);
-            ok (dbcolumninfo[i].bScale == colinfo_data[i].bScale, "got %d/%d", dbcolumninfo[i].bScale, colinfo_data[i].bScale);
+            ok (dbcolumninfo[i].pTypeInfo == colinfo_data[i].pTypeInfo, "got %p/%p\n", dbcolumninfo[i].pTypeInfo, colinfo_data[i].pTypeInfo);
+            ok (dbcolumninfo[i].iOrdinal == colinfo_data[i].iOrdinal, "got %Id/%Id\n", dbcolumninfo[i].iOrdinal, colinfo_data[i].iOrdinal);
+            ok (dbcolumninfo[i].dwFlags == colinfo_data[i].dwFlags, "got 0x%08lx/0x%08lx\n", dbcolumninfo[i].dwFlags, colinfo_data[i].dwFlags);
+            ok (dbcolumninfo[i].ulColumnSize == colinfo_data[i].ulColumnSize, "got %Iu/%Iu\n", dbcolumninfo[i].ulColumnSize, colinfo_data[i].ulColumnSize);
+            ok (dbcolumninfo[i].wType == colinfo_data[i].wType, "got %d/%d\n", dbcolumninfo[i].wType, colinfo_data[i].wType);
+            ok (dbcolumninfo[i].bPrecision == colinfo_data[i].bPrecision, "got %d/%d\n", dbcolumninfo[i].bPrecision, colinfo_data[i].bPrecision);
+            ok (dbcolumninfo[i].bScale == colinfo_data[i].bScale, "got %d/%d\n", dbcolumninfo[i].bScale, colinfo_data[i].bScale);
         }
 
         CoTaskMemFree(buffer);

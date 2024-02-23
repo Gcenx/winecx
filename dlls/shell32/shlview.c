@@ -42,7 +42,6 @@
 
 #define CINTERFACE
 #define COBJMACROS
-#define NONAMELESSUNION
 
 #include "windef.h"
 #include "winerror.h"
@@ -953,7 +952,7 @@ static HRESULT ShellView_OpenSelectedItems(IShellViewImpl * This)
 	if (FAILED(hr))
 	  return hr;
 
-	pIDList = GlobalLock(stgm.u.hGlobal);
+	pIDList = GlobalLock(stgm.hGlobal);
 
 	parent_pidl = (LPCITEMIDLIST) ((LPBYTE)pIDList+pIDList->aoffset[0]);
 	hr = IShellFolder_GetAttributesOf(This->pSFParent, 1, &parent_pidl, &attribs);
@@ -992,7 +991,7 @@ static HRESULT ShellView_OpenSelectedItems(IShellViewImpl * This)
 	  }
 	}
 
-	GlobalUnlock(stgm.u.hGlobal);
+	GlobalUnlock(stgm.hGlobal);
 	ReleaseStgMedium(&stgm);
 
 	IDataObject_Release(selection);
@@ -1436,7 +1435,7 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
 	      {
 	          /* set to empty on failure */
 	          sd.str.uType = STRRET_WSTR;
-	          sd.str.u.pOleStr = emptyW;
+	          sd.str.pOleStr = emptyW;
 	      }
 
               if (lpnmh->code == LVN_GETDISPINFOW)
@@ -1578,7 +1577,7 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
 		  }
 
 		  /* allocate memory for the pidl array */
-		  pItems = heap_alloc(sizeof(LPITEMIDLIST) * count);
+		  pItems = malloc(sizeof(ITEMIDLIST*) * count);
 
 		  /* retrieve all selected items */
 		  i = 0;
@@ -1604,7 +1603,7 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
 		  ISFHelper_Release(psfhlp);
 
 		  /* free pidl array memory */
-		  heap_free(pItems);
+		  free(pItems);
                 }
 		break;
 
@@ -1826,7 +1825,7 @@ static ULONG WINAPI IShellView_fnRelease(IShellView3 *iface)
 	  if(This->pAdvSink)
 	    IAdviseSink_Release(This->pAdvSink);
 
-	  heap_free(This);
+	  free(This);
 	}
 	return refCount;
 }
@@ -2709,25 +2708,20 @@ static HRESULT WINAPI FolderView_GetCurrentViewMode(IFolderView2 *iface, UINT *m
 
 static HRESULT WINAPI FolderView_SetCurrentViewMode(IFolderView2 *iface, UINT mode)
 {
-    IShellViewImpl *This = impl_from_IFolderView2(iface);
-    DWORD dwStyle;
+    IShellViewImpl *shellview = impl_from_IFolderView2(iface);
+    DWORD style;
 
-    TRACE("%p, %u.\n", This, mode);
+    TRACE("folder view %p, mode %u.\n", iface, mode);
 
-    if((mode < FVM_FIRST || mode > FVM_LAST) &&
-       (mode != FVM_AUTO))
-        return E_INVALIDARG;
+    if (mode == FVM_AUTO)
+        mode = FVM_ICON;
 
-    /* Windows before Vista uses LVM_SETVIEW and possibly
-       LVM_SETEXTENDEDLISTVIEWSTYLE to set the style of the listview,
-       while later versions seem to accomplish this through other
-       means. */
-    dwStyle = ViewModeToListStyle(mode);
-    SetStyle(This, dwStyle, LVS_TYPEMASK);
-
-    /* This will not necessarily be the actual mode set above.
-       This mimics the behavior of Windows XP. */
-    This->FolderSettings.ViewMode = mode;
+    if (mode >= FVM_FIRST && mode <= FVM_LAST)
+    {
+        style = ViewModeToListStyle(mode);
+        SetStyle(shellview, style, LVS_TYPEMASK);
+        shellview->FolderSettings.ViewMode = mode;
+    }
 
     return S_OK;
 }
@@ -2780,8 +2774,49 @@ static HRESULT WINAPI FolderView_ItemCount(IFolderView2 *iface, UINT flags, int 
 static HRESULT WINAPI FolderView_Items(IFolderView2 *iface, UINT flags, REFIID riid, void **ppv)
 {
     IShellViewImpl *This = impl_from_IFolderView2(iface);
-    FIXME("(%p)->(%u %s %p), stub\n", This, flags, debugstr_guid(riid), ppv);
-    return E_NOTIMPL;
+    int count, i;
+    ITEMIDLIST **pidl;
+    LVITEMW item;
+    HRESULT hr;
+
+    if (!IsEqualIID(riid, &IID_IShellItemArray))
+    {
+        FIXME("%s is not supported\n", debugstr_guid(riid));
+        return E_NOINTERFACE;
+    }
+
+    if (flags != SVGIO_ALLVIEW)
+        FIXME("some flags unsupported, %x\n", flags & ~SVGIO_ALLVIEW);
+
+    count = SendMessageW(This->hWndList, LVM_GETITEMCOUNT, 0, 0);
+    if (!count)
+    {
+        FIXME("Folder is empty\n");
+        return E_FAIL;
+    }
+
+    pidl = HeapAlloc(GetProcessHeap(), 0, count * sizeof(*pidl));
+    if (!pidl) return E_OUTOFMEMORY;
+
+    for (i = 0; i < count; i++)
+    {
+        item.mask = LVIF_PARAM;
+        item.iItem = i;
+        if (!SendMessageW(This->hWndList, LVM_GETITEMW, 0, (LPARAM)&item))
+        {
+            FIXME("LVM_GETITEMW(%d) failed\n" ,i);
+            HeapFree(GetProcessHeap(), 0, pidl);
+            return E_FAIL;
+        }
+
+        pidl[i] = (ITEMIDLIST *)item.lParam;
+    }
+
+    hr = SHCreateShellItemArray(NULL, This->pSFParent, count, (LPCITEMIDLIST *)pidl, (IShellItemArray **)ppv);
+
+    HeapFree(GetProcessHeap(), 0, pidl);
+
+    return hr;
 }
 
 static HRESULT WINAPI FolderView_GetSelectionMarkedItem(IFolderView2 *iface, int *item)
@@ -2945,16 +2980,23 @@ static HRESULT WINAPI FolderView2_SetText(IFolderView2 *iface, FVTEXTTYPE type, 
 
 static HRESULT WINAPI FolderView2_SetCurrentFolderFlags(IFolderView2 *iface, DWORD mask, DWORD flags)
 {
-    IShellViewImpl *This = impl_from_IFolderView2(iface);
-    FIXME("(%p)->(0x%08lx 0x%08lx), stub\n", This, mask, flags);
-    return E_NOTIMPL;
+    IShellViewImpl *shellview = impl_from_IFolderView2(iface);
+
+    TRACE("folder view %p, mask %#lx, flags %#lx.\n", iface, mask, flags);
+
+    shellview->FolderSettings.fFlags = (shellview->FolderSettings.fFlags & ~mask) | (flags & mask);
+    return S_OK;
 }
 
 static HRESULT WINAPI FolderView2_GetCurrentFolderFlags(IFolderView2 *iface, DWORD *flags)
 {
-    IShellViewImpl *This = impl_from_IFolderView2(iface);
-    FIXME("(%p)->(%p), stub\n", This, flags);
-    return E_NOTIMPL;
+    IShellViewImpl *shellview = impl_from_IFolderView2(iface);
+
+    TRACE("folder view %p, flags %p.\n", iface, flags);
+
+    if (flags)
+        *flags = shellview->FolderSettings.fFlags;
+    return S_OK;
 }
 
 static HRESULT WINAPI FolderView2_GetSortColumnCount(IFolderView2 *iface, int *columns)
@@ -3030,15 +3072,20 @@ static HRESULT WINAPI FolderView2_SetViewModeAndIconSize(IFolderView2 *iface, FO
 {
     IShellViewImpl *This = impl_from_IFolderView2(iface);
     FIXME("(%p)->(%d %d), stub\n", This, mode, size);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI FolderView2_GetViewModeAndIconSize(IFolderView2 *iface, FOLDERVIEWMODE *mode,
     int *size)
 {
     IShellViewImpl *This = impl_from_IFolderView2(iface);
+
     FIXME("(%p)->(%p %p), stub\n", This, mode, size);
-    return E_NOTIMPL;
+
+    *size = 16; /* FIXME */
+    *mode = This->FolderSettings.ViewMode;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI FolderView2_SetGroupSubsetCount(IFolderView2 *iface, UINT visible_rows)
@@ -3755,7 +3802,7 @@ IShellView *IShellView_Constructor(IShellFolder *folder)
 {
     IShellViewImpl *sv;
 
-    sv = heap_alloc_zero(sizeof(*sv));
+    sv = calloc(1, sizeof(*sv));
     if (!sv)
         return NULL;
 
@@ -3779,6 +3826,8 @@ IShellView *IShellView_Constructor(IShellFolder *folder)
     sv->cScrollDelay = 0;
     sv->ptLastMousePos.x = 0;
     sv->ptLastMousePos.y = 0;
+    sv->FolderSettings.ViewMode = FVM_TILE;
+    sv->FolderSettings.fFlags = FWF_USESEARCHFOLDER;
 
     TRACE("(%p)->(%p)\n", sv, folder);
     return (IShellView*)&sv->IShellView3_iface;

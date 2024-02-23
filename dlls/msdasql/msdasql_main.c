@@ -17,6 +17,7 @@
  */
 
 #define COBJMACROS
+#define DBINITCONSTANTS
 
 #include <stdarg.h>
 
@@ -37,12 +38,6 @@
 #include "msdasql_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msdasql);
-
-DEFINE_GUID(DBPROPSET_DATASOURCEINFO, 0xc8b522bb, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
-DEFINE_GUID(DBPROPSET_DBINIT,    0xc8b522bc, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
-DEFINE_GUID(DBPROPSET_ROWSET,    0xc8b522be, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
-
-DEFINE_GUID(DBGUID_DEFAULT,      0xc8b521fb, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
 
 void dump_sql_diag_records(SQLSMALLINT type, SQLHANDLE handle)
 {
@@ -362,18 +357,19 @@ static HRESULT WINAPI dbprops_GetProperties(IDBProperties *iface, ULONG cPropert
     struct msdasql *provider = impl_from_IDBProperties(iface);
     int i, j, k;
     DBPROPSET *propset;
+    BOOL no_prop_id;
 
     TRACE("(%p)->(%ld %p %p %p)\n", provider, cPropertyIDSets, rgPropertyIDSets, pcPropertySets, prgPropertySets);
 
     *pcPropertySets = 1;
 
-    if (cPropertyIDSets != 1)
+    if (cPropertyIDSets > 1)
     {
-        FIXME("Currently only 1 property set supported.\n");
+        FIXME("Currently only 0 or 1 property set are supported.\n");
         cPropertyIDSets = 1;
     }
 
-    propset = CoTaskMemAlloc(cPropertyIDSets * sizeof(DBPROPSET));
+    propset = CoTaskMemAlloc(max(cPropertyIDSets, 1) * sizeof(DBPROPSET));
 
     if (IsEqualGUID(&rgPropertyIDSets[0].guidPropertySet, &DBPROPSET_DATASOURCEINFO))
     {
@@ -396,6 +392,33 @@ static HRESULT WINAPI dbprops_GetProperties(IDBProperties *iface, ULONG cPropert
 
     propset->guidPropertySet = DBPROPSET_DBINIT;
 
+    no_prop_id = TRUE;
+    for (i = 0; i < cPropertyIDSets; i++)
+    {
+        if (rgPropertyIDSets[i].cPropertyIDs)
+        {
+            no_prop_id = FALSE;
+            break;
+        }
+    }
+
+    /* If no property ID is specified then return all currently set properties */
+    if (no_prop_id)
+    {
+        propset->cProperties = ARRAY_SIZE(provider->properties);
+        propset->rgProperties = CoTaskMemAlloc(propset->cProperties * sizeof(DBPROP));
+        for(i = 0; i < ARRAY_SIZE(provider->properties); i++)
+        {
+            propset->rgProperties[i].dwPropertyID = provider->properties[i].id;
+            V_VT(&propset->rgProperties[i].vValue) = VT_EMPTY;
+            VariantCopy(&propset->rgProperties[i].vValue, &provider->properties[i].value);
+        }
+
+        *prgPropertySets = propset;
+        return S_OK;
+    }
+
+    /* Return property info for properties in the specified property ID sets */
     for (i=0; i < cPropertyIDSets; i++)
     {
         TRACE("Property id %d (count %ld, set %s)\n", i, rgPropertyIDSets[i].cPropertyIDs,
@@ -530,26 +553,35 @@ static ULONG WINAPI dbinit_Release(IDBInitialize *iface)
 static HRESULT WINAPI dbinit_Initialize(IDBInitialize *iface)
 {
     struct msdasql *provider = impl_from_IDBInitialize(iface);
-    int i;
+    int i, len;
     SQLRETURN ret;
+    WCHAR connection[1024], *p = connection, outstr[1024];
 
     FIXME("%p semi-stub\n", provider);
 
-    for(i=0; i < sizeof(provider->properties); i++)
+    *p = 0;
+    for(i=0; i < ARRAY_SIZE(provider->properties); i++)
     {
         if (provider->properties[i].id == DBPROP_INIT_DATASOURCE)
-            break;
+        {
+            len = swprintf(p, ARRAY_SIZE(connection) - (p - connection),
+                           L"DSN=%s;", V_BSTR(&provider->properties[i].value));
+            p+= len;
+        }
+        else if (provider->properties[i].id == DBPROP_INIT_PROVIDERSTRING)
+        {
+            if (V_VT(&provider->properties[i].value) == VT_BSTR && SysStringLen(V_BSTR(&provider->properties[i].value)) )
+            {
+                len = swprintf(p, ARRAY_SIZE(connection) - (p - connection),
+                               L"%s;", V_BSTR(&provider->properties[i].value));
+                p+= len;
+            }
+        }
     }
 
-    if (i >= sizeof(provider->properties))
-    {
-        ERR("Datasource not found\n");
-        return E_FAIL;
-    }
-
-    ret = SQLConnectW( provider->hdbc, (SQLWCHAR *)V_BSTR(&provider->properties[i].value),
-        SQL_NTS, NULL, SQL_NTS, NULL, SQL_NTS );
-    TRACE("SQLConnectW ret %d\n", ret);
+    ret = SQLDriverConnectW( provider->hdbc, NULL, connection, wcslen(connection),
+                             outstr, ARRAY_SIZE(outstr), NULL, 0);
+    TRACE("SQLDriverConnectW ret %d\n", ret);
     if (ret != SQL_SUCCESS)
     {
         dump_sql_diag_records(SQL_HANDLE_DBC, provider->hdbc);

@@ -17,13 +17,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "initguid.h"
 #include "dmband_private.h"
 #include "rpcproxy.h"
 #include "dmobject.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmband);
-
-LONG DMBAND_refCount = 0;
 
 typedef struct {
         IClassFactory IClassFactory_iface;
@@ -60,15 +59,11 @@ static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID r
 
 static ULONG WINAPI ClassFactory_AddRef(IClassFactory *iface)
 {
-        DMBAND_LockModule();
-
         return 2; /* non-heap based object */
 }
 
 static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
 {
-        DMBAND_UnlockModule();
-
         return 1; /* non-heap based object */
 }
 
@@ -90,12 +85,6 @@ static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown
 static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL dolock)
 {
         TRACE("(%d)\n", dolock);
-
-        if (dolock)
-                DMBAND_LockModule();
-        else
-                DMBAND_UnlockModule();
-
         return S_OK;
 }
 
@@ -109,16 +98,6 @@ static const IClassFactoryVtbl classfactory_vtbl = {
 
 static IClassFactoryImpl Band_CF = {{&classfactory_vtbl}, create_dmband};
 static IClassFactoryImpl BandTrack_CF = {{&classfactory_vtbl}, create_dmbandtrack};
-
-/******************************************************************
- *		DllCanUnloadNow (DMBAND.@)
- *
- *
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-	return DMBAND_refCount != 0 ? S_FALSE : S_OK;
-}
 
 
 /******************************************************************

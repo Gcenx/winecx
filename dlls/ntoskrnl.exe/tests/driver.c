@@ -20,6 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep testdll
+#endif
+
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -454,6 +458,7 @@ static void test_current_thread(BOOL is_system)
 
     ok(PsGetThreadId((PETHREAD)KeGetCurrentThread()) == PsGetCurrentThreadId(), "thread IDs don't match\n");
     ok(PsIsSystemThread((PETHREAD)KeGetCurrentThread()) == is_system, "unexpected system thread\n");
+    ok(ExGetPreviousMode() == is_system ? KernelMode : UserMode, "previous mode is not correct\n");
     if (!is_system)
     {
         ok(create_caller_thread == KeGetCurrentThread(), "thread is not create caller thread\n");
@@ -1240,8 +1245,7 @@ static void test_lookaside_list(void)
     ok(list.L.Type == (NonPagedPool|POOL_NX_ALLOCATION),
        "Expected NonPagedPool|POOL_NX_ALLOCATION got %u\n", list.L.Type);
     ok(list.L.Tag == tag, "Expected %lx got %lx\n", tag, list.L.Tag);
-    ok(list.L.Size == LOOKASIDE_MINIMUM_BLOCK_SIZE,
-       "Expected %Iu got %lu\n", LOOKASIDE_MINIMUM_BLOCK_SIZE, list.L.Size);
+    ok(list.L.Size == LOOKASIDE_MINIMUM_BLOCK_SIZE, "got %lu\n", list.L.Size);
     ok(list.L.LastTotalAllocates == 0,"Expected 0 got %lu\n", list.L.LastTotalAllocates);
     ok(list.L.LastAllocateMisses == 0,"Expected 0 got %lu\n", list.L.LastAllocateMisses);
     ExDeleteNPagedLookasideList(&list);
@@ -1263,8 +1267,7 @@ static void test_lookaside_list(void)
     ok(paged_list.L.Type == (PagedPool|POOL_NX_ALLOCATION),
        "Expected PagedPool|POOL_NX_ALLOCATION got %u\n", paged_list.L.Type);
     ok(paged_list.L.Tag == tag, "Expected %lx got %lx\n", tag, paged_list.L.Tag);
-    ok(paged_list.L.Size == LOOKASIDE_MINIMUM_BLOCK_SIZE,
-       "Expected %Iu got %lu\n", LOOKASIDE_MINIMUM_BLOCK_SIZE, paged_list.L.Size);
+    ok(paged_list.L.Size == LOOKASIDE_MINIMUM_BLOCK_SIZE, "got %lu\n", paged_list.L.Size);
     ok(paged_list.L.LastTotalAllocates == 0,"Expected 0 got %lu\n", paged_list.L.LastTotalAllocates);
     ok(paged_list.L.LastAllocateMisses == 0,"Expected 0 got %lu\n", paged_list.L.LastAllocateMisses);
     ExDeletePagedLookasideList(&paged_list);
@@ -2120,9 +2123,26 @@ static void WINAPI test_dpc_func(PKDPC Dpc, void *context, void *cpu_count,
 static void test_dpc(void)
 {
     void (WINAPI *pKeGenericCallDpc)(PKDEFERRED_ROUTINE routine, void *context);
+    void (WINAPI *pKeInitializeDpc)(PKDPC dpc, PKDEFERRED_ROUTINE routine, void *context);
     struct test_dpc_func_context data;
     KAFFINITY cpu_mask;
     ULONG cpu_count;
+    struct _KDPC dpc = {0};
+
+    pKeInitializeDpc = get_proc_address("KeInitializeDpc");
+    if(!pKeInitializeDpc)
+    {
+        win_skip("KeInitializeDpc is not available.\n");
+        return;
+    }
+
+    pKeInitializeDpc(&dpc, test_dpc_func, &data);
+
+    ok(dpc.Number == 0, "Got unexpected Dpc Number %u.\n", dpc.Number);
+    todo_wine ok(dpc.Type == 0x13, "Got unexpected Dpc Type %u.\n", dpc.Type);
+    todo_wine ok(dpc.Importance == MediumImportance, "Got unexpected Dpc Importance %u.\n", dpc.Importance);
+    ok(dpc.DeferredRoutine == test_dpc_func, "Got unexpected Dpc DeferredRoutine %p.\n", dpc.DeferredRoutine);
+    ok(dpc.DeferredContext == &data, "Got unexpected Dpc DeferredContext %p.\n", dpc.DeferredContext);
 
     pKeGenericCallDpc = get_proc_address("KeGenericCallDpc");
     if (!pKeGenericCallDpc)
@@ -2234,7 +2254,7 @@ static void test_process_memory(const struct main_test_input *test_input)
        win_skip("MmCopyVirtualMemory is not available.\n");
     }
 
-    if (!running_under_wine)
+    if (!winetest_platform_is_wine)
     {
         KeStackAttachProcess((PKPROCESS)process, &state);
         todo_wine ok(!strcmp(teststr, (char *)(base + test_input->teststr_offset)),
@@ -2293,6 +2313,38 @@ static void test_permanence(void)
     ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status);
 }
 
+static void test_driver_object_extension(void)
+{
+    NTSTATUS (WINAPI *pIoAllocateDriverObjectExtension)(PDRIVER_OBJECT, PVOID, ULONG, PVOID *);
+    PVOID (WINAPI *pIoGetDriverObjectExtension)(PDRIVER_OBJECT, PVOID);
+    NTSTATUS status;
+    void *driver_obj_ext = NULL;
+    void *get_obj_ext = NULL;
+
+    pIoAllocateDriverObjectExtension = get_proc_address("IoAllocateDriverObjectExtension");
+    pIoGetDriverObjectExtension = get_proc_address("IoGetDriverObjectExtension");
+
+    if (!pIoAllocateDriverObjectExtension)
+    {
+        win_skip("IoAllocateDriverObjectExtension is not available.\n");
+        return;
+    }
+
+    status = pIoAllocateDriverObjectExtension(driver_obj, NULL, 100, &driver_obj_ext);
+    todo_wine ok(status == STATUS_SUCCESS, "got %#lx\n", status);
+    todo_wine ok(driver_obj_ext != NULL, "got NULL\n");
+
+    get_obj_ext = pIoGetDriverObjectExtension(driver_obj, NULL);
+    todo_wine ok(get_obj_ext == driver_obj_ext && get_obj_ext != NULL, "got %p != %p\n", get_obj_ext, driver_obj_ext);
+
+    status = pIoAllocateDriverObjectExtension(driver_obj, NULL, 100, &driver_obj_ext);
+    todo_wine ok(status == STATUS_OBJECT_NAME_COLLISION, "got %#lx\n", status);
+    ok(driver_obj_ext == NULL, "got %p\n", driver_obj_ext);
+
+    get_obj_ext = pIoGetDriverObjectExtension(driver_obj, (void *)0xdead);
+    ok(get_obj_ext == NULL, "got %p\n", get_obj_ext);
+}
+
 static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *stack)
 {
     void *buffer = irp->AssociatedIrp.SystemBuffer;
@@ -2336,6 +2388,7 @@ static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *st
     test_dpc();
     test_process_memory(test_input);
     test_permanence();
+    test_driver_object_extension();
 
     IoMarkIrpPending(irp);
     IoQueueWorkItem(work_item, main_test_task, DelayedWorkQueue, irp);

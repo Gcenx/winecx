@@ -21,18 +21,14 @@
 #ifndef __WOW64WIN_PRIVATE_H
 #define __WOW64WIN_PRIVATE_H
 
-#include "syscall.h"
+#include "../win32u/win32syscalls.h"
 
-#define SYSCALL_ENTRY(func) extern NTSTATUS WINAPI wow64_ ## func( UINT *args ) DECLSPEC_HIDDEN;
-ALL_WIN32_SYSCALLS
+#define SYSCALL_ENTRY(id,name,_args) extern NTSTATUS WINAPI wow64_ ## name( UINT *args );
+ALL_SYSCALLS32
 #undef SYSCALL_ENTRY
 
 typedef NTSTATUS (WINAPI *user_callback)( void *params, ULONG size );
-extern user_callback user_callbacks[] DECLSPEC_HIDDEN;
-
-void * WINAPI Wow64AllocateTemp( SIZE_T size );
-NTSTATUS WINAPI Wow64KiUserCallbackDispatcher( ULONG id, void *args, ULONG len,
-                                               void **ret_ptr, ULONG *ret_len );
+extern user_callback user_callbacks[];
 
 struct object_attr64
 {
@@ -54,7 +50,6 @@ typedef struct
 static inline ULONG get_ulong( UINT **args ) { return *(*args)++; }
 static inline HANDLE get_handle( UINT **args ) { return LongToHandle( *(*args)++ ); }
 static inline void *get_ptr( UINT **args ) { return ULongToPtr( *(*args)++ ); }
-static inline float get_float( UINT **args ) { return *(*(float **)args)++; }
 
 static inline void **addr_32to64( void **addr, ULONG *addr32 )
 {

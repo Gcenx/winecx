@@ -26,8 +26,6 @@
 #include <limits.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "winerror.h"
 #include "windef.h"
 #include "winbase.h"
@@ -530,14 +528,14 @@ static HRESULT WINAPI ISF_MyComputer_fnGetUIObjectOf (IShellFolder2 * iface,
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         pObj = (LPUNKNOWN) IExtractIconA_Constructor (pidl);
-        SHFree (pidl);
+        ILFree(pidl);
         hr = S_OK;
     }
     else if (IsEqualIID (riid, &IID_IExtractIconW) && (cidl == 1))
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         pObj = (LPUNKNOWN) IExtractIconW_Constructor (pidl);
-        SHFree (pidl);
+        ILFree(pidl);
         hr = S_OK;
     }
     else if (IsEqualIID (riid, &IID_IDropTarget) && (cidl >= 1))
@@ -550,7 +548,7 @@ static HRESULT WINAPI ISF_MyComputer_fnGetUIObjectOf (IShellFolder2 * iface,
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         hr = IShellLink_ConstructFromFile(NULL, riid, pidl, &pObj);
-        SHFree (pidl);
+        ILFree(pidl);
     }
     else 
         hr = E_NOINTERFACE;
@@ -704,21 +702,21 @@ static HRESULT WINAPI ISF_MyComputer_fnGetDisplayNameOf (IShellFolder2 *iface,
         if (GetVersion() & 0x80000000)
         {
             strRet->uType = STRRET_CSTR;
-            if (!WideCharToMultiByte(CP_ACP, 0, pszPath, -1, strRet->u.cStr, MAX_PATH,
+            if (!WideCharToMultiByte(CP_ACP, 0, pszPath, -1, strRet->cStr, MAX_PATH,
                     NULL, NULL))
-                strRet->u.cStr[0] = '\0';
+                strRet->cStr[0] = '\0';
             CoTaskMemFree(pszPath);
         }
         else
         {
             strRet->uType = STRRET_WSTR;
-            strRet->u.pOleStr = pszPath;
+            strRet->pOleStr = pszPath;
         }
     }
     else
         CoTaskMemFree(pszPath);
 
-    TRACE ("-- (%p)->(%s)\n", This, strRet->uType == STRRET_CSTR ? strRet->u.cStr : debugstr_w(strRet->u.pOleStr));
+    TRACE ("-- (%p)->(%s)\n", This, strRet->uType == STRRET_CSTR ? strRet->cStr : debugstr_w(strRet->pOleStr));
     return hr;
 }
 
@@ -791,13 +789,12 @@ static HRESULT WINAPI ISF_MyComputer_fnGetDetailsEx (IShellFolder2 * iface,
     return E_NOTIMPL;
 }
 
-/* FIXME: drive size >4GB is rolling over */
 static HRESULT WINAPI ISF_MyComputer_fnGetDetailsOf (IShellFolder2 *iface,
                LPCITEMIDLIST pidl, UINT iColumn, SHELLDETAILS *psd)
 {
     IMyComputerFolderImpl *This = impl_from_IShellFolder2(iface);
-    char szPath[MAX_PATH];
-    ULARGE_INTEGER ulBytes;
+    WCHAR path[MAX_PATH];
+    ULARGE_INTEGER bytes;
     HRESULT hr = S_OK;
 
     TRACE ("(%p)->(%p %i %p)\n", This, pidl, iColumn, psd);
@@ -808,28 +805,35 @@ static HRESULT WINAPI ISF_MyComputer_fnGetDetailsOf (IShellFolder2 *iface,
     if (!pidl)
         return SHELL32_GetColumnDetails(mycomputer_header, iColumn, psd);
 
-    psd->str.u.cStr[0] = 0;
+    psd->str.cStr[0] = 0;
     psd->str.uType = STRRET_CSTR;
 
     switch (iColumn)
     {
         case 2:        /* total size */
-            if (_ILIsDrive (pidl))
-            {
-                _ILSimpleGetText (pidl, szPath, MAX_PATH);
-                GetDiskFreeSpaceExA (szPath, NULL, &ulBytes, NULL);
-                StrFormatByteSizeA (ulBytes.u.LowPart, psd->str.u.cStr, MAX_PATH);
-            }
+            if (!_ILIsDrive (pidl))
+                break;
+
+            _ILSimpleGetTextW(pidl, path, MAX_PATH);
+            if (!GetDiskFreeSpaceExW(path, NULL, &bytes, NULL))
+                break;
+
+            psd->str.uType = STRRET_WSTR;
+            psd->str.pOleStr = CoTaskMemAlloc((MAX_PATH + 1) * sizeof(WCHAR));
+            StrFormatByteSizeW(bytes.QuadPart, psd->str.pOleStr, MAX_PATH);
             break;
         case 3:        /* free size */
-            if (_ILIsDrive (pidl))
-            {
-                _ILSimpleGetText (pidl, szPath, MAX_PATH);
-                GetDiskFreeSpaceExA (szPath, &ulBytes, NULL, NULL);
-                StrFormatByteSizeA (ulBytes.u.LowPart, psd->str.u.cStr, MAX_PATH);
-            }
-            break;
+            if (!_ILIsDrive (pidl))
+                break;
 
+            _ILSimpleGetTextW(pidl, path, MAX_PATH);
+            if (!GetDiskFreeSpaceExW(path, &bytes, NULL, NULL))
+                break;
+
+            psd->str.uType = STRRET_WSTR;
+            psd->str.pOleStr = CoTaskMemAlloc((MAX_PATH + 1) * sizeof(WCHAR));
+            StrFormatByteSizeW(bytes.QuadPart, psd->str.pOleStr, MAX_PATH);
+            break;
         default:
             return shellfolder_get_file_details( iface, pidl, mycomputer_header, iColumn, psd );
     }

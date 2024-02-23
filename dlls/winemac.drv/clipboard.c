@@ -151,14 +151,8 @@ static const struct
     { CF_PENDATA,           CFSTR("org.winehq.builtin.pendata"),            import_clipboard_data,          export_clipboard_data,      FALSE },
     { CF_RIFF,              CFSTR("org.winehq.builtin.riff"),               import_clipboard_data,          export_clipboard_data,      FALSE },
     { CF_SYLK,              CFSTR("org.winehq.builtin.sylk"),               import_clipboard_data,          export_clipboard_data,      FALSE },
-
     { CF_TEXT,              CFSTR("org.winehq.builtin.text"),               import_clipboard_data,          export_clipboard_data,      FALSE },
-#if 1 /* CodeWeavers Hack #12338: don't map CF_TIFF to Mac-native type since we don't ship libtiff */
-    { CF_TIFF,              CFSTR("org.winehq.builtin.tiff"),               import_clipboard_data,          export_clipboard_data,      FALSE },
-#else
     { CF_TIFF,              CFSTR("public.tiff"),                           import_clipboard_data,          export_clipboard_data,      FALSE },
-#endif
-
     { CF_WAVE,              CFSTR("com.microsoft.waveform-audio"),          import_clipboard_data,          export_clipboard_data,      FALSE },
 
     { CF_DIB,               CFSTR("org.winehq.builtin.dib"),                import_clipboard_data,          export_clipboard_data,      FALSE },
@@ -575,7 +569,7 @@ static void *import_html(CFDataRef data, size_t *ret_size)
     if ((ret = malloc(total)))
     {
         char *p = ret;
-        p += sprintf(p, header, total - 1, len, len + size + 1 /* include the final \n in the data */);
+        p += snprintf(p, total, header, total - 1, len, len + size + 1 /* include the final \n in the data */);
         CFDataGetBytes(data, CFRangeMake(0, size), (UInt8*)p);
         strcpy(p + size, trailer);
         *ret_size = total;
@@ -1671,8 +1665,7 @@ void macdrv_UpdateClipboard(void)
 
     if (!NtUserIsWindow(clipboard_manager))
     {
-        UNICODE_STRING str;
-        RtlInitUnicodeString(&str, clipboard_classname);
+        UNICODE_STRING str = RTL_CONSTANT_STRING(clipboard_classname);
         clipboard_manager = NtUserFindWindowEx(NULL, NULL, &str, NULL, 0);
         if (!clipboard_manager)
         {

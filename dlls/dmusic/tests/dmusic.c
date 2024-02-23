@@ -30,6 +30,100 @@
 #include "dmusicf.h"
 #include "dmksctrl.h"
 
+static ULONG get_refcount(void *iface)
+{
+    IUnknown *unknown = iface;
+    IUnknown_AddRef(unknown);
+    return IUnknown_Release(unknown);
+}
+
+#define check_interface(a, b, c) check_interface_(__LINE__, a, b, c)
+static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOOL supported)
+{
+    ULONG expect_ref = get_refcount(iface_ptr);
+    IUnknown *iface = iface_ptr;
+    HRESULT hr, expected;
+    IUnknown *unk;
+
+    expected = supported ? S_OK : E_NOINTERFACE;
+    hr = IUnknown_QueryInterface(iface, iid, (void **)&unk);
+    ok_(__FILE__, line)(hr == expected, "got hr %#lx, expected %#lx.\n", hr, expected);
+    if (SUCCEEDED(hr))
+    {
+        LONG ref = get_refcount(unk);
+        ok_(__FILE__, line)(ref == expect_ref + 1, "got %ld\n", ref);
+        IUnknown_Release(unk);
+        ref = get_refcount(iface_ptr);
+        ok_(__FILE__, line)(ref == expect_ref, "got %ld\n", ref);
+    }
+}
+
+static void stream_begin_chunk(IStream *stream, const char type[5], ULARGE_INTEGER *offset)
+{
+    static const LARGE_INTEGER zero = {0};
+    HRESULT hr;
+    hr = IStream_Write(stream, type, 4, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IStream_Seek(stream, zero, STREAM_SEEK_CUR, offset);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IStream_Write(stream, "\0\0\0\0", 4, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+}
+
+static void stream_end_chunk(IStream *stream, ULARGE_INTEGER *offset)
+{
+    static const LARGE_INTEGER zero = {0};
+    ULARGE_INTEGER position;
+    HRESULT hr;
+    UINT size;
+    hr = IStream_Seek(stream, zero, STREAM_SEEK_CUR, &position);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IStream_Seek(stream, *(LARGE_INTEGER *)offset, STREAM_SEEK_SET, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    size = position.QuadPart - offset->QuadPart - 4;
+    hr = IStream_Write(stream, &size, 4, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IStream_Seek(stream, *(LARGE_INTEGER *)&position, STREAM_SEEK_SET, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IStream_Write(stream, &zero, (position.QuadPart & 1), NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+}
+
+#define CHUNK_BEGIN(stream, type)                                \
+    do {                                                         \
+        ULARGE_INTEGER __off;                                    \
+        IStream *__stream = (stream);                            \
+        stream_begin_chunk(stream, type, &__off);                \
+        do
+
+#define CHUNK_RIFF(stream, form)                                 \
+    do {                                                         \
+        ULARGE_INTEGER __off;                                    \
+        IStream *__stream = (stream);                            \
+        stream_begin_chunk(stream, "RIFF", &__off);              \
+        IStream_Write(stream, form, 4, NULL);                    \
+        do
+
+#define CHUNK_LIST(stream, form)                                 \
+    do {                                                         \
+        ULARGE_INTEGER __off;                                    \
+        IStream *__stream = (stream);                            \
+        stream_begin_chunk(stream, "LIST", &__off);              \
+        IStream_Write(stream, form, 4, NULL);                    \
+        do
+
+#define CHUNK_END                                                \
+        while (0);                                               \
+        stream_end_chunk(__stream, &__off);                      \
+    } while (0)
+
+#define CHUNK_DATA(stream, type, data)                           \
+    CHUNK_BEGIN(stream, type)                                    \
+    {                                                            \
+        IStream_Write((stream), &(data), sizeof(data), NULL);    \
+    }                                                            \
+    CHUNK_END
+
 static BOOL compare_time(REFERENCE_TIME x, REFERENCE_TIME y, unsigned int max_diff)
 {
     REFERENCE_TIME diff = x > y ? x - y : y - x;
@@ -95,12 +189,6 @@ static void test_dmusic(void)
     if (port)
         IDirectMusicPort_Release(port);
     IDirectMusic_Release(dmusic);
-}
-
-static ULONG get_refcount(IDirectSound *iface)
-{
-    IDirectSound_AddRef(iface);
-    return IDirectSound_Release(iface);
 }
 
 static void test_setdsound(void)
@@ -779,7 +867,7 @@ static void test_master_clock(void)
     LARGE_INTEGER counter, freq;
     DMUS_CLOCKINFO clock_info;
     IDirectMusic *dmusic;
-    DWORD cookie;
+    DWORD_PTR cookie;
     HRESULT hr;
     ULONG ref;
     GUID guid;
@@ -829,10 +917,10 @@ static void test_master_clock(void)
     ok(time2 - time1 > 80 * 10000, "Expected about %s, but got %s.\n",
             wine_dbgstr_longlong(time1 + 100 * 10000), wine_dbgstr_longlong(time2));
 
-    hr = IReferenceClock_AdviseTime(clock, 0, 0, NULL, &cookie);
+    hr = IReferenceClock_AdviseTime(clock, 0, 0, 0, &cookie);
     ok(hr == E_NOTIMPL, "Got hr %#lx.\n", hr);
 
-    hr = IReferenceClock_AdvisePeriodic(clock, 0, 0, NULL, &cookie);
+    hr = IReferenceClock_AdvisePeriodic(clock, 0, 0, 0, &cookie);
     ok(hr == E_NOTIMPL, "Got hr %#lx.\n", hr);
 
     hr = IReferenceClock_Unadvise(clock, 0);
@@ -947,6 +1035,616 @@ static void test_synthport(void)
     IDirectMusic_Release(dmusic);
 }
 
+static void test_port_download(void)
+{
+    struct wave_download
+    {
+        DMUS_DOWNLOADINFO info;
+        ULONG offsets[2];
+        DMUS_WAVE wave;
+        DMUS_WAVEDATA wave_data;
+    };
+
+    static void *invalid_ptr = (void *)0xdeadbeef;
+    IDirectMusicDownload *download, *tmp_download;
+    struct wave_download *wave_download;
+    IDirectMusicPortDownload *port;
+    IDirectMusicPort *tmp_port;
+    DWORD ids[4], append, size;
+    IDirectMusic *dmusic;
+    void *buffer;
+    HRESULT hr;
+
+    tmp_port = create_synth_port(&dmusic);
+    hr = IDirectMusicPort_QueryInterface(tmp_port, &IID_IDirectMusicPortDownload, (void **)&port);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    IDirectMusicPort_Release(tmp_port);
+
+    /* GetBuffer only works with pre-allocated DLId */
+    hr = IDirectMusicPortDownload_GetBuffer(port, 0, NULL);
+    ok(hr == E_POINTER, "got %#lx\n", hr);
+    hr = IDirectMusicPortDownload_GetBuffer(port, 0, &download);
+    ok(hr == DMUS_E_INVALID_DOWNLOADID, "got %#lx\n", hr);
+    hr = IDirectMusicPortDownload_GetBuffer(port, 0xdeadbeef, &download);
+    ok(hr == DMUS_E_INVALID_DOWNLOADID, "got %#lx\n", hr);
+
+    /* AllocateBuffer use the exact requested size */
+    hr = IDirectMusicPortDownload_AllocateBuffer(port, 0, NULL);
+    ok(hr == E_POINTER, "got %#lx\n", hr);
+    hr = IDirectMusicPortDownload_AllocateBuffer(port, 0, &download);
+    ok(hr == E_INVALIDARG, "got %#lx\n", hr);
+
+    hr = IDirectMusicPortDownload_AllocateBuffer(port, 1, &download);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    size = 0xdeadbeef;
+    buffer = invalid_ptr;
+    hr = IDirectMusicDownload_GetBuffer(download, &buffer, &size);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(size == 1, "got %#lx\n", size);
+    ok(buffer != invalid_ptr, "got %p\n", buffer);
+    IDirectMusicDownload_Release(download);
+
+    /* GetDLId allocates the given number of slots and returns only the first */
+    hr = IDirectMusicPortDownload_GetDLId(port, NULL, 0);
+    ok(hr == E_POINTER, "got %#lx\n", hr);
+    hr = IDirectMusicPortDownload_GetDLId(port, ids, 0);
+    ok(hr == E_INVALIDARG, "got %#lx\n", hr);
+
+    memset(ids, 0xcc, sizeof(ids));
+    hr = IDirectMusicPortDownload_GetDLId(port, ids, 4);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(ids[0] == 0, "got %#lx\n", ids[0]);
+    ok(ids[1] == 0xcccccccc, "got %#lx\n", ids[1]);
+
+    /* GetBuffer looks up allocated ids to find downloaded buffers */
+    hr = IDirectMusicPortDownload_GetBuffer(port, 2, &download);
+    ok(hr == DMUS_E_NOT_DOWNLOADED_TO_PORT, "got %#lx\n", hr);
+
+    hr = IDirectMusicPortDownload_GetAppend(port, NULL);
+    todo_wine ok(hr == E_POINTER, "got %#lx\n", hr);
+    append = 0xdeadbeef;
+    hr = IDirectMusicPortDownload_GetAppend(port, &append);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    todo_wine ok(append == 2, "got %#lx\n", append);
+
+    /* test Download / Unload on invalid and valid buffers */
+
+    download = invalid_ptr;
+    hr = IDirectMusicPortDownload_AllocateBuffer(port, sizeof(struct wave_download), &download);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(download != invalid_ptr, "got %p\n", download);
+    size = 0xdeadbeef;
+    wave_download = invalid_ptr;
+    hr = IDirectMusicDownload_GetBuffer(download, (void **)&wave_download, &size);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(size == sizeof(struct wave_download), "got %#lx\n", size);
+    ok(wave_download != invalid_ptr, "got %p\n", wave_download);
+    wave_download->info.cbSize = sizeof(struct wave_download);
+    wave_download->info.dwDLId = 2;
+    wave_download->info.dwDLType = 0;
+    wave_download->info.dwNumOffsetTableEntries = 0;
+    hr = IDirectMusicPortDownload_GetBuffer(port, 2, &tmp_download);
+    ok(hr == DMUS_E_NOT_DOWNLOADED_TO_PORT, "got %#lx\n", hr);
+
+    hr = IDirectMusicPortDownload_Download(port, NULL);
+    ok(hr == E_POINTER, "got %#lx\n", hr);
+    hr = IDirectMusicPortDownload_Download(port, download);
+    todo_wine ok(hr == DMUS_E_UNKNOWNDOWNLOAD, "got %#lx\n", hr);
+
+    wave_download->info.dwDLType = DMUS_DOWNLOADINFO_WAVE;
+    wave_download->info.dwNumOffsetTableEntries = 2;
+    wave_download->offsets[0] = offsetof(struct wave_download, wave);
+    wave_download->offsets[1] = offsetof(struct wave_download, wave_data);
+    wave_download->wave.WaveformatEx.wFormatTag = WAVE_FORMAT_PCM;
+    wave_download->wave.WaveformatEx.nChannels = 1;
+    wave_download->wave.WaveformatEx.nSamplesPerSec = 44100;
+    wave_download->wave.WaveformatEx.nAvgBytesPerSec = 44100;
+    wave_download->wave.WaveformatEx.nBlockAlign = 1;
+    wave_download->wave.WaveformatEx.wBitsPerSample = 8;
+    wave_download->wave.WaveformatEx.cbSize = 0;
+    wave_download->wave.ulWaveDataIdx = 1;
+    wave_download->wave.ulCopyrightIdx = 0;
+    wave_download->wave.ulFirstExtCkIdx = 0;
+    wave_download->wave_data.cbSize = 1;
+
+    hr = IDirectMusicPortDownload_Download(port, download);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicPortDownload_Download(port, download);
+    ok(hr == DMUS_E_ALREADY_DOWNLOADED, "got %#lx\n", hr);
+
+    tmp_download = invalid_ptr;
+    hr = IDirectMusicPortDownload_GetBuffer(port, 2, &tmp_download);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(tmp_download == download, "got %p\n", tmp_download);
+    IDirectMusicDownload_Release(tmp_download);
+
+    hr = IDirectMusicPortDownload_Unload(port, NULL);
+    ok(hr == E_POINTER, "got %#lx\n", hr);
+    hr = IDirectMusicPortDownload_Unload(port, download);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IDirectMusicPortDownload_GetBuffer(port, 2, &tmp_download);
+    ok(hr == DMUS_E_NOT_DOWNLOADED_TO_PORT, "got %#lx\n", hr);
+
+    hr = IDirectMusicPortDownload_Unload(port, download);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    /* DLIds are never released */
+    hr = IDirectMusicPortDownload_GetDLId(port, ids, 1);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(ids[0] == 4, "got %#lx\n", ids[0]);
+
+    IDirectMusicDownload_Release(download);
+
+    IDirectMusicPortDownload_Release(port);
+}
+
+static void test_download_instrument(void)
+{
+    static const LARGE_INTEGER zero = {0};
+    IDirectMusicDownloadedInstrument *downloaded;
+    IDirectMusicCollection *collection;
+    IDirectMusicInstrument *instrument, *tmp_instrument;
+    IPersistStream *persist;
+    IDirectMusicPort *port;
+    IDirectMusic *dmusic;
+    WCHAR name[MAX_PATH];
+    IStream *stream;
+    DWORD patch;
+    HRESULT hr;
+
+    port = create_synth_port(&dmusic);
+
+    hr = CoCreateInstance(&CLSID_DirectMusicCollection, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IDirectMusicCollection, (void **)&collection);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IDirectMusicCollection_QueryInterface(collection, &IID_IPersistStream, (void **)&persist);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = CreateStreamOnHGlobal(0, TRUE, &stream);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    CHUNK_RIFF(stream, "DLS ")
+    {
+        DLSHEADER colh = {.cInstruments = 1};
+        struct
+        {
+            POOLTABLE head;
+            POOLCUE cues[1];
+        } ptbl =
+        {
+            .head = {.cbSize = sizeof(POOLTABLE), .cCues = ARRAY_SIZE(ptbl.cues)},
+            .cues = {{.ulOffset = 0}}, /* offsets in wvpl */
+        };
+
+        CHUNK_DATA(stream, "colh", colh);
+        CHUNK_LIST(stream, "lins")
+        {
+            CHUNK_LIST(stream, "ins ")
+            {
+                INSTHEADER insh = {.cRegions = 1, .Locale = {.ulBank = 0x12, .ulInstrument = 0x34}};
+
+                CHUNK_DATA(stream, "insh", insh);
+                CHUNK_LIST(stream, "lrgn")
+                {
+                    CHUNK_LIST(stream, "rgn ")
+                    {
+                        RGNHEADER rgnh =
+                        {
+                            .RangeKey = {.usLow = 0, .usHigh = 127},
+                            .RangeVelocity = {.usLow = 1, .usHigh = 127},
+                        };
+                        WAVELINK wlnk = {.ulChannel = 1, .ulTableIndex = 0};
+                        WSMPL wsmp = {.cbSize = sizeof(WSMPL)};
+
+                        CHUNK_DATA(stream, "rgnh", rgnh);
+                        CHUNK_DATA(stream, "wsmp", wsmp);
+                        CHUNK_DATA(stream, "wlnk", wlnk);
+                    }
+                    CHUNK_END;
+                }
+                CHUNK_END;
+
+                CHUNK_LIST(stream, "lart")
+                {
+                    CONNECTIONLIST connections = {.cbSize = sizeof(connections)};
+                    CHUNK_DATA(stream, "art1", connections);
+                }
+                CHUNK_END;
+            }
+            CHUNK_END;
+        }
+        CHUNK_END;
+        CHUNK_DATA(stream, "ptbl", ptbl);
+        CHUNK_LIST(stream, "wvpl")
+        {
+            CHUNK_LIST(stream, "wave")
+            {
+                WAVEFORMATEX fmt =
+                {
+                    .wFormatTag = WAVE_FORMAT_PCM,
+                    .nChannels = 1,
+                    .wBitsPerSample = 8,
+                    .nSamplesPerSec = 22050,
+                    .nAvgBytesPerSec = 22050,
+                    .nBlockAlign = 1,
+                };
+                BYTE data[16] = {0};
+
+                /* native returns DMUS_E_INVALIDOFFSET from DownloadInstrument if data is last */
+                CHUNK_DATA(stream, "data", data);
+                CHUNK_DATA(stream, "fmt ", fmt);
+            }
+            CHUNK_END;
+        }
+        CHUNK_END;
+    }
+    CHUNK_END;
+
+    hr = IStream_Seek(stream, zero, 0, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IPersistStream_Load(persist, stream);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    IPersistStream_Release(persist);
+    IStream_Release(stream);
+
+    patch = 0xdeadbeef;
+    wcscpy(name, L"DeadBeef");
+    hr = IDirectMusicCollection_EnumInstrument(collection, 0, &patch, name, ARRAY_SIZE(name));
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(patch == 0x1234, "got %#lx\n", patch);
+    ok(*name == 0, "got %s\n", debugstr_w(name));
+    hr = IDirectMusicCollection_EnumInstrument(collection, 1, &patch, name, ARRAY_SIZE(name));
+    ok(hr == S_FALSE, "got %#lx\n", hr);
+
+    hr = IDirectMusicCollection_GetInstrument(collection, 0x1234, &instrument);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicInstrument_GetPatch(instrument, &patch);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(patch == 0x1234, "got %#lx\n", patch);
+    hr = IDirectMusicInstrument_SetPatch(instrument, 0x4321);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicInstrument_GetPatch(instrument, &patch);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(patch == 0x4321, "got %#lx\n", patch);
+
+    hr = IDirectMusicCollection_GetInstrument(collection, 0x1234, &tmp_instrument);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(instrument == tmp_instrument, "got %p\n", tmp_instrument);
+    hr = IDirectMusicInstrument_GetPatch(tmp_instrument, &patch);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(patch == 0x4321, "got %#lx\n", patch);
+    IDirectMusicInstrument_Release(tmp_instrument);
+
+    check_interface(instrument, &IID_IDirectMusicObject, FALSE);
+    check_interface(instrument, &IID_IDirectMusicDownload, FALSE);
+    check_interface(instrument, &IID_IDirectMusicDownloadedInstrument, FALSE);
+
+    hr = IDirectMusicPort_DownloadInstrument(port, instrument, &downloaded, NULL, 0);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    check_interface(downloaded, &IID_IDirectMusicObject, FALSE);
+    check_interface(downloaded, &IID_IDirectMusicDownload, FALSE);
+    check_interface(downloaded, &IID_IDirectMusicInstrument, FALSE);
+
+    hr = IDirectMusicPort_UnloadInstrument(port, downloaded);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    IDirectMusicDownloadedInstrument_Release(downloaded);
+
+    IDirectMusicInstrument_Release(instrument);
+
+    IDirectMusicCollection_Release(collection);
+    IDirectMusicPort_Release(port);
+    IDirectMusic_Release(dmusic);
+}
+
+struct result
+{
+    DWORD patch;
+    WCHAR name[DMUS_MAX_NAME];
+};
+
+static int __cdecl result_cmp(const void *a, const void *b)
+{
+    const struct result *ra = a, *rb = b;
+    if (ra->patch != rb->patch) return ra->patch < rb->patch ? -1 : 1;
+    return wcscmp(ra->name, rb->name);
+}
+
+static void test_default_gm_collection(void)
+{
+    DMUS_OBJECTDESC desc =
+    {
+        .dwSize = sizeof(DMUS_OBJECTDESC),
+        .dwValidData = DMUS_OBJ_OBJECT | DMUS_OBJ_CLASS,
+        .guidClass = CLSID_DirectMusicCollection,
+        .guidObject = GUID_DefaultGMCollection,
+    };
+    struct result expected[] =
+    {
+        {         0, L"Piano 1     "},
+        {       0x1, L"Piano 2     "},
+        {       0x2, L"Piano 3     "},
+        {       0x3, L"Honky-tonk  "},
+        {       0x4, L"E.Piano 1   "},
+        {       0x5, L"E.Piano 2   "},
+        {       0x6, L"Harpsichord "},
+        {       0x7, L"Clav.       "},
+        {       0x8, L"Celesta     "},
+        {       0x9, L"Glockenspiel"},
+        {       0xa, L"Music Box   "},
+        {       0xb, L"Vibraphone  "},
+        {       0xc, L"Marimba     "},
+        {       0xd, L"Xylophone   "},
+        {       0xe, L"Tubular-bell"},
+        {       0xf, L"Santur      "},
+        {      0x10, L"Organ 1     "},
+        {      0x11, L"Organ 2     "},
+        {      0x12, L"Organ 3     "},
+        {      0x13, L"Church Org.1"},
+        {      0x14, L"Reed Organ  "},
+        {      0x15, L"Accordion Fr"},
+        {      0x16, L"Harmonica   "},
+        {      0x17, L"Bandoneon   "},
+        {      0x18, L"Nylon-str.Gt"},
+        {      0x19, L"Steel-str.Gt"},
+        {      0x1a, L"Jazz Gt.    "},
+        {      0x1b, L"Clean Gt.   "},
+        {      0x1c, L"Muted Gt.   "},
+        {      0x1d, L"Overdrive Gt"},
+        {      0x1e, L"DistortionGt"},
+        {      0x1f, L"Gt.Harmonics"},
+        {      0x20, L"Acoustic Bs."},
+        {      0x21, L"Fingered Bs."},
+        {      0x22, L"Picked Bs.  "},
+        {      0x23, L"Fretless Bs."},
+        {      0x24, L"Slap Bass 1 "},
+        {      0x25, L"Slap Bass 2 "},
+        {      0x26, L"Synth Bass 1"},
+        {      0x27, L"Synth Bass 2"},
+        {      0x28, L"Violin      "},
+        {      0x29, L"Viola       "},
+        {      0x2a, L"Cello       "},
+        {      0x2b, L"Contrabass  "},
+        {      0x2c, L"Tremolo Str "},
+        {      0x2d, L"PizzicatoStr"},
+        {      0x2e, L"Harp        "},
+        {      0x2f, L"Timpani     "},
+        {      0x30, L"Strings     "},
+        {      0x31, L"Slow Strings"},
+        {      0x32, L"Syn.Strings1"},
+        {      0x33, L"Syn.Strings2"},
+        {      0x34, L"Choir Aahs  "},
+        {      0x35, L"Voice Oohs  "},
+        {      0x36, L"SynVox      "},
+        {      0x37, L"OrchestraHit"},
+        {      0x38, L"Trumpet     "},
+        {      0x39, L"Trombone    "},
+        {      0x3a, L"Tuba        "},
+        {      0x3b, L"MutedTrumpet"},
+        {      0x3c, L"French Horns"},
+        {      0x3d, L"Brass 1     "},
+        {      0x3e, L"Synth Brass1"},
+        {      0x3f, L"Synth Brass2"},
+        {      0x40, L"Soprano Sax "},
+        {      0x41, L"Alto Sax    "},
+        {      0x42, L"Tenor Sax   "},
+        {      0x43, L"Baritone Sax"},
+        {      0x44, L"Oboe        "},
+        {      0x45, L"English Horn"},
+        {      0x46, L"Bassoon     "},
+        {      0x47, L"Clarinet    "},
+        {      0x48, L"Piccolo     "},
+        {      0x49, L"Flute       "},
+        {      0x4a, L"Recorder    "},
+        {      0x4b, L"Pan Flute   "},
+        {      0x4c, L"Bottle Blow "},
+        {      0x4d, L"Shakuhachi  "},
+        {      0x4e, L"Whistle     "},
+        {      0x4f, L"Ocarina     "},
+        {      0x50, L"Square Wave "},
+        {      0x51, L"Saw Wave    "},
+        {      0x52, L"Syn.Calliope"},
+        {      0x53, L"Chiffer Lead"},
+        {      0x54, L"Charang     "},
+        {      0x55, L"Solo Vox    "},
+        {      0x56, L"5th Saw Wave"},
+        {      0x57, L"Bass & Lead "},
+        {      0x58, L"Fantasia    "},
+        {      0x59, L"Warm Pad    "},
+        {      0x5a, L"Polysynth   "},
+        {      0x5b, L"Space Voice "},
+        {      0x5c, L"Bowed Glass "},
+        {      0x5d, L"Metal Pad   "},
+        {      0x5e, L"Halo Pad    "},
+        {      0x5f, L"Sweep Pad   "},
+        {      0x60, L"Ice Rain    "},
+        {      0x61, L"Soundtrack  "},
+        {      0x62, L"Crystal     "},
+        {      0x63, L"Atmosphere  "},
+        {      0x64, L"Brightness  "},
+        {      0x65, L"Goblin      "},
+        {      0x66, L"Echo Drops  "},
+        {      0x67, L"Star Theme  "},
+        {      0x68, L"Sitar       "},
+        {      0x69, L"Banjo       "},
+        {      0x6a, L"Shamisen    "},
+        {      0x6b, L"Koto        "},
+        {      0x6c, L"Kalimba     "},
+        {      0x6d, L"Bagpipe     "},
+        {      0x6e, L"Fiddle      "},
+        {      0x6f, L"Shanai      "},
+        {      0x70, L"Tinkle Bell "},
+        {      0x71, L"Agogo       "},
+        {      0x72, L"Steel Drums "},
+        {      0x73, L"Woodblock   "},
+        {      0x74, L"Taiko       "},
+        {      0x75, L"Melo. Tom 1 "},
+        {      0x76, L"Synth Drum  "},
+        {      0x77, L"Reverse Cym."},
+        {      0x78, L"Gt.FretNoise"},
+        {      0x79, L"Breath Noise"},
+        {      0x7a, L"Seashore    "},
+        {      0x7b, L"Bird        "},
+        {      0x7c, L"Telephone 1 "},
+        {      0x7d, L"Helicopter  "},
+        {      0x7e, L"Applause    "},
+        {      0x7f, L"Gun Shot    "},
+        {   0x10026, L"SynthBass101"},
+        {   0x10039, L"Trombone 2  "},
+        {   0x1003c, L"Fr.Horn 2   "},
+        {   0x10050, L"Square      "},
+        {   0x10051, L"Saw         "},
+        {   0x10062, L"Syn Mallet  "},
+        {   0x10066, L"Echo Bell   "},
+        {   0x10068, L"Sitar 2     "},
+        {   0x10078, L"Gt.Cut Noise"},
+        {   0x10079, L"Fl.Key Click"},
+        {   0x1007a, L"Rain        "},
+        {   0x1007b, L"Dog         "},
+        {   0x1007c, L"Telephone 2 "},
+        {   0x1007d, L"Car-Engine  "},
+        {   0x1007e, L"Laughing    "},
+        {   0x1007f, L"Machine Gun "},
+        {   0x20066, L"Echo Pan    "},
+        {   0x20078, L"String Slap "},
+        {   0x2007a, L"Thunder     "},
+        {   0x2007b, L"Horse-Gallop"},
+        {   0x2007c, L"DoorCreaking"},
+        {   0x2007d, L"Car-Stop    "},
+        {   0x2007e, L"Screaming   "},
+        {   0x2007f, L"Lasergun    "},
+        {   0x3007a, L"Wind        "},
+        {   0x3007b, L"Bird 2      "},
+        {   0x3007c, L"Door        "},
+        {   0x3007d, L"Car-Pass    "},
+        {   0x3007e, L"Punch       "},
+        {   0x3007f, L"Explosion   "},
+        {   0x4007a, L"Stream      "},
+        {   0x4007c, L"Scratch     "},
+        {   0x4007d, L"Car-Crash   "},
+        {   0x4007e, L"Heart Beat  "},
+        {   0x5007a, L"Bubble      "},
+        {   0x5007c, L"Wind Chimes "},
+        {   0x5007d, L"Siren       "},
+        {   0x5007e, L"Footsteps   "},
+        {   0x6007d, L"Train       "},
+        {   0x7007d, L"Jetplane    "},
+        {   0x80000, L"Piano 1     "},
+        {   0x80001, L"Piano 2     "},
+        {   0x80002, L"Piano 3     "},
+        {   0x80003, L"Honky-tonk  "},
+        {   0x80004, L"Detuned EP 1"},
+        {   0x80005, L"Detuned EP 2"},
+        {   0x80006, L"Coupled Hps."},
+        {   0x8000b, L"Vibraphone  "},
+        {   0x8000c, L"Marimba     "},
+        {   0x8000e, L"Church Bell "},
+        {   0x80010, L"Detuned Or.1"},
+        {   0x80011, L"Detuned Or.2"},
+        {   0x80013, L"Church Org.2"},
+        {   0x80015, L"Accordion It"},
+        {   0x80018, L"Ukulele     "},
+        {   0x80019, L"12-str.Gt   "},
+        {   0x8001a, L"Hawaiian Gt."},
+        {   0x8001b, L"Chorus Gt.  "},
+        {   0x8001c, L"Funk Gt.    "},
+        {   0x8001e, L"Feedback Gt."},
+        {   0x8001f, L"Gt. Feedback"},
+        {   0x80026, L"Synth Bass 3"},
+        {   0x80027, L"Synth Bass 4"},
+        {   0x80028, L"Slow Violin "},
+        {   0x80030, L"Orchestra   "},
+        {   0x80032, L"Syn.Strings3"},
+        {   0x8003d, L"Brass 2     "},
+        {   0x8003e, L"Synth Brass3"},
+        {   0x8003f, L"Synth Brass4"},
+        {   0x80050, L"Sine Wave   "},
+        {   0x80051, L"Doctor Solo "},
+        {   0x8006b, L"Taisho Koto "},
+        {   0x80073, L"Castanets   "},
+        {   0x80074, L"Concert BD  "},
+        {   0x80075, L"Melo. Tom 2 "},
+        {   0x80076, L"808 Tom     "},
+        {   0x8007d, L"Starship    "},
+        {   0x9000e, L"Carillon    "},
+        {   0x90076, L"Elec Perc.  "},
+        {   0x9007d, L"Burst Noise "},
+        {  0x100000, L"Piano 1d    "},
+        {  0x100004, L"E.Piano 1v  "},
+        {  0x100005, L"E.Piano 2v  "},
+        {  0x100006, L"Harpsichord "},
+        {  0x100010, L"60's Organ 1"},
+        {  0x100013, L"Church Org.3"},
+        {  0x100018, L"Nylon Gt.o  "},
+        {  0x100019, L"Mandolin    "},
+        {  0x10001c, L"Funk Gt.2   "},
+        {  0x100027, L"Rubber Bass "},
+        {  0x10003e, L"AnalogBrass1"},
+        {  0x10003f, L"AnalogBrass2"},
+        {  0x180004, L"60's E.Piano"},
+        {  0x180006, L"Harpsi.o    "},
+        {  0x200010, L"Organ 4     "},
+        {  0x200011, L"Organ 5     "},
+        {  0x200018, L"Nylon Gt.2  "},
+        {  0x200034, L"Choir Aahs 2"},
+        {0x80000000, L"Standard    "},
+        {0x80000008, L"Room        "},
+        {0x80000010, L"Power       "},
+        {0x80000018, L"Electronic  "},
+        {0x80000019, L"TR-808      "},
+        {0x80000020, L"Jazz        "},
+        {0x80000028, L"Brush       "},
+        {0x80000030, L"Orchestra   "},
+        {0x80000038, L"SFX         "},
+    }, results[ARRAY_SIZE(expected) + 1];
+    IDirectMusicCollection *collection;
+    IDirectMusicLoader *loader;
+    HRESULT hr;
+    DWORD i;
+
+    hr = CoCreateInstance(&CLSID_DirectMusicLoader, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IDirectMusicLoader, (void**)&loader);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IDirectMusicLoader_GetObject(loader, &desc, &IID_IDirectMusicCollection, (void **)&collection);
+    if (hr == DMUS_E_LOADER_NOFILENAME)
+    {
+        skip("Failed to open default GM collection, skipping tests. Missing system SoundFont?\n");
+        goto skip_tests;
+    }
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    for (i = 0; hr == S_OK && i < ARRAY_SIZE(results); i++)
+    {
+        results[i].patch = 0xdeadbeef;
+        wcscpy(results[i].name, L"DeadBeef");
+        hr = IDirectMusicCollection_EnumInstrument(collection, i, &results[i].patch,
+                results[i].name, ARRAY_SIZE(results[i].name));
+    }
+    if (hr == S_FALSE) i--;
+    ok(hr == S_FALSE, "got %#lx\n", hr);
+    ok(i > 0, "got %lu\n", i);
+    todo_wine ok(i == ARRAY_SIZE(expected), "got %lu\n", i);
+
+    qsort(results, i, sizeof(*results), result_cmp);
+
+    while (i--)
+    {
+        winetest_push_context("%lu", i);
+        trace("got %#lx %s\n", results[i].patch, debugstr_w(results[i].name));
+        todo_wine_if(expected[i].patch >= 128)
+        ok(results[i].patch == expected[i].patch, "got %#lx\n", results[i].patch);
+        /* system soundfont names are not very predictable, let's not check them */
+        winetest_pop_context();
+    }
+
+    IDirectMusicCollection_Release(collection);
+
+skip_tests:
+    IDirectMusicLoader_Release(loader);
+}
+
 START_TEST(dmusic)
 {
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -967,6 +1665,9 @@ START_TEST(dmusic)
     test_parsedescriptor();
     test_master_clock();
     test_synthport();
+    test_port_download();
+    test_download_instrument();
+    test_default_gm_collection();
 
     CoUninitialize();
 }

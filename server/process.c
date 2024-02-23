@@ -855,7 +855,6 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     list_init( &process->locks );
     list_init( &process->asyncs );
     list_init( &process->classes );
-    list_init( &process->surfaces );
     list_init( &process->views );
 
     process->end_time = 0;
@@ -1168,7 +1167,6 @@ static void process_killed( struct process *process )
     destroy_process_classes( process );
     free_mapped_views( process );
     free_process_user_handles( process );
-    remove_process_surfaces( process );
     remove_process_locks( process );
     set_process_startup_state( process, STARTUP_ABORTED );
     finish_process_tracing( process );
@@ -1490,6 +1488,7 @@ DECL_HANDLER(new_process)
                                     handles, req->handles_size / sizeof(*handles), token )))
         goto done;
 
+    process->machine = req->machine;
     process->startup_info = (struct startup_info *)grab_object( info );
 
     job = parent->job;
@@ -1551,7 +1550,10 @@ DECL_HANDLER(new_process)
         /* debug_children is set to 1 by default */
     }
 
-    if (!info->data->console_flags) process->group_id = parent->group_id;
+    if (info->data->process_group_id == parent->group_id)
+        process->group_id = parent->group_id;
+    else
+        info->data->process_group_id = process->group_id;
 
     info->process = (struct process *)grab_object( process );
     reply->info = alloc_handle( current->process, info, SYNCHRONIZE, 0 );
@@ -1590,6 +1592,7 @@ DECL_HANDLER(get_startup_info)
     if (!info) return;
 
     /* we return the data directly without making a copy so this can only be called once */
+    reply->machine = process->machine;
     reply->info_size = info->info_size;
     size = info->data_size;
     if (size > get_reply_max_size()) size = get_reply_max_size();

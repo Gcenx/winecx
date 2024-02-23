@@ -145,9 +145,9 @@ static inline HDDEDATA Dde_OnRequest(UINT uFmt, HCONV hconv, HSZ hszTopic,
         WIN32_FIND_DATAW finddata;
         HANDLE hfind;
         int len = 1;
-        WCHAR *groups_data = malloc(sizeof(WCHAR));
+        WCHAR *groups_data = malloc(sizeof(WCHAR)), *new_groups_data;
         char *groups_dataA;
-        HDDEDATA ret;
+        HDDEDATA ret = NULL;
 
         groups_data[0] = 0;
         programs = get_programs_path(L"*", FALSE);
@@ -160,7 +160,15 @@ static inline HDDEDATA Dde_OnRequest(UINT uFmt, HCONV hconv, HSZ hszTopic,
                     wcscmp(finddata.cFileName, L".") && wcscmp(finddata.cFileName, L".."))
                 {
                     len += lstrlenW(finddata.cFileName) + 2;
-                    groups_data = realloc(groups_data, len * sizeof(WCHAR));
+                    new_groups_data = realloc(groups_data, len * sizeof(WCHAR));
+                    if (!new_groups_data)
+                    {
+                        free(groups_data);
+                        free(programs);
+                        FindClose(hfind);
+                        return NULL;
+                    }
+                    groups_data = new_groups_data;
                     lstrcatW(groups_data, finddata.cFileName);
                     lstrcatW(groups_data, L"\r\n");
                 }
@@ -169,9 +177,12 @@ static inline HDDEDATA Dde_OnRequest(UINT uFmt, HCONV hconv, HSZ hszTopic,
         }
 
         len = WideCharToMultiByte(CP_ACP, 0, groups_data, -1, NULL, 0, NULL, NULL);
-        groups_dataA = malloc(len * sizeof(WCHAR));
-        WideCharToMultiByte(CP_ACP, 0, groups_data, -1, groups_dataA, len, NULL, NULL);
-        ret = DdeCreateDataHandle(dwDDEInst, (BYTE *)groups_dataA, len, 0, hszGroups, uFmt, 0);
+        groups_dataA = malloc(len);
+        if (groups_dataA)
+        {
+            WideCharToMultiByte(CP_ACP, 0, groups_data, -1, groups_dataA, len, NULL, NULL);
+            ret = DdeCreateDataHandle(dwDDEInst, (BYTE *)groups_dataA, len, 0, hszGroups, uFmt, 0);
+        }
 
         free(groups_dataA);
         free(groups_data);
@@ -346,7 +357,7 @@ static DWORD PROGMAN_OnExecute(WCHAR *command, int argc, WCHAR **argv)
 static DWORD parse_dde_command(HSZ hszTopic, WCHAR *command)
 {
     WCHAR *original = command;
-    WCHAR *opcode = NULL, **argv = NULL, *p;
+    WCHAR *opcode = NULL, **argv = NULL, **new_argv, *p;
     int argc = 0, i;
     DWORD ret = DDE_FACK;
 
@@ -356,7 +367,7 @@ static DWORD parse_dde_command(HSZ hszTopic, WCHAR *command)
     while (*command == '[')
     {
         argc = 0;
-        argv = malloc(sizeof(*argv));
+        argv = NULL;
 
         command++;
         while (*command == ' ') command++;
@@ -381,12 +392,14 @@ static DWORD parse_dde_command(HSZ hszTopic, WCHAR *command)
                 else
                 {
                     if (!(p = wcspbrk(command, L",()[]"))) goto error;
-                    while (p[-1] == ' ') p--;
+                    while (p > command && p[-1] == ' ') p--;
                 }
 
+                new_argv = realloc(argv, (argc + 1) * sizeof(*argv));
+                if (!new_argv) goto error;
+                argv = new_argv;
+                argv[argc] = strndupW(command, p - command);
                 argc++;
-                argv = realloc(argv, argc * sizeof(*argv));
-                argv[argc-1] = strndupW(command, p - command);
 
                 command = p;
                 if (*command == '"') command++;

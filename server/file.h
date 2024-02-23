@@ -94,6 +94,8 @@ extern unsigned int get_fd_options( struct fd *fd );
 extern unsigned int get_fd_comp_flags( struct fd *fd );
 extern int is_fd_overlapped( struct fd *fd );
 extern int get_unix_fd( struct fd *fd );
+extern client_ptr_t get_fd_map_address( struct fd *fd );
+extern void set_fd_map_address( struct fd *fd, client_ptr_t addr, mem_size_t size );
 extern int is_same_file_fd( struct fd *fd1, struct fd *fd2 );
 extern int is_fd_removable( struct fd *fd );
 extern int check_fd_events( struct fd *fd, int events );
@@ -102,7 +104,7 @@ extern obj_handle_t lock_fd( struct fd *fd, file_pos_t offset, file_pos_t count,
 extern void unlock_fd( struct fd *fd, file_pos_t offset, file_pos_t count );
 extern void allow_fd_caching( struct fd *fd );
 extern void set_fd_signaled( struct fd *fd, int signaled );
-extern char *dup_fd_name( struct fd *root, const char *name );
+extern char *dup_fd_name( struct fd *root, const char *name ) __WINE_DEALLOC(free) __WINE_MALLOC;
 extern void get_nt_name( struct fd *fd, struct unicode_str *name );
 
 extern int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry );
@@ -174,7 +176,9 @@ extern int is_file_executable( const char *name );
 
 struct memory_view;
 
+extern void init_memory(void);
 extern int grow_file( int unix_fd, file_pos_t new_size );
+extern void free_map_addr( client_ptr_t base, mem_size_t size );
 extern struct memory_view *find_mapped_view( struct process *process, client_ptr_t base );
 extern struct memory_view *get_exe_view( struct process *process );
 extern struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing );
@@ -186,10 +190,6 @@ extern struct mapping *create_fd_mapping( struct object *root, const struct unic
                                           unsigned int attr, const struct security_descriptor *sd );
 extern struct object *create_user_data_mapping( struct object *root, const struct unicode_str *name,
                                                 unsigned int attr, const struct security_descriptor *sd );
-extern struct mapping *create_mapping( struct object *root, const struct unicode_str *name,
-                                       unsigned int attr, mem_size_t size, unsigned int flags,
-                                       obj_handle_t handle, unsigned int file_access,
-                                       const struct security_descriptor *sd );
 
 /* device functions */
 
@@ -252,6 +252,7 @@ extern struct thread *async_get_thread( struct async *async );
 extern struct async *find_pending_async( struct async_queue *queue );
 extern void cancel_process_asyncs( struct process *process );
 extern void cancel_terminating_thread_asyncs( struct thread *thread );
+extern int async_close_obj_handle( struct object *obj, struct process *process, obj_handle_t handle );
 
 static inline void init_async_queue( struct async_queue *queue )
 {

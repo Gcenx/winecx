@@ -89,6 +89,8 @@
 #include "wine/asm.h"
 #include "main.h"
 
+#pragma GCC visibility push(hidden)
+
 /* ELF definitions */
 #define ELF_PREFERRED_ADDRESS(loader, maplength, mapstartpref) (mapstartpref)
 #define ELF_FIXED_ADDRESS(loader, mapstart) ((void) 0)
@@ -172,11 +174,6 @@ struct wld_auxv
  * provide our own (empty) version, otherwise linker fails.
  */
 void __bb_init_func(void) { return; }
-
-/* similar to the above but for -fstack-protector */
-void *__stack_chk_guard = 0;
-void __stack_chk_fail_local(void) { return; }
-void __stack_chk_fail(void) { return; }
 
 #ifdef __i386__
 
@@ -351,7 +348,7 @@ __ASM_GLOBAL_FUNC(_start,
                   "movq %rsp,%rax\n\t"
                   "leaq -144(%rsp),%rsp\n\t" /* allocate some space for extra aux values */
                   "movq %rax,(%rsp)\n\t"     /* orig stack pointer */
-                  "movq $thread_data,%rsi\n\t"
+                  "leaq thread_data(%rip),%rsi\n\t"
                   "movq $0x1002,%rdi\n\t"    /* ARCH_SET_FS */
                   "movq $158,%rax\n\t"       /* SYS_arch_prctl */
                   "syscall\n\t"
@@ -439,7 +436,8 @@ __ASM_GLOBAL_FUNC(_start,
                   "mov x0, SP\n\t"
                   "sub SP, SP, #144\n\t" /* allocate some space for extra aux values */
                   "str x0, [SP]\n\t"     /* orig stack pointer */
-                  "ldr x0, =thread_data\n\t"
+                  "adrp x0, thread_data\n\t"
+                  "add x0, x0, :lo12:thread_data\n\t"
                   "msr tpidr_el0, x0\n\t"
                   "mov x0, SP\n\t"       /* ptr to orig stack pointer */
                   "bl wld_start\n\t"
@@ -754,6 +752,33 @@ static __attribute__((noreturn,format(printf,1,2))) void fatal_error(const char 
     va_end( args );
     wld_write(2, buffer, len);
     wld_exit(1);
+}
+
+/*
+ * The __stack_chk_* symbols are only used when file is compiled with gcc flags
+ * "-fstack-protector".  This function is normally provided by libc's startup
+ * files, but since we build the preloader with "-nostartfiles -nodefaultlibs",
+ * we have to provide our own version to keep the linker happy.
+ */
+unsigned long __stack_chk_guard = 0;
+
+void __attribute__((noreturn)) __stack_chk_fail(void)
+{
+    static const char message[] = "preloader: stack overrun detected, crashing\n";
+
+    /* Avoid using non-syscall functions that can re-enter this function */
+    wld_write(2, message, sizeof(message) - 1);
+
+    /* Deliberate induce crash and possibly dump core */
+    *(volatile char *)0;
+
+    /* Last resort if the zero page turns out to be actually readable */
+    wld_exit(1);
+}
+
+void __attribute__((noreturn)) __stack_chk_fail_local(void)
+{
+    __stack_chk_fail();
 }
 
 #ifdef DUMP_AUX_INFO
@@ -1398,7 +1423,7 @@ void* wld_start( void **stack )
     page_size = get_auxiliary( av, AT_PAGESZ, 4096 );
     page_mask = page_size - 1;
 
-    preloader_start = (char *)_start - ((unsigned long)_start & page_mask);
+    preloader_start = (char *)((unsigned long)_start & ~page_mask);
     preloader_end = (char *)((unsigned long)(_end + page_mask) & ~page_mask);
 
 #ifdef DUMP_AUX_INFO
@@ -1495,5 +1520,7 @@ void* wld_start( void **stack )
 
     return (void *)ld_so_map.l_entry;
 }
+
+#pragma GCC visibility pop
 
 #endif /* __linux__ */

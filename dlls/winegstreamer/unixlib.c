@@ -78,26 +78,63 @@ GstElement *create_element(const char *name, const char *plugin_set)
     return element;
 }
 
-GstElement *find_element(GstElementFactoryListType type, GstCaps *src_caps, GstCaps *sink_caps)
+GstElement *factory_create_element(GstElementFactory *factory)
+{
+    GstElement *element;
+
+    if ((element = gst_element_factory_create(factory, NULL)))
+        GST_INFO("Created element %"GST_PTR_FORMAT" from factory %"GST_PTR_FORMAT".",
+                element, factory);
+    else
+        GST_WARNING("Failed to create element from factory %"GST_PTR_FORMAT".", factory);
+
+    return element;
+}
+
+GList *find_element_factories(GstElementFactoryListType type, GstRank min_rank,
+        GstCaps *element_sink_caps, GstCaps *element_src_caps)
+{
+    GList *tmp, *factories = NULL;
+
+    if (!(factories = gst_element_factory_list_get_elements(type, min_rank)))
+        goto done;
+
+    if (element_sink_caps)
+    {
+        tmp = gst_element_factory_list_filter(factories, element_sink_caps, GST_PAD_SINK, FALSE);
+        gst_plugin_feature_list_free(factories);
+        if (!(factories = tmp))
+            goto done;
+    }
+
+    if (element_src_caps)
+    {
+        tmp = gst_element_factory_list_filter(factories, element_src_caps, GST_PAD_SRC, FALSE);
+        gst_plugin_feature_list_free(factories);
+        if (!(factories = tmp))
+            goto done;
+    }
+
+    factories = g_list_sort(factories, gst_plugin_feature_rank_compare_func);
+
+done:
+    if (!factories)
+        GST_WARNING("Failed to find any element factory matching "
+                "type %"G_GUINT64_FORMAT"x, caps %"GST_PTR_FORMAT" / %"GST_PTR_FORMAT".",
+                type, element_sink_caps, element_src_caps);
+
+    return factories;
+}
+
+GstElement *find_element(GstElementFactoryListType type, GstCaps *element_sink_caps, GstCaps *element_src_caps)
 {
     GstElement *element = NULL;
     GList *tmp, *transforms;
     const gchar *name;
 
-    if (!(transforms = gst_element_factory_list_get_elements(type, GST_RANK_MARGINAL)))
-        goto done;
+    if (!(transforms = find_element_factories(type, GST_RANK_MARGINAL, element_sink_caps, element_src_caps)))
+        return NULL;
 
-    tmp = gst_element_factory_list_filter(transforms, src_caps, GST_PAD_SINK, FALSE);
-    gst_plugin_feature_list_free(transforms);
-    if (!(transforms = tmp))
-        goto done;
-
-    tmp = gst_element_factory_list_filter(transforms, sink_caps, GST_PAD_SRC, FALSE);
-    gst_plugin_feature_list_free(transforms);
-    if (!(transforms = tmp))
-        goto done;
-
-    transforms = g_list_sort(transforms, gst_plugin_feature_rank_compare_func);
     for (tmp = transforms; tmp != NULL && element == NULL; tmp = tmp->next)
     {
         name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(tmp->data));
@@ -111,23 +148,14 @@ GstElement *find_element(GstElementFactoryListType type, GstCaps *src_caps, GstC
             continue;
         }
 
-        if (!(element = gst_element_factory_create(GST_ELEMENT_FACTORY(tmp->data), NULL)))
-            GST_WARNING("Failed to create %s element.", name);
+        element = factory_create_element(GST_ELEMENT_FACTORY(tmp->data));
     }
+
     gst_plugin_feature_list_free(transforms);
 
-done:
-    if (element)
-    {
-        GST_DEBUG("Created %s element %p.", name, element);
-    }
-    else
-    {
-        gchar *src_str = gst_caps_to_string(src_caps), *sink_str = gst_caps_to_string(sink_caps);
-        GST_WARNING("Failed to create element matching caps %s / %s.", src_str, sink_str);
-        g_free(sink_str);
-        g_free(src_str);
-    }
+    if (!element)
+        GST_WARNING("Failed to create element matching caps %"GST_PTR_FORMAT" / %"GST_PTR_FORMAT".",
+                element_sink_caps, element_src_caps);
 
     return element;
 }
@@ -156,27 +184,34 @@ bool append_element(GstElement *container, GstElement *element, GstElement **fir
     return success;
 }
 
+bool link_src_to_sink(GstPad *src_pad, GstPad *sink_pad)
+{
+    GstPadLinkReturn ret;
+
+    if ((ret = gst_pad_link(src_pad, sink_pad)) != GST_PAD_LINK_OK)
+    {
+        GST_ERROR("Failed to link src pad %"GST_PTR_FORMAT" to sink pad %"GST_PTR_FORMAT", reason: %s",
+                src_pad, sink_pad, gst_pad_link_get_name(ret));
+        return false;
+    }
+
+    return true;
+}
+
 bool link_src_to_element(GstPad *src_pad, GstElement *element)
 {
     GstPadLinkReturn ret;
     GstPad *sink_pad;
 
-    if (!(sink_pad = gst_element_get_static_pad(element, "sink")))
+    if (!(sink_pad = gst_element_get_compatible_pad(element, src_pad, NULL)))
     {
-        gchar *name = gst_element_get_name(element);
-        GST_ERROR("Failed to find sink pad on %s", name);
-        g_free(name);
+        GST_ERROR("Failed to find sink pad compatible to %"GST_PTR_FORMAT" on %"GST_PTR_FORMAT".",
+                src_pad, element);
         return false;
     }
-    if ((ret = gst_pad_link(src_pad, sink_pad)))
-    {
-        gchar *src_name = gst_pad_get_name(src_pad), *sink_name = gst_pad_get_name(sink_pad);
-        GST_ERROR("Failed to link element pad %s with pad %s", src_name, sink_name);
-        g_free(sink_name);
-        g_free(src_name);
-    }
+    ret = link_src_to_sink(src_pad, sink_pad);
     gst_object_unref(sink_pad);
-    return !ret;
+    return ret;
 }
 
 bool link_element_to_sink(GstElement *element, GstPad *sink_pad)
@@ -184,22 +219,29 @@ bool link_element_to_sink(GstElement *element, GstPad *sink_pad)
     GstPadLinkReturn ret;
     GstPad *src_pad;
 
-    if (!(src_pad = gst_element_get_static_pad(element, "src")))
+    if (!(src_pad = gst_element_get_compatible_pad(element, sink_pad, NULL)))
     {
-        gchar *name = gst_element_get_name(element);
-        GST_ERROR("Failed to find src pad on %s", name);
-        g_free(name);
+        GST_ERROR("Failed to find src pad compatible to %"GST_PTR_FORMAT" on %"GST_PTR_FORMAT".",
+                sink_pad, element);
         return false;
     }
-    if ((ret = gst_pad_link(src_pad, sink_pad)))
-    {
-        gchar *src_name = gst_pad_get_name(src_pad), *sink_name = gst_pad_get_name(sink_pad);
-        GST_ERROR("Failed to link pad %s with element pad %s", src_name, sink_name);
-        g_free(sink_name);
-        g_free(src_name);
-    }
+    ret = link_src_to_sink(src_pad, sink_pad);
     gst_object_unref(src_pad);
-    return !ret;
+    return ret;
+}
+
+bool push_event(GstPad *pad, GstEvent *event)
+{
+    if (!gst_pad_push_event(pad, event))
+    {
+        const gchar *type_name = gst_event_type_get_name(GST_EVENT_TYPE(event));
+        gchar *pad_name = gst_pad_get_name(pad);
+
+        GST_ERROR("Failed to push %s event %p to pad %s.", type_name, event, pad_name);
+        g_free(pad_name);
+        return false;
+    }
+    return true;
 }
 
 NTSTATUS wg_init_gstreamer(void *arg)

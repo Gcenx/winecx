@@ -44,8 +44,6 @@
 #include <string.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -499,7 +497,7 @@ static HRESULT WINAPI IPropertyStorage_fnReadMultiple(
         if (rgpspec[i].ulKind == PRSPEC_LPWSTR)
         {
             PROPVARIANT *prop = PropertyStorage_FindPropertyByName(This,
-             rgpspec[i].u.lpwstr);
+             rgpspec[i].lpwstr);
 
             if (prop)
                 PropertyStorage_PropVariantCopy(&rgpropvar[i], prop, GetACP(),
@@ -507,7 +505,7 @@ static HRESULT WINAPI IPropertyStorage_fnReadMultiple(
         }
         else
         {
-            switch (rgpspec[i].u.propid)
+            switch (rgpspec[i].propid)
             {
                 case PID_CODEPAGE:
                     rgpropvar[i].vt = VT_I2;
@@ -520,7 +518,7 @@ static HRESULT WINAPI IPropertyStorage_fnReadMultiple(
                 default:
                 {
                     PROPVARIANT *prop = PropertyStorage_FindProperty(This,
-                     rgpspec[i].u.propid);
+                     rgpspec[i].propid);
 
                     if (prop)
                         PropertyStorage_PropVariantCopy(&rgpropvar[i], prop,
@@ -765,7 +763,7 @@ static HRESULT WINAPI IPropertyStorage_fnWriteMultiple(
         if (rgpspec[i].ulKind == PRSPEC_LPWSTR)
         {
             PROPVARIANT *prop = PropertyStorage_FindPropertyByName(This,
-             rgpspec[i].u.lpwstr);
+             rgpspec[i].lpwstr);
 
             if (prop)
                 PropVariantCopy(prop, &rgpropvar[i]);
@@ -782,7 +780,7 @@ static HRESULT WINAPI IPropertyStorage_fnWriteMultiple(
                     PROPID nextId = max(propidNameFirst, This->highestProp + 1);
 
                     hr = PropertyStorage_StoreNameWithId(This,
-                     (LPCSTR)rgpspec[i].u.lpwstr, CP_UNICODE, nextId);
+                     (LPCSTR)rgpspec[i].lpwstr, CP_UNICODE, nextId);
                     if (SUCCEEDED(hr))
                         hr = PropertyStorage_StorePropWithId(This, nextId,
                          &rgpropvar[i], GetACP());
@@ -791,7 +789,7 @@ static HRESULT WINAPI IPropertyStorage_fnWriteMultiple(
         }
         else
         {
-            switch (rgpspec[i].u.propid)
+            switch (rgpspec[i].propid)
             {
             case PID_DICTIONARY:
                 /* Can't set the dictionary */
@@ -823,11 +821,11 @@ static HRESULT WINAPI IPropertyStorage_fnWriteMultiple(
                 /* silently ignore like MSDN says */
                 break;
             default:
-                if (rgpspec[i].u.propid >= PID_MIN_READONLY)
+                if (rgpspec[i].propid >= PID_MIN_READONLY)
                     hr = STG_E_INVALIDPARAMETER;
                 else
                     hr = PropertyStorage_StorePropWithId(This,
-                     rgpspec[i].u.propid, &rgpropvar[i], GetACP());
+                     rgpspec[i].propid, &rgpropvar[i], GetACP());
             }
         }
     }
@@ -864,14 +862,14 @@ static HRESULT WINAPI IPropertyStorage_fnDeleteMultiple(
         {
             void *propid;
 
-            if (dictionary_find(This->name_to_propid, rgpspec[i].u.lpwstr, &propid))
+            if (dictionary_find(This->name_to_propid, rgpspec[i].lpwstr, &propid))
                 dictionary_remove(This->propid_to_prop, propid);
         }
         else
         {
-            if (rgpspec[i].u.propid >= PID_FIRST_USABLE &&
-             rgpspec[i].u.propid < PID_MIN_READONLY)
-                dictionary_remove(This->propid_to_prop, UlongToPtr(rgpspec[i].u.propid));
+            if (rgpspec[i].propid >= PID_FIRST_USABLE &&
+             rgpspec[i].propid < PID_MIN_READONLY)
+                dictionary_remove(This->propid_to_prop, UlongToPtr(rgpspec[i].propid));
             else
                 hr = STG_E_INVALIDPARAMETER;
         }
@@ -1746,20 +1744,20 @@ static HRESULT PropertyStorage_ReadFromStream(PropertyStorage_impl *This)
     hr = IStream_Stat(This->stm, &stat, STATFLAG_NONAME);
     if (FAILED(hr))
         goto end;
-    if (stat.cbSize.u.HighPart)
+    if (stat.cbSize.HighPart)
     {
         WARN("stream too big\n");
         /* maximum size varies, but it can't be this big */
         hr = STG_E_INVALIDHEADER;
         goto end;
     }
-    if (stat.cbSize.u.LowPart == 0)
+    if (stat.cbSize.LowPart == 0)
     {
         /* empty stream is okay */
         hr = S_OK;
         goto end;
     }
-    else if (stat.cbSize.u.LowPart < sizeof(PROPERTYSETHEADER) +
+    else if (stat.cbSize.LowPart < sizeof(PROPERTYSETHEADER) +
      sizeof(FORMATIDOFFSET))
     {
         WARN("stream too small\n");
@@ -1794,9 +1792,9 @@ static HRESULT PropertyStorage_ReadFromStream(PropertyStorage_impl *This)
     hr = PropertyStorage_ReadFmtIdOffsetFromStream(This->stm, &fmtOffset);
     if (FAILED(hr))
         goto end;
-    if (fmtOffset.dwOffset > stat.cbSize.u.LowPart)
+    if (fmtOffset.dwOffset > stat.cbSize.LowPart)
     {
-        WARN("invalid offset %ld (stream length is %ld)\n", fmtOffset.dwOffset, stat.cbSize.u.LowPart);
+        WARN("invalid offset %ld (stream length is %ld)\n", fmtOffset.dwOffset, stat.cbSize.LowPart);
         hr = STG_E_INVALIDHEADER;
         goto end;
     }
@@ -2995,167 +2993,6 @@ static const IPropertyStorageVtbl IPropertyStorage_Vtbl =
     IPropertyStorage_fnSetClass,
     IPropertyStorage_fnStat,
 };
-
-/***********************************************************************
- * Format ID <-> name conversion
- */
-static const WCHAR szSummaryInfo[] = L"\5SummaryInformation";
-static const WCHAR szDocSummaryInfo[] = L"\5DocumentSummaryInformation";
-
-#define BITS_PER_BYTE    8
-#define CHARMASK         0x1f
-#define BITS_IN_CHARMASK 5
-#define NUM_ALPHA_CHARS  26
-
-/***********************************************************************
- * FmtIdToPropStgName					[ole32.@]
- * Returns the storage name of the format ID rfmtid.
- * PARAMS
- *  rfmtid [I] Format ID for which to return a storage name
- *  str    [O] Storage name associated with rfmtid.
- *
- * RETURNS
- *  E_INVALIDARG if rfmtid or str i NULL, S_OK otherwise.
- *
- * NOTES
- * str must be at least CCH_MAX_PROPSTG_NAME characters in length.
- */
-HRESULT WINAPI FmtIdToPropStgName(const FMTID *rfmtid, LPOLESTR str)
-{
-    static const char fmtMap[] = "abcdefghijklmnopqrstuvwxyz012345";
-
-    TRACE("%s, %p\n", debugstr_guid(rfmtid), str);
-
-    if (!rfmtid) return E_INVALIDARG;
-    if (!str) return E_INVALIDARG;
-
-    if (IsEqualGUID(&FMTID_SummaryInformation, rfmtid))
-        lstrcpyW(str, szSummaryInfo);
-    else if (IsEqualGUID(&FMTID_DocSummaryInformation, rfmtid))
-        lstrcpyW(str, szDocSummaryInfo);
-    else if (IsEqualGUID(&FMTID_UserDefinedProperties, rfmtid))
-        lstrcpyW(str, szDocSummaryInfo);
-    else
-    {
-        const BYTE *fmtptr;
-        WCHAR *pstr = str;
-        ULONG bitsRemaining = BITS_PER_BYTE;
-
-        *pstr++ = 5;
-        for (fmtptr = (const BYTE *)rfmtid; fmtptr < (const BYTE *)rfmtid + sizeof(FMTID); )
-        {
-            ULONG i = *fmtptr >> (BITS_PER_BYTE - bitsRemaining);
-
-            if (bitsRemaining >= BITS_IN_CHARMASK)
-            {
-                *pstr = (WCHAR)(fmtMap[i & CHARMASK]);
-                if (bitsRemaining == BITS_PER_BYTE && *pstr >= 'a' &&
-                 *pstr <= 'z')
-                    *pstr += 'A' - 'a';
-                pstr++;
-                bitsRemaining -= BITS_IN_CHARMASK;
-                if (bitsRemaining == 0)
-                {
-                    fmtptr++;
-                    bitsRemaining = BITS_PER_BYTE;
-                }
-            }
-            else
-            {
-                if (++fmtptr < (const BYTE *)rfmtid + sizeof(FMTID))
-                    i |= *fmtptr << bitsRemaining;
-                *pstr++ = (WCHAR)(fmtMap[i & CHARMASK]);
-                bitsRemaining += BITS_PER_BYTE - BITS_IN_CHARMASK;
-            }
-        }
-        *pstr = 0;
-    }
-    TRACE("returning %s\n", debugstr_w(str));
-    return S_OK;
-}
-
-/***********************************************************************
- * PropStgNameToFmtId					[ole32.@]
- * Returns the format ID corresponding to the given name.
- * PARAMS
- *  str    [I] Storage name to convert to a format ID.
- *  rfmtid [O] Format ID corresponding to str.
- *
- * RETURNS
- *  E_INVALIDARG if rfmtid or str is NULL or if str can't be converted to
- *  a format ID, S_OK otherwise.
- */
-HRESULT WINAPI PropStgNameToFmtId(const LPOLESTR str, FMTID *rfmtid)
-{
-    HRESULT hr = STG_E_INVALIDNAME;
-
-    TRACE("%s, %p\n", debugstr_w(str), rfmtid);
-
-    if (!rfmtid) return E_INVALIDARG;
-    if (!str) return STG_E_INVALIDNAME;
-
-    if (!lstrcmpiW(str, szDocSummaryInfo))
-    {
-        *rfmtid = FMTID_DocSummaryInformation;
-        hr = S_OK;
-    }
-    else if (!lstrcmpiW(str, szSummaryInfo))
-    {
-        *rfmtid = FMTID_SummaryInformation;
-        hr = S_OK;
-    }
-    else
-    {
-        ULONG bits;
-        BYTE *fmtptr = (BYTE *)rfmtid - 1;
-        const WCHAR *pstr = str;
-
-        memset(rfmtid, 0, sizeof(*rfmtid));
-        for (bits = 0; bits < sizeof(FMTID) * BITS_PER_BYTE;
-         bits += BITS_IN_CHARMASK)
-        {
-            ULONG bitsUsed = bits % BITS_PER_BYTE, bitsStored;
-            WCHAR wc;
-
-            if (bitsUsed == 0)
-                fmtptr++;
-            wc = *++pstr - 'A';
-            if (wc > NUM_ALPHA_CHARS)
-            {
-                wc += 'A' - 'a';
-                if (wc > NUM_ALPHA_CHARS)
-                {
-                    wc += 'a' - '0' + NUM_ALPHA_CHARS;
-                    if (wc > CHARMASK)
-                    {
-                        WARN("invalid character (%d)\n", *pstr);
-                        goto end;
-                    }
-                }
-            }
-            *fmtptr |= wc << bitsUsed;
-            bitsStored = min(BITS_PER_BYTE - bitsUsed, BITS_IN_CHARMASK);
-            if (bitsStored < BITS_IN_CHARMASK)
-            {
-                wc >>= BITS_PER_BYTE - bitsUsed;
-                if (bits + bitsStored == sizeof(FMTID) * BITS_PER_BYTE)
-                {
-                    if (wc != 0)
-                    {
-                        WARN("extra bits\n");
-                        goto end;
-                    }
-                    break;
-                }
-                fmtptr++;
-                *fmtptr |= (BYTE)wc;
-            }
-        }
-        hr = S_OK;
-    }
-end:
-    return hr;
-}
 
 #ifdef __i386__  /* thiscall functions are i386-specific */
 

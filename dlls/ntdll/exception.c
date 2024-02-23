@@ -24,8 +24,6 @@
 #include <signal.h>
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -94,6 +92,7 @@ const char *debugstr_exception_code( DWORD code )
     case EXCEPTION_WINE_CXX_EXCEPTION: return "EXCEPTION_WINE_CXX_EXCEPTION";
     case EXCEPTION_WINE_NAME_THREAD: return "EXCEPTION_WINE_NAME_THREAD";
     case EXCEPTION_WINE_STUB: return "EXCEPTION_WINE_STUB";
+    case RPC_S_SERVER_UNAVAILABLE: return "RPC_S_SERVER_UNAVAILABLE";
     }
     return "unknown";
 }
@@ -191,7 +190,7 @@ LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
  *
  * Implementation of RtlRaiseStatus with a specific exception record.
  */
-void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec )
+void DECLSPEC_NORETURN raise_status( NTSTATUS status, EXCEPTION_RECORD *rec )
 {
     EXCEPTION_RECORD ExceptionRec;
 
@@ -208,7 +207,7 @@ void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec )
  *
  * Raise an exception with ExceptionCode = status
  */
-void WINAPI RtlRaiseStatus( NTSTATUS status )
+void DECLSPEC_NORETURN WINAPI RtlRaiseStatus( NTSTATUS status )
 {
     raise_status( status, NULL );
 }
@@ -280,6 +279,27 @@ LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr )
     return unhandled_exception_filter( eptr );
 }
 
+/*******************************************************************
+ *         call_unhandled_exception_handler
+ */
+EXCEPTION_DISPOSITION WINAPI call_unhandled_exception_handler( EXCEPTION_RECORD *rec, void *frame,
+                                                               CONTEXT *context, void *dispatch )
+{
+    EXCEPTION_POINTERS ep = { rec, context };
+
+    switch (call_unhandled_exception_filter( &ep ))
+    {
+    case EXCEPTION_CONTINUE_SEARCH:
+        return ExceptionContinueSearch;
+    case EXCEPTION_CONTINUE_EXECUTION:
+        return ExceptionContinueExecution;
+    case EXCEPTION_EXECUTE_HANDLER:
+        break;
+    }
+    NtTerminateProcess( GetCurrentProcess(), rec->ExceptionCode );
+    return ExceptionContinueExecution;
+}
+
 
 #if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 
@@ -311,7 +331,7 @@ static ULONG_PTR get_runtime_function_end( RUNTIME_FUNCTION *func, ULONG_PTR add
 #ifdef __x86_64__
     return func->EndAddress;
 #elif defined(__arm__)
-    if (func->u.s.Flag) return func->BeginAddress + func->u.s.FunctionLength * 2;
+    if (func->Flag) return func->BeginAddress + func->FunctionLength * 2;
     else
     {
         struct unwind_info
@@ -323,11 +343,11 @@ static ULONG_PTR get_runtime_function_end( RUNTIME_FUNCTION *func, ULONG_PTR add
             DWORD f : 1;
             DWORD count : 5;
             DWORD words : 4;
-        } *info = (struct unwind_info *)(addr + func->u.UnwindData);
+        } *info = (struct unwind_info *)(addr + func->UnwindData);
         return func->BeginAddress + info->function_length * 2;
     }
 #else  /* __aarch64__ */
-    if (func->u.s.Flag) return func->BeginAddress + func->u.s.FunctionLength * 4;
+    if (func->Flag) return func->BeginAddress + func->FunctionLength * 4;
     else
     {
         struct unwind_info
@@ -338,7 +358,7 @@ static ULONG_PTR get_runtime_function_end( RUNTIME_FUNCTION *func, ULONG_PTR add
             DWORD e : 1;
             DWORD epilog : 5;
             DWORD codes : 5;
-        } *info = (struct unwind_info *)(addr + func->u.UnwindData);
+        } *info = (struct unwind_info *)(addr + func->UnwindData);
         return func->BeginAddress + info->function_length * 4;
     }
 #endif
@@ -623,7 +643,7 @@ PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG_PTR pc, ULONG_PTR *base,
 /*************************************************************
  *            _assert
  */
-void __cdecl _assert( const char *str, const char *file, unsigned int line )
+void DECLSPEC_NORETURN __cdecl _assert( const char *str, const char *file, unsigned int line )
 {
     ERR( "%s:%u: Assertion failed %s\n", file, line, debugstr_a(str) );
     RtlRaiseStatus( EXCEPTION_WINE_ASSERTION );
@@ -671,7 +691,6 @@ BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
     __ENDTRY
     return FALSE;
 }
-__ASM_STDCALL_IMPORT(IsBadStringPtrA,8)
 
 /*************************************************************
  *            IsBadStringPtrW
@@ -693,8 +712,14 @@ BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
     __ENDTRY
     return FALSE;
 }
-__ASM_STDCALL_IMPORT(IsBadStringPtrW,8)
 
+#ifdef __i386__
+__ASM_STDCALL_IMPORT(IsBadStringPtrA,8)
+__ASM_STDCALL_IMPORT(IsBadStringPtrW,8)
+#else
+__ASM_GLOBAL_IMPORT(IsBadStringPtrA)
+__ASM_GLOBAL_IMPORT(IsBadStringPtrW)
+#endif
 
 /**********************************************************************
  *              RtlGetEnabledExtendedFeatures   (NTDLL.@)

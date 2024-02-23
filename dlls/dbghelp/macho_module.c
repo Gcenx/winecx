@@ -206,6 +206,18 @@ static char* format_uuid(const UINT8 uuid[16], char out[UUID_STRING_LEN])
     return out;
 }
 
+static USHORT macho_cpu_to_machine(unsigned cpu)
+{
+    switch (cpu)
+    {
+    case MACHO_CPU_TYPE_X86:    return IMAGE_FILE_MACHINE_I386;
+    case MACHO_CPU_TYPE_X86_64: return IMAGE_FILE_MACHINE_AMD64;
+    default:
+        FIXME("Untranslated Mach-O CPU %x\n", cpu);
+        return IMAGE_FILE_MACHINE_UNKNOWN;
+    }
+}
+
 /******************************************************************
  *              macho_calc_range
  *
@@ -744,9 +756,9 @@ static BOOL macho_map_file(struct process *pcs, const WCHAR *filenameW,
     WCHAR*              filename;
     struct section_info info;
     BOOL                ret = FALSE;
-    UINT32 target_cpu = (pcs->is_64bit) ? MACHO_CPU_TYPE_X86_64 : MACHO_CPU_TYPE_X86;
-    UINT32 target_magic = (pcs->is_64bit) ? MACHO_MH_MAGIC_64 : MACHO_MH_MAGIC_32;
-    UINT32 target_cmd   = (pcs->is_64bit) ? MACHO_LC_SEGMENT_64 : MACHO_LC_SEGMENT;
+    UINT32 target_cpu = (pcs->is_host_64bit) ? MACHO_CPU_TYPE_X86_64 : MACHO_CPU_TYPE_X86;
+    UINT32 target_magic = (pcs->is_host_64bit) ? MACHO_MH_MAGIC_64 : MACHO_MH_MAGIC_32;
+    UINT32 target_cmd   = (pcs->is_host_64bit) ? MACHO_LC_SEGMENT_64 : MACHO_LC_SEGMENT;
     DWORD bytes_read;
 
     struct
@@ -762,8 +774,8 @@ static BOOL macho_map_file(struct process *pcs, const WCHAR *filenameW,
     ifm->modtype = DMT_MACHO;
     ifm->ops = &macho_file_map_ops;
     ifm->alternate = NULL;
-    ifm->addr_size = (pcs->is_64bit) ? 64 : 32;
-    fmap->header_size = (pcs->is_64bit) ? sizeof(struct macho_header) : FIELD_OFFSET(struct macho_header, reserved);
+    ifm->addr_size = (pcs->is_host_64bit) ? 64 : 32;
+    fmap->header_size = (pcs->is_host_64bit) ? sizeof(struct macho_header) : FIELD_OFFSET(struct macho_header, reserved);
 
     if (!(filename = get_dos_file_name(filenameW))) return FALSE;
 
@@ -1339,8 +1351,8 @@ static BOOL image_uses_split_segs(struct process* process, ULONG_PTR load_addr)
 
     if (load_addr)
     {
-        UINT32 target_cpu = (process->is_64bit) ? MACHO_CPU_TYPE_X86_64 : MACHO_CPU_TYPE_X86;
-        UINT32 target_magic = (process->is_64bit) ? MACHO_MH_MAGIC_64 : MACHO_MH_MAGIC_32;
+        UINT32 target_cpu = (process->is_host_64bit) ? MACHO_CPU_TYPE_X86_64 : MACHO_CPU_TYPE_X86;
+        UINT32 target_magic = (process->is_host_64bit) ? MACHO_MH_MAGIC_64 : MACHO_MH_MAGIC_32;
         struct macho_header header;
 
         if (read_process_memory(process, load_addr, &header, FIELD_OFFSET(struct macho_header, reserved)) &&
@@ -1352,6 +1364,26 @@ static BOOL image_uses_split_segs(struct process* process, ULONG_PTR load_addr)
     }
 
     return split_segs;
+}
+
+/******************************************************************
+ *              image_get_machine
+ *
+ * For a module identified by its load address, return the machine field
+ * of the (loaded) Macho header.
+ */
+static USHORT image_get_machine(struct process *process, ULONG_PTR load_addr)
+{
+    if (load_addr)
+    {
+        struct macho_header header;
+        UINT32 target_magic = (process->is_host_64bit) ? MACHO_MH_MAGIC_64 : MACHO_MH_MAGIC_32;
+
+        if (read_process_memory(process, load_addr, &header, FIELD_OFFSET(struct macho_header, reserved)) &&
+            header.magic == target_magic)
+            return macho_cpu_to_machine(header.cputype);
+    }
+    return IMAGE_FILE_MACHINE_UNKNOWN;
 }
 
 /******************************************************************
@@ -1372,6 +1404,9 @@ static BOOL macho_load_debug_info(struct process *pcs, struct module* module)
         ERR("Bad Mach-O module '%s'\n", debugstr_w(module->module.LoadedImageName));
         return FALSE;
     }
+
+    if (!module->has_file_image) /* no much more we can do here */
+        return FALSE;
 
     ifm = &module->format_info[DFI_MACHO]->u.macho_info->file_map;
     fmap = &ifm->u.macho;
@@ -1457,17 +1492,22 @@ static void macho_module_remove(struct process* pcs, struct module_format* modfm
  *      TRUE on success
  */
 static BOOL macho_load_file(struct process* pcs, const WCHAR* filename,
-                            ULONG_PTR load_addr, struct macho_info* macho_info)
+                            ULONG_PTR load_addr, struct macho_info* macho_info, BOOL with_image)
 {
     BOOL                    ret = TRUE;
     BOOL                    split_segs;
     struct image_file_map   fmap;
 
-    TRACE("(%p/%p, %s, 0x%08Ix, %p/0x%08x)\n", pcs, pcs->handle, debugstr_w(filename),
-            load_addr, macho_info, macho_info->flags);
+    TRACE("(%p/%p, %s, 0x%08Ix, %p/0x%08x, %u)\n", pcs, pcs->handle, debugstr_w(filename),
+          load_addr, macho_info, macho_info->flags, with_image);
 
     split_segs = image_uses_split_segs(pcs, load_addr);
-    if (!macho_map_file(pcs, filename, split_segs, &fmap)) return FALSE;
+    if (with_image)
+    {
+        if (!macho_map_file(pcs, filename, split_segs, &fmap)) return FALSE;
+    }
+    else
+        reset_file_map(&fmap);
 
     if (macho_info->flags & MACHO_INFO_MODULE)
     {
@@ -1475,17 +1515,21 @@ static BOOL macho_load_file(struct process* pcs, const WCHAR* filename,
         struct module_format*   modfmt =
             HeapAlloc(GetProcessHeap(), 0, sizeof(struct module_format) + sizeof(struct macho_module_info));
         if (!modfmt) goto leave;
-        if (!load_addr)
+        if (!load_addr && with_image)
             load_addr = fmap.u.macho.segs_start;
-        macho_info->module = module_new(pcs, filename, DMT_MACHO, FALSE, load_addr,
-                                        fmap.u.macho.segs_size, 0, calc_crc32(fmap.u.macho.handle),
-                                        IMAGE_FILE_MACHINE_UNKNOWN);
+        macho_info->module = module_new(pcs, filename, DMT_MACHO, module_is_wine_host(filename, L".so"),
+                                        FALSE, load_addr,
+                                        with_image ? fmap.u.macho.segs_size : 1024,
+                                        0, with_image ? calc_crc32(fmap.u.macho.handle) : 0,
+                                        image_get_machine(pcs, load_addr));
         if (!macho_info->module)
         {
             HeapFree(GetProcessHeap(), 0, modfmt);
             goto leave;
         }
-        macho_info->module->reloc_delta = macho_info->module->module.BaseOfImage - fmap.u.macho.segs_start;
+        macho_info->module->reloc_delta = macho_info->module->module.BaseOfImage;
+        if (with_image) macho_info->module->reloc_delta -= fmap.u.macho.segs_start;
+
         macho_module_info = (void*)(modfmt + 1);
         macho_info->module->format_info[DFI_MACHO] = modfmt;
 
@@ -1498,6 +1542,7 @@ static BOOL macho_load_file(struct process* pcs, const WCHAR* filename,
 
         macho_module_info->file_map = fmap;
         reset_file_map(&fmap);
+        if (!with_image) macho_info->module->has_file_image = 0;
 
         macho_info->module->format_info[DFI_MACHO]->u.macho_info->in_use = 1;
         macho_info->module->format_info[DFI_MACHO]->u.macho_info->is_loader = 0;
@@ -1533,7 +1578,7 @@ struct macho_load_params
 static BOOL macho_load_file_cb(void *param, HANDLE handle, const WCHAR *filename)
 {
     struct macho_load_params *macho_load = param;
-    return macho_load_file(macho_load->process, filename, macho_load->load_addr, macho_load->macho_info);
+    return macho_load_file(macho_load->process, filename, macho_load->load_addr, macho_load->macho_info, TRUE);
 }
 
 /******************************************************************
@@ -1573,7 +1618,7 @@ static BOOL macho_search_and_load_file(struct process* pcs, const WCHAR* filenam
 
     /* Try the path as given. */
     if (!ret)
-        ret = macho_load_file(pcs, filename, load_addr, macho_info);
+        ret = macho_load_file(pcs, filename, load_addr, macho_info, TRUE);
     /* Try DYLD_FALLBACK_LIBRARY_PATH, with just the filename (no directories). */
     if (!ret)
     {
@@ -1583,8 +1628,21 @@ static BOOL macho_search_and_load_file(struct process* pcs, const WCHAR* filenam
         ret = search_unix_path(p, fallback, macho_load_file_cb, &load_params);
     }
     if (!ret && p == filename)
-        ret = search_dll_path(pcs, filename, macho_load_file_cb, &load_params);
+        ret = search_dll_path(pcs, filename, IMAGE_FILE_MACHINE_UNKNOWN, macho_load_file_cb, &load_params);
 
+    if (!ret && load_addr)
+    {
+        /* Starting at macos 11.0, the system libraries are no longer present on the file system.
+         * So, if we cannot find an image by its filename, just declare the module without
+         * any debug information.
+         * This avoids, when walking the internal module list, to search each time
+         * for the module filename.
+         * Note: doesn't seem to be a simple way to get the size of the loaded Mach-O module
+         * without the corresponding file image. And it has also ASLR in place,
+         * where segments of the same module are not contiguous.
+         */
+        ret = macho_load_file(pcs, filename, load_addr, macho_info, FALSE);
+    }
     return ret;
 }
 
@@ -1608,14 +1666,14 @@ static BOOL macho_enum_modules_internal(const struct process* pcs,
     TRACE("(%p/%p, %s, %p, %p)\n", pcs, pcs->handle, debugstr_w(main_name), cb,
             user);
 
-    if (pcs->is_64bit)
+    if (pcs->is_host_64bit)
         len = sizeof(image_infos.infos64);
     else
         len = sizeof(image_infos.infos32);
     if (!pcs->dbg_hdr_addr ||
         !read_process_memory(pcs, pcs->dbg_hdr_addr, &image_infos, len))
         goto done;
-    if (!pcs->is_64bit)
+    if (!pcs->is_host_64bit)
     {
         struct dyld_all_image_infos32 temp = image_infos.infos32;
         image_infos.infos64.infoArrayCount = temp.infoArrayCount;
@@ -1625,7 +1683,7 @@ static BOOL macho_enum_modules_internal(const struct process* pcs,
         goto done;
     TRACE("Process has %u image infos at %I64x\n", image_infos.infos64.infoArrayCount, image_infos.infos64.infoArray);
 
-    if (pcs->is_64bit)
+    if (pcs->is_host_64bit)
         len = sizeof(info_array->info64);
     else
         len = sizeof(info_array->info32);
@@ -1639,7 +1697,7 @@ static BOOL macho_enum_modules_internal(const struct process* pcs,
     for (i = 0; i < image_infos.infos64.infoArrayCount; i++)
     {
         struct dyld_image_info64 info;
-        if (pcs->is_64bit)
+        if (pcs->is_host_64bit)
             info = info_array[i].info64;
         else
         {
@@ -1829,13 +1887,13 @@ static BOOL macho_search_loader(struct process* pcs, struct macho_info* macho_in
     char path[1024];
     BOOL got_path = FALSE;
 
-    if (pcs->is_64bit)
+    if (pcs->is_host_64bit)
         len = sizeof(image_infos.infos64);
     else
         len = sizeof(image_infos.infos32);
     if (read_process_memory(pcs, pcs->dbg_hdr_addr, &image_infos, len))
     {
-        if (pcs->is_64bit)
+        if (pcs->is_host_64bit)
             len = sizeof(image_info.info64);
         else
         {
@@ -1847,7 +1905,7 @@ static BOOL macho_search_loader(struct process* pcs, struct macho_info* macho_in
         if (image_infos.infos64.infoArray && image_infos.infos64.infoArrayCount &&
             read_process_memory(pcs, image_infos.infos64.infoArray, &image_info, len))
         {
-            if (!pcs->is_64bit)
+            if (!pcs->is_host_64bit)
             {
                 struct dyld_image_info32 temp = image_info.info32;
                 image_info.info64.imageLoadAddress = temp.imageLoadAddress;
@@ -1875,7 +1933,7 @@ static BOOL macho_search_loader(struct process* pcs, struct macho_info* macho_in
         if (pathW)
         {
             MultiByteToWideChar(CP_UNIXCP, 0, path, -1, pathW, len);
-            ret = macho_load_file(pcs, pathW, 0, macho_info);
+            ret = macho_load_file(pcs, pathW, 0, macho_info, TRUE);
             HeapFree(GetProcessHeap(), 0, pathW);
         }
     }

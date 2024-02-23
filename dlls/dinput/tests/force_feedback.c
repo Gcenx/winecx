@@ -213,7 +213,7 @@ static void check_dinput_devices( DWORD version, DIDEVICEINSTANCEW *devinst )
 {
     IDirectInput8W *di8;
     IDirectInputW *di;
-    ULONG count;
+    ULONG count, ref;
     HRESULT hr;
 
     if (version >= 0x800)
@@ -270,6 +270,9 @@ static void check_dinput_devices( DWORD version, DIDEVICEINSTANCEW *devinst )
         if ((devinst->dwDevType & 0xff) != DI8DEVTYPE_SUPPLEMENTAL) ok( hr == DI_OK, "EnumDevices returned: %#lx\n", hr );
         else ok( hr == DIERR_INVALIDPARAM, "EnumDevices returned: %#lx\n", hr );
         ok( count == 0, "got count %lu, expected 0\n", count );
+
+        ref = IDirectInput8_Release( di8 );
+        ok( ref == 0, "Release returned %ld\n", ref );
     }
     else
     {
@@ -324,6 +327,9 @@ static void check_dinput_devices( DWORD version, DIDEVICEINSTANCEW *devinst )
 
         hr = IDirectInput_EnumDevices( di, 0x14, enum_device_count, &count, DIEDFL_ALLDEVICES );
         ok( hr == DIERR_INVALIDPARAM, "EnumDevices returned: %#lx\n", hr );
+
+        ref = IDirectInput_Release( di );
+        ok( ref == 0, "Release returned %ld\n", ref );
     }
 }
 
@@ -457,14 +463,6 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
             .report_id = 5,
             .report_len = 2,
             .report_buf = {0x05,0x19},
-        },
-        /* set envelope (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 6,
-            .report_len = 7,
-            .report_buf = {0x06,0x19,0x4c,0x01,0x00,0x04,0x00},
-            .todo = TRUE, .wine_only = TRUE,
         },
         /* update effect */
         {
@@ -1463,7 +1461,7 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
     set_hid_expect( file, NULL, 0 );
     desc = expect_desc;
     desc.dwDuration = INFINITE;
-    desc.dwTriggerButton = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( 0 ) | DIDFT_FFEFFECTTRIGGER,
+    desc.dwTriggerButton = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( 0 ) | DIDFT_FFEFFECTTRIGGER;
     hr = IDirectInputEffect_SetParameters( effect, &desc, DIEP_NODOWNLOAD | DIEP_DURATION | DIEP_TRIGGERBUTTON );
     ok( hr == DI_DOWNLOADSKIPPED, "SetParameters returned %#lx\n", hr );
     set_hid_expect( file, expect_update, sizeof(expect_update) );
@@ -1472,7 +1470,7 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
     wait_hid_expect( file, 100 ); /* these updates are sent asynchronously */
     desc = expect_desc;
     desc.dwDuration = INFINITE;
-    desc.dwTriggerButton = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( 0 ) | DIDFT_FFEFFECTTRIGGER,
+    desc.dwTriggerButton = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( 0 ) | DIDFT_FFEFFECTTRIGGER;
     hr = IDirectInputEffect_SetParameters( effect, &desc, DIEP_NODOWNLOAD | DIEP_DURATION | DIEP_TRIGGERBUTTON );
     ok( hr == DI_DOWNLOADSKIPPED, "SetParameters returned %#lx\n", hr );
     set_hid_expect( file, expect_update, sizeof(expect_update) );
@@ -2958,7 +2956,7 @@ static BOOL test_force_feedback_joystick( DWORD version )
         .expect_count = version < 0x700 ? ARRAY_SIZE(expect_objects_5) : ARRAY_SIZE(expect_objects),
         .expect_objs = version < 0x700 ? expect_objects_5 : expect_objects,
         .todo_objs = version < 0x700 ? todo_objects_5 : NULL,
-        .todo_extra = version < 0x700 ? TRUE : FALSE,
+        .todo_extra = version < 0x700,
     };
     struct check_effects_params check_effects_params =
     {
@@ -4183,7 +4181,7 @@ static void test_device_managed_effect(void)
     res = WaitForSingleObject( event, 100 );
     ok( res == WAIT_TIMEOUT, "WaitForSingleObject returned %#lx\n", res );
     send_hid_input( file, device_state_input, sizeof(device_state_input) );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     set_hid_expect( file, expect_pool, sizeof(struct hid_expect) );
@@ -4391,7 +4389,7 @@ static void test_device_managed_effect(void)
     set_hid_expect( file, NULL, 0 );
 
     send_hid_input( file, device_state_input_0, sizeof(device_state_input_0) );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
     set_hid_expect( file, expect_pool, sizeof(struct hid_expect) );
     res = 0xdeadbeef;
@@ -4402,7 +4400,7 @@ static void test_device_managed_effect(void)
     set_hid_expect( file, NULL, 0 );
 
     send_hid_input( file, device_state_input_1, sizeof(device_state_input_1) );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
     res = 0xdeadbeef;
     hr = IDirectInputEffect_GetEffectStatus( effect, &res );
@@ -4417,7 +4415,7 @@ static void test_device_managed_effect(void)
     set_hid_expect( file, NULL, 0 );
 
     send_hid_input( file, device_state_input_2, sizeof(device_state_input_2) );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
     res = 0xdeadbeef;
     hr = IDirectInputEffect_GetEffectStatus( effect, &res );
@@ -4734,6 +4732,8 @@ static void check_result_async_( int line, IAsyncOperation_ForceFeedbackLoadEffe
 struct bool_async_handler
 {
     IAsyncOperationCompletedHandler_boolean IAsyncOperationCompletedHandler_boolean_iface;
+    LONG refcount;
+
     IAsyncOperation_boolean *async;
     AsyncStatus status;
     BOOL invoked;
@@ -4763,12 +4763,16 @@ static HRESULT WINAPI bool_async_handler_QueryInterface( IAsyncOperationComplete
 
 static ULONG WINAPI bool_async_handler_AddRef( IAsyncOperationCompletedHandler_boolean *iface )
 {
-    return 2;
+    struct bool_async_handler *impl = impl_from_IAsyncOperationCompletedHandler_boolean( iface );
+    return InterlockedIncrement( &impl->refcount );
 }
 
 static ULONG WINAPI bool_async_handler_Release( IAsyncOperationCompletedHandler_boolean *iface )
 {
-    return 1;
+    struct bool_async_handler *impl = impl_from_IAsyncOperationCompletedHandler_boolean( iface );
+    ULONG ref = InterlockedDecrement( &impl->refcount );
+    if (!ref) free( impl );
+    return ref;
 }
 
 static HRESULT WINAPI bool_async_handler_Invoke( IAsyncOperationCompletedHandler_boolean *iface,
@@ -4797,28 +4801,46 @@ static IAsyncOperationCompletedHandler_booleanVtbl bool_async_handler_vtbl =
     bool_async_handler_Invoke,
 };
 
-static struct bool_async_handler default_bool_async_handler = {{&bool_async_handler_vtbl}};
+static IAsyncOperationCompletedHandler_boolean *bool_async_handler_create( HANDLE event )
+{
+    struct bool_async_handler *impl;
+
+    if (!(impl = calloc( 1, sizeof(*impl) ))) return NULL;
+    impl->IAsyncOperationCompletedHandler_boolean_iface.lpVtbl = &bool_async_handler_vtbl;
+    impl->event = event;
+    impl->refcount = 1;
+
+    return &impl->IAsyncOperationCompletedHandler_boolean_iface;
+}
 
 #define await_bool( a ) await_bool_( __LINE__, a )
 static void await_bool_( int line, IAsyncOperation_boolean *async )
 {
-    struct bool_async_handler handler = default_bool_async_handler;
+    IAsyncOperationCompletedHandler_boolean *handler;
+    HANDLE event;
     HRESULT hr;
     DWORD ret;
 
-    handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
-    ok_(__FILE__, line)( !!handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
-    hr = IAsyncOperation_boolean_put_Completed( async, &handler.IAsyncOperationCompletedHandler_boolean_iface );
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok_(__FILE__, line)( !!event, "CreateEventW failed, error %lu\n", GetLastError() );
+
+    handler = bool_async_handler_create( event );
+    ok_(__FILE__, line)( !!handler, "bool_async_handler_create failed\n" );
+    hr = IAsyncOperation_boolean_put_Completed( async, handler );
     ok_(__FILE__, line)( hr == S_OK, "put_Completed returned %#lx\n", hr );
-    ret = WaitForSingleObject( handler.event, 5000 );
+    IAsyncOperationCompletedHandler_boolean_Release( handler );
+
+    ret = WaitForSingleObject( event, 5000 );
     ok_(__FILE__, line)( !ret, "WaitForSingleObject returned %#lx\n", ret );
-    ret = CloseHandle( handler.event );
+    ret = CloseHandle( event );
     ok_(__FILE__, line)( ret, "CloseHandle failed, error %lu\n", GetLastError() );
 }
 
 struct result_async_handler
 {
     IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_iface;
+    LONG refcount;
+
     IAsyncOperation_ForceFeedbackLoadEffectResult *async;
     AsyncStatus status;
     BOOL invoked;
@@ -4848,12 +4870,16 @@ static HRESULT WINAPI result_async_handler_QueryInterface( IAsyncOperationComple
 
 static ULONG WINAPI result_async_handler_AddRef( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface )
 {
-    return 2;
+    struct result_async_handler *impl = impl_from_IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult( iface );
+    return InterlockedIncrement( &impl->refcount );
 }
 
 static ULONG WINAPI result_async_handler_Release( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface )
 {
-    return 1;
+    struct result_async_handler *impl = impl_from_IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult( iface );
+    ULONG ref = InterlockedDecrement( &impl->refcount );
+    if (!ref) free( impl );
+    return ref;
 }
 
 static HRESULT WINAPI result_async_handler_Invoke( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface,
@@ -4882,22 +4908,38 @@ static IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResultVtbl result_
     result_async_handler_Invoke,
 };
 
-static struct result_async_handler default_result_async_handler = {{&result_async_handler_vtbl}};
+static IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *result_async_handler_create( HANDLE event )
+{
+    struct result_async_handler *impl;
+
+    if (!(impl = calloc( 1, sizeof(*impl) ))) return NULL;
+    impl->IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_iface.lpVtbl = &result_async_handler_vtbl;
+    impl->event = event;
+    impl->refcount = 1;
+
+    return &impl->IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_iface;
+}
 
 #define await_result( a ) await_result_( __LINE__, a )
 static void await_result_( int line, IAsyncOperation_ForceFeedbackLoadEffectResult *async )
 {
-    struct result_async_handler handler = default_result_async_handler;
+    IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *handler;
+    HANDLE event;
     HRESULT hr;
     DWORD ret;
 
-    handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
-    ok_(__FILE__, line)( !!handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
-    hr = IAsyncOperation_ForceFeedbackLoadEffectResult_put_Completed( async, &handler.IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_iface );
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok_(__FILE__, line)( !!event, "CreateEventW failed, error %lu\n", GetLastError() );
+
+    handler = result_async_handler_create( event );
+    ok_(__FILE__, line)( !!handler, "result_async_handler_create failed\n" );
+    hr = IAsyncOperation_ForceFeedbackLoadEffectResult_put_Completed( async, handler );
     ok_(__FILE__, line)( hr == S_OK, "put_Completed returned %#lx\n", hr );
-    ret = WaitForSingleObject( handler.event, 5000 );
+    IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_Release( handler );
+
+    ret = WaitForSingleObject( event, 5000 );
     ok_(__FILE__, line)( !ret, "WaitForSingleObject returned %#lx\n", ret );
-    ret = CloseHandle( handler.event );
+    ret = CloseHandle( event );
     ok_(__FILE__, line)( ret, "CloseHandle failed, error %lu\n", GetLastError() );
 }
 
@@ -5683,14 +5725,6 @@ static void test_windows_gaming_input(void)
             .report_len = 10,
             .report_buf = {7,0x01,0x10,0x27,0x00,0x00,0x70,0xff,0xe8,0x03},
         },
-        /* set envelope (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 8,
-            .report_len = 8,
-            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
-            .todo = TRUE, .wine_only = TRUE,
-        },
         /* update effect */
         {
             .code = IOCTL_HID_WRITE_REPORT,
@@ -5822,29 +5856,12 @@ static void test_windows_gaming_input(void)
             .report_len = 4,
             .report_buf = {9,0x01,0x18,0xfc},
         },
-        /* set envelope (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 8,
-            .report_len = 8,
-            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
-            .todo = TRUE, .wine_only = TRUE,
-        },
-        /* update effect (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 3,
-            .report_len = 18,
-            .report_buf = {3,0x01,0x04,0x04,0x28,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0x7f,0x99,0x00,0x00,0x00},
-            .wine_only = TRUE, .todo = TRUE,
-        },
         /* update effect */
         {
             .code = IOCTL_HID_WRITE_REPORT,
             .report_id = 3,
             .report_len = 18,
             .report_buf = {3,0x01,0x04,0x04,0x28,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0x7f,0x4e,0x01,0x00,0x00},
-            .todo = TRUE,
         },
     };
     struct hid_expect expect_create_ramp[] =
@@ -5908,29 +5925,12 @@ static void test_windows_gaming_input(void)
             .report_len = 6,
             .report_buf = {10,0x01,0xe8,0x03,0xa0,0x0f},
         },
-        /* set envelope (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 8,
-            .report_len = 8,
-            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
-            .todo = TRUE, .wine_only = TRUE,
-        },
-        /* update effect (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 3,
-            .report_len = 18,
-            .report_buf = {3,0x01,0x05,0x04,0x8f,0xe4,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
-            .todo = TRUE, .wine_only = TRUE,
-        },
         /* update effect */
         {
             .code = IOCTL_HID_WRITE_REPORT,
             .report_id = 3,
             .report_len = 18,
             .report_buf = {3,0x01,0x05,0x04,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
-            .todo = TRUE,
         },
     };
     struct hid_expect expect_create_ramp_neg[] =
@@ -5956,29 +5956,12 @@ static void test_windows_gaming_input(void)
             .report_len = 6,
             .report_buf = {10,0x01,0x18,0xfc,0x60,0xf0},
         },
-        /* set envelope (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 8,
-            .report_len = 8,
-            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
-            .todo = TRUE, .wine_only = TRUE,
-        },
-        /* update effect (wine) */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 3,
-            .report_len = 18,
-            .report_buf = {3,0x01,0x05,0x04,0x8f,0xe4,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x99,0x00,0x00,0x00},
-            .wine_only = TRUE, .todo = TRUE,
-        },
         /* update effect */
         {
             .code = IOCTL_HID_WRITE_REPORT,
             .report_id = 3,
             .report_len = 18,
             .report_buf = {3,0x01,0x05,0x04,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
-            .todo = TRUE,
         },
     };
     struct hid_expect expect_effect_start =
@@ -6038,7 +6021,7 @@ static void test_windows_gaming_input(void)
     IRawGameControllerStatics *controller_statics;
     EventRegistrationToken controller_added_token;
     IPeriodicForceEffectFactory *periodic_factory;
-    struct bool_async_handler bool_async_handler;
+    struct bool_async_handler *bool_async_handler;
     ForceFeedbackEffectAxes supported_axes, axes;
     IVectorView_ForceFeedbackMotor *motors_view;
     IConditionForceEffect *condition_effect;
@@ -6201,21 +6184,27 @@ static void test_windows_gaming_input(void)
     hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
     ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
     ok( tmp_handler == NULL, "got handler %p\n", tmp_handler );
-    bool_async_handler = default_bool_async_handler;
-    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+
+    bool_async_handler = impl_from_IAsyncOperationCompletedHandler_boolean( bool_async_handler_create( NULL ) );
+    ok( !!bool_async_handler, "bool_async_handler_create failed\n" );
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler->IAsyncOperationCompletedHandler_boolean_iface );
     ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
-    ok( bool_async_handler.invoked, "handler not invoked\n" );
-    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
-    ok( bool_async_handler.status == Completed, "got status %u\n", bool_async_handler.status );
+    ok( bool_async_handler->invoked, "handler not invoked\n" );
+    ok( bool_async_handler->async == bool_async, "got async %p\n", bool_async_handler->async );
+    ok( bool_async_handler->status == Completed, "got status %u\n", bool_async_handler->status );
     hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
     ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
     ok( tmp_handler == NULL, "got handler %p\n", tmp_handler );
-    bool_async_handler = default_bool_async_handler;
-    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+    IAsyncOperationCompletedHandler_boolean_Release( &bool_async_handler->IAsyncOperationCompletedHandler_boolean_iface );
+
+    bool_async_handler = impl_from_IAsyncOperationCompletedHandler_boolean( bool_async_handler_create( NULL ) );
+    ok( !!bool_async_handler, "bool_async_handler_create failed\n" );
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler->IAsyncOperationCompletedHandler_boolean_iface );
     ok( hr == E_ILLEGAL_DELEGATE_ASSIGNMENT, "put_Completed returned %#lx\n", hr );
-    ok( !bool_async_handler.invoked, "handler invoked\n" );
-    ok( bool_async_handler.async == NULL, "got async %p\n", bool_async_handler.async );
-    ok( bool_async_handler.status == Started, "got status %u\n", bool_async_handler.status );
+    ok( !bool_async_handler->invoked, "handler invoked\n" );
+    ok( bool_async_handler->async == NULL, "got async %p\n", bool_async_handler->async );
+    ok( bool_async_handler->status == Started, "got status %u\n", bool_async_handler->status );
+    IAsyncOperationCompletedHandler_boolean_Release( &bool_async_handler->IAsyncOperationCompletedHandler_boolean_iface );
 
     hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
     ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
@@ -6236,12 +6225,14 @@ static void test_windows_gaming_input(void)
     wait_hid_expect( file, 100 );
     check_bool_async( bool_async, 1, Error, 0x8685400d, FALSE );
 
-    bool_async_handler = default_bool_async_handler;
-    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+    bool_async_handler = impl_from_IAsyncOperationCompletedHandler_boolean( bool_async_handler_create( NULL ) );
+    ok( !!bool_async_handler, "bool_async_handler_create failed\n" );
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler->IAsyncOperationCompletedHandler_boolean_iface );
     ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
-    ok( bool_async_handler.invoked, "handler not invoked\n" );
-    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
-    ok( bool_async_handler.status == Error, "got status %u\n", bool_async_handler.status );
+    ok( bool_async_handler->invoked, "handler not invoked\n" );
+    ok( bool_async_handler->async == bool_async, "got async %p\n", bool_async_handler->async );
+    ok( bool_async_handler->status == Error, "got status %u\n", bool_async_handler->status );
+    IAsyncOperationCompletedHandler_boolean_Release( &bool_async_handler->IAsyncOperationCompletedHandler_boolean_iface );
 
     hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
     ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );

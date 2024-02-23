@@ -91,16 +91,12 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
 #include <ctype.h>
 #include <limits.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_SYSCTL_H
-# include <sys/sysctl.h>
-#endif
 
 #include "utils.h"
 
@@ -148,10 +144,7 @@ static const char *output_debug_file;
 static const char *output_implib;
 static int keep_generated = 0;
 const char *temp_dir = NULL;
-static struct strarray tmp_files;
-#ifdef HAVE_SIGSET_T
-static sigset_t signal_mask;
-#endif
+struct strarray temp_files = { 0 };
 
 static const char *bindir;
 static const char *libdir;
@@ -184,6 +177,7 @@ struct options
     int unwind_tables;
     int strip;
     int pic;
+    int no_default_config;
     const char* wine_objdir;
     const char* winebuild;
     const char* output_name;
@@ -195,7 +189,6 @@ struct options
     const char* lib_suffix;
     const char* subsystem;
     const char* entry_point;
-    const char* prelink;
     const char* debug_file;
     const char* out_implib;
     struct strarray prefix;
@@ -217,38 +210,13 @@ static void cleanup_output_files(void)
 
 static void clean_temp_files(void)
 {
-    unsigned int i;
-
-    if (keep_generated) return;
-
-    for (i = 0; i < tmp_files.count; i++)
-	unlink(tmp_files.str[i]);
-    if (temp_dir) rmdir( temp_dir );
+    if (!keep_generated) remove_temp_files();
 }
 
 /* clean things up when aborting on a signal */
 static void exit_on_signal( int sig )
 {
     exit(1);  /* this will call the atexit functions */
-}
-
-static char* get_temp_file(const char* prefix, const char* suffix)
-{
-    int fd;
-    char *tmp;
-
-#ifdef HAVE_SIGPROCMASK
-    sigset_t old_set;
-    /* block signals while manipulating the temp files list */
-    sigprocmask( SIG_BLOCK, &signal_mask, &old_set );
-#endif
-    fd = make_temp_file( prefix, suffix, &tmp );
-    close( fd );
-    strarray_add(&tmp_files, tmp);
-#ifdef HAVE_SIGPROCMASK
-    sigprocmask( SIG_SETMASK, &old_set, NULL );
-#endif
-    return tmp;
 }
 
 static int is_pe_target( const struct options *opts )
@@ -332,37 +300,32 @@ static struct strarray build_tool_name( struct options *opts, enum tool tool )
         }
         strarray_add( &ret, "-Wno-unused-command-line-argument" );
         strarray_add( &ret, "-fuse-ld=lld" );
+        if (opts->no_default_config) strarray_add( &ret, "--no-default-config" );
     }
     return ret;
 }
 
 static struct strarray get_translator(struct options *opts)
 {
-    enum tool tool;
-
     switch(opts->processor)
     {
     case proc_cpp:
-        tool = TOOL_CPP;
-        break;
+        return build_tool_name( opts, TOOL_CPP );
     case proc_cc:
     case proc_as:
-        tool = TOOL_CC;
-        break;
+        return build_tool_name( opts, TOOL_CC );
     case proc_cxx:
-        tool = TOOL_CXX;
-        break;
-    default:
-        assert(0);
+        return build_tool_name( opts, TOOL_CXX );
     }
-    return build_tool_name( opts, tool );
+    assert(0);
+    return empty_strarray;
 }
 
 static int try_link( struct strarray prefix, struct strarray link_tool, const char *cflags )
 {
-    const char *in = get_temp_file( "try_link", ".c" );
-    const char *out = get_temp_file( "try_link", ".out" );
-    const char *err = get_temp_file( "try_link", ".err" );
+    const char *in = make_temp_file( "try_link", ".c" );
+    const char *out = make_temp_file( "try_link", ".out" );
+    const char *err = make_temp_file( "try_link", ".err" );
     struct strarray link = empty_strarray;
     int sout = -1, serr = -1;
     int ret;
@@ -419,12 +382,11 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
 
     case PLATFORM_SOLARIS:
         {
-            char *mapfile = get_temp_file( output_name, ".map" );
+            char *mapfile = make_temp_file( output_name, ".map" );
             const char *align = opts->section_align ? opts->section_align : "0x1000";
 
             create_file( mapfile, 0644, "text = A%s;\ndata = A%s;\n", align, align );
             strarray_add( &flags, strmake("-Wl,-M,%s", mapfile) );
-            strarray_add( &tmp_files, mapfile );
         }
         break;
 
@@ -447,7 +409,10 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
         if (opts->nostartfiles || opts->use_msvcrt) strarray_add( &flags, "-nostartfiles" );
         if (opts->subsystem) strarray_add( &flags, strmake("-Wl,--subsystem,%s", opts->subsystem ));
 
+        strarray_add( &flags, "-Wl,--exclude-all-symbols" );
         strarray_add( &flags, "-Wl,--nxcompat" );
+        strarray_add( &flags, "-Wl,--dynamicbase" );
+        strarray_add( &flags, "-Wl,--disable-auto-image-base" );
 
         if (opts->image_base) strarray_add( &flags, strmake("-Wl,--image-base,%s", opts->image_base ));
 
@@ -502,6 +467,8 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
 
         if (opts->out_implib)
             strarray_add(&link_args, strmake("-Wl,-implib:%s", opts->out_implib));
+        else
+            strarray_add(&link_args, strmake("-Wl,-implib:%s", make_temp_file( output_name, ".lib" )));
 
         strarray_add( &link_args, strmake( "-Wl,-filealign:%s", opts->file_align ? opts->file_align : "0x1000" ));
 
@@ -513,8 +480,6 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
         {
             if (!try_link( opts->prefix, link_args, strmake("-Wl,-Ttext-segment=%s", opts->image_base)) )
                 strarray_add( &flags, strmake("-Wl,-Ttext-segment=%s", opts->image_base) );
-            else
-                opts->prelink = PRELINK;
         }
         if (!try_link( opts->prefix, link_args, "-Wl,-z,max-page-size=0x1000"))
             strarray_add( &flags, "-Wl,-z,max-page-size=0x1000");
@@ -542,8 +507,9 @@ static const char *get_multiarch_dir( struct target target )
    case CPU_x86_64:  return "/x86_64-linux-gnu";
    case CPU_ARM:     return "/arm-linux-gnueabi";
    case CPU_ARM64:   return "/aarch64-linux-gnu";
+   default:
+       assert(0);
    }
-   assert(0);
    return NULL;
 }
 
@@ -646,24 +612,9 @@ static char *get_lib_dir( struct options *opts )
 
 static void init_argv0_dir( const char *argv0 )
 {
-#ifndef _WIN32
-    char *dir = NULL;
-
-#if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
-    dir = realpath( "/proc/self/exe", NULL );
-#elif defined (__FreeBSD__) || defined(__DragonFly__)
-    static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
-    size_t path_size = PATH_MAX;
-    char *path = xmalloc( path_size );
-    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
-        dir = realpath( path, NULL );
-    free( path );
-#endif
-    if (!dir && !(dir = realpath( argv0, NULL ))) return;
-    bindir = get_dirname( dir );
+    if (!(bindir = get_argv0_dir( argv0 ))) return;
     includedir = strmake( "%s/%s", bindir, BIN_TO_INCLUDEDIR );
     libdir = strmake( "%s/%s", bindir, BIN_TO_LIBDIR );
-#endif
 }
 
 static void compile(struct options* opts, const char* lang)
@@ -751,6 +702,8 @@ static void compile(struct options* opts, const char* lang)
             strarray_add(&comp_args, "-D__stdcall=__attribute__((pcs(\"aapcs-vfp\")))");
             strarray_add(&comp_args, "-D__cdecl=__stdcall");
             strarray_add(&comp_args, "-D__fastcall=__stdcall");
+            break;
+        case CPU_ARM64EC:
             break;
         }
         strarray_add(&comp_args, "-D_stdcall=__stdcall");
@@ -848,7 +801,7 @@ static const char* compile_to_object(struct options* opts, const char* file, con
     /* make a copy so we don't change any of the initial stuff */
     /* a shallow copy is exactly what we want in this case */
     copts = *opts;
-    copts.output_name = get_temp_file(get_basename_noext(file), ".o");
+    copts.output_name = make_temp_file(get_basename_noext(file), ".o");
     copts.compile_only = 1;
     copts.files = empty_strarray;
     strarray_add(&copts.files, file);
@@ -888,8 +841,6 @@ static struct strarray get_winebuild_args(struct options *opts)
     for (i = 0; i < opts->prefix.count; i++)
         strarray_add( &spec_args, strmake( "-B%s", opts->prefix.str[i] ));
     strarray_addall( &spec_args, opts->winebuild_args );
-    if (opts->unwind_tables) strarray_add( &spec_args, "-fasynchronous-unwind-tables" );
-    else strarray_add( &spec_args, "-fno-asynchronous-unwind-tables" );
     return spec_args;
 }
 
@@ -922,8 +873,8 @@ static char *find_static_lib( const char *dll )
 
 static const char *find_libgcc(struct strarray prefix, struct strarray link_tool)
 {
-    const char *out = get_temp_file( "find_libgcc", ".out" );
-    const char *err = get_temp_file( "find_libgcc", ".err" );
+    const char *out = make_temp_file( "find_libgcc", ".out" );
+    const char *err = make_temp_file( "find_libgcc", ".err" );
     struct strarray link = empty_strarray;
     int sout = -1, serr = -1;
     char *libgcc, *p;
@@ -1012,11 +963,12 @@ static const char *build_spec_obj( struct options *opts, const char *spec_file, 
         strarray_add( &spec_args, strmake( "--ld-cmd=%s", strarray_tostring( tool, " " )));
     }
 
-    spec_o_name = get_temp_file(output_name, ".spec.o");
+    spec_o_name = make_temp_file(output_name, ".spec.o");
     if (!is_pe)
     {
         if (opts->pic) strarray_add(&spec_args, "-fPIC");
         if (opts->use_msvcrt) strarray_add(&spec_args, "-mno-cygwin");
+        if (opts->unwind_tables) strarray_add( &spec_args, "-fasynchronous-unwind-tables" );
     }
     strarray_add(&spec_args, opts->shared ? "--dll" : "--exe");
     if (opts->fake_module)
@@ -1045,7 +997,8 @@ static const char *build_spec_obj( struct options *opts, const char *spec_file, 
         if (opts->large_address_aware) strarray_add( &spec_args, "--large-address-aware" );
     }
 
-    if (opts->target.platform == PLATFORM_WINDOWS) strarray_add(&spec_args, "--safeseh");
+    if (opts->target.platform == PLATFORM_WINDOWS && opts->target.cpu == CPU_i386)
+        strarray_add(&spec_args, "--safeseh");
 
     if (entry_point)
     {
@@ -1433,20 +1386,6 @@ static void build(struct options* opts)
         spawn(opts->prefix, implib_args, 0);
     }
 
-    /* set the base address with prelink if linker support is not present */
-    if (opts->prelink && !opts->target_alias)
-    {
-        if (opts->prelink[0] && strcmp(opts->prelink,"false"))
-        {
-            struct strarray prelink_args = empty_strarray;
-            strarray_add(&prelink_args, opts->prelink);
-            strarray_add(&prelink_args, "--reloc-only");
-            strarray_add(&prelink_args, opts->image_base);
-            strarray_add(&prelink_args, output_path);
-            spawn(opts->prefix, prelink_args, 1);
-        }
-    }
-
     if (!is_pe) fixup_constructors( opts, output_path );
     else if (opts->wine_builtin) make_wine_builtin( opts, output_path );
 
@@ -1535,17 +1474,7 @@ int main(int argc, char **argv)
     char* lang = 0;
     char* str;
 
-#ifdef SIGHUP
-    signal( SIGHUP, exit_on_signal );
-#endif
-    signal( SIGTERM, exit_on_signal );
-    signal( SIGINT, exit_on_signal );
-#ifdef HAVE_SIGADDSET
-    sigemptyset( &signal_mask );
-    sigaddset( &signal_mask, SIGHUP );
-    sigaddset( &signal_mask, SIGTERM );
-    sigaddset( &signal_mask, SIGINT );
-#endif
+    init_signals( exit_on_signal );
     init_argv0_dir( argv[0] );
 
     /* setup tmp file removal at exit */
@@ -1924,6 +1853,11 @@ int main(int argc, char **argv)
                 case '-':
                     if (strcmp("-static", opts.args.str[i]+1) == 0)
                         linking = -1;
+                    else if (!strcmp( "-no-default-config", opts.args.str[i] + 1 ))
+                    {
+                        opts.no_default_config = 1;
+                        raw_compiler_arg = raw_linker_arg = 1;
+                    }
                     else if (is_option( &opts, i, "--sysroot", &option_arg ))
                     {
                         opts.sysroot = option_arg;

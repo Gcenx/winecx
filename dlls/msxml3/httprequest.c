@@ -20,7 +20,6 @@
  */
 
 #define COBJMACROS
-#define NONAMELESSUNION
 
 #include <stdarg.h>
 
@@ -375,7 +374,7 @@ static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
     if (This->request->verb != BINDVERB_GET && This->body)
     {
         pbindinfo->stgmedData.tymed = TYMED_HGLOBAL;
-        pbindinfo->stgmedData.u.hGlobal = This->body;
+        pbindinfo->stgmedData.hGlobal = This->body;
         pbindinfo->cbstgmedData = GlobalSize(This->body);
         /* callback owns passed body pointer */
         IBindStatusCallback_QueryInterface(iface, &IID_IUnknown, (void**)&pbindinfo->stgmedData.pUnkForRelease);
@@ -403,7 +402,7 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
 
     do
     {
-        hr = IStream_Read(stgmed->u.pstm, buf, sizeof(buf), &read);
+        hr = IStream_Read(stgmed->pstm, buf, sizeof(buf), &read);
         if (hr != S_OK) break;
 
         hr = IStream_Write(This->stream, buf, read, &written);
@@ -681,19 +680,12 @@ static const IAuthenticateVtbl AuthenticateVtbl = {
 static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback **obj, const VARIANT *body)
 {
     BindStatusCallback *bsc;
-    IBindCtx *pbc;
+    IBindCtx *pbc = NULL;
     HRESULT hr;
     LONG size;
 
-    hr = CreateBindCtx(0, &pbc);
-    if (hr != S_OK) return hr;
-
-    bsc = heap_alloc(sizeof(*bsc));
-    if (!bsc)
-    {
-        IBindCtx_Release(pbc);
+    if (!(bsc = heap_alloc(sizeof(*bsc))))
         return E_OUTOFMEMORY;
-    }
 
     bsc->IBindStatusCallback_iface.lpVtbl = &BindStatusCallbackVtbl;
     bsc->IHttpNegotiate_iface.lpVtbl = &BSCHttpNegotiateVtbl;
@@ -796,7 +788,9 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
             SafeArrayUnaccessData(sa);
     }
 
-    hr = RegisterBindStatusCallback(pbc, &bsc->IBindStatusCallback_iface, NULL, 0);
+    hr = CreateBindCtx(0, &pbc);
+    if (hr == S_OK)
+        hr = RegisterBindStatusCallback(pbc, &bsc->IBindStatusCallback_iface, NULL, 0);
     if (hr == S_OK)
     {
         IMoniker *moniker;
@@ -810,8 +804,10 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
             IMoniker_Release(moniker);
             if (stream) IStream_Release(stream);
         }
-        IBindCtx_Release(pbc);
     }
+
+    if (pbc)
+        IBindCtx_Release(pbc);
 
     if (FAILED(hr))
     {

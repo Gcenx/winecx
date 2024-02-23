@@ -137,13 +137,13 @@ HKEY open_hkcu_key(const char *name)
             return 0;
 
         sid = ((TOKEN_USER *)sid_data)->User.Sid;
-        len = sprintf(buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
+        len = snprintf(buffer, sizeof(buffer), "\\Registry\\User\\S-%u-%u", sid->Revision,
                       (unsigned int)MAKELONG(MAKEWORD(sid->IdentifierAuthority.Value[5],
                                                       sid->IdentifierAuthority.Value[4]),
                                              MAKEWORD(sid->IdentifierAuthority.Value[3],
                                                       sid->IdentifierAuthority.Value[2])));
         for (i = 0; i < sid->SubAuthorityCount; i++)
-            len += sprintf(buffer + len, "-%u", (unsigned int)sid->SubAuthority[i]);
+            len += snprintf(buffer + len, sizeof(buffer) - len, "-%u", (unsigned int)sid->SubAuthority[i]);
 
         ascii_to_unicode(bufferW, buffer, len);
         hkcu = reg_open_key(NULL, bufferW, len * sizeof(WCHAR));
@@ -659,19 +659,6 @@ NTSTATUS macdrv_client_func(enum macdrv_client_funcs id, const void *params, ULO
 }
 
 
-static NTSTATUS macdrv_ime_clear(void *arg)
-{
-    macdrv_clear_ime_text();
-    return 0;
-}
-
-
-static NTSTATUS macdrv_ime_using_input_method(void *arg)
-{
-    return macdrv_using_input_method();
-}
-
-
 static NTSTATUS macdrv_quit_result(void *arg)
 {
     struct quit_result_params *params = arg;
@@ -687,11 +674,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     macdrv_dnd_have_format,
     macdrv_dnd_release,
     macdrv_dnd_retain,
-    macdrv_ime_clear,
-    macdrv_ime_process_text_input,
-    macdrv_ime_using_input_method,
     macdrv_init,
-    macdrv_notify_icon,
     macdrv_quit_result,
 };
 
@@ -717,28 +700,6 @@ static NTSTATUS wow64_dnd_get_data(void *arg)
     return macdrv_dnd_get_data(&params);
 }
 
-static NTSTATUS wow64_ime_process_text_input(void *arg)
-{
-    struct
-    {
-        UINT vkey;
-        UINT scan;
-        UINT repeat;
-        ULONG key_state;
-        ULONG himc;
-        ULONG done;
-    } *params32 = arg;
-    struct process_text_input_params params;
-
-    params.vkey = params32->vkey;
-    params.scan = params32->scan;
-    params.repeat = params32->repeat;
-    params.key_state = UlongToPtr(params32->key_state);
-    params.himc = UlongToPtr(params32->himc);
-    params.done = UlongToPtr(params32->done);
-    return macdrv_ime_process_text_input(&params);
-}
-
 static NTSTATUS wow64_init(void *arg)
 {
     struct
@@ -751,61 +712,6 @@ static NTSTATUS wow64_init(void *arg)
     return macdrv_init(&params);
 }
 
-static NTSTATUS wow64_notify_icon(void *arg)
-{
-    struct
-    {
-        DWORD msg;
-        ULONG data;
-    } *params32 = arg;
-    struct
-    {
-        DWORD cbSize;
-        ULONG hWnd;
-        UINT uID;
-        UINT uFlags;
-        UINT uCallbackMessage;
-        ULONG hIcon;
-        WCHAR szTip[128];
-        DWORD dwState;
-        DWORD dwStateMask;
-        WCHAR szInfo[256];
-        UINT uTimeout;
-        WCHAR szInfoTitle[64];
-        DWORD dwInfoFlags;
-        GUID guidItem;
-        ULONG hBalloonIcon;
-    } *data32 = UlongToPtr(params32->data);
-
-    struct notify_icon_params params;
-    NOTIFYICONDATAW data;
-
-    params.msg = params32->msg;
-    params.data = &data;
-
-    data.cbSize = sizeof(data);
-    data.hWnd = UlongToHandle(data32->hWnd);
-    data.uID = data32->uID;
-    data.uFlags = data32->uFlags;
-    data.uCallbackMessage = data32->uCallbackMessage;
-    data.hIcon = UlongToHandle(data32->hIcon);
-    if (data.uFlags & NIF_TIP)
-        wcscpy(data.szTip, data32->szTip);
-    data.dwState = data32->dwState;
-    data.dwStateMask = data32->dwStateMask;
-    if (data.uFlags & NIF_INFO)
-    {
-        wcscpy(data.szInfoTitle, data32->szInfoTitle);
-        wcscpy(data.szInfo, data32->szInfo);
-        data.uTimeout = data32->uTimeout;
-        data.dwInfoFlags = data32->dwInfoFlags;
-    }
-    data.guidItem = data32->guidItem;
-    data.hBalloonIcon = UlongToHandle(data32->hBalloonIcon);
-
-    return macdrv_notify_icon(&params);
-}
-
 const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
     wow64_dnd_get_data,
@@ -813,11 +719,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     macdrv_dnd_have_format,
     macdrv_dnd_release,
     macdrv_dnd_retain,
-    macdrv_ime_clear,
-    wow64_ime_process_text_input,
-    macdrv_ime_using_input_method,
     wow64_init,
-    wow64_notify_icon,
     macdrv_quit_result,
 };
 

@@ -113,7 +113,7 @@
 @ stub NtGdiAddRemoteFontToDC
 @ stub NtGdiAddRemoteMMInstanceToDC
 @ stdcall -syscall NtGdiAlphaBlend(long long long long long long long long long long long ptr)
-@ stdcall -syscall NtGdiAngleArc(long long long long float float)
+@ stdcall -syscall NtGdiAngleArc(long long long long long long)
 @ stub NtGdiAnyLinkedFonts
 @ stdcall -syscall NtGdiArcInternal(long long long long long long long long long long)
 @ stub NtGdiBRUSHOBJ_DeleteRbrush
@@ -123,7 +123,7 @@
 @ stub NtGdiBRUSHOBJ_ulGetBrushColor
 @ stub NtGdiBeginGdiRendering
 @ stdcall -syscall NtGdiBeginPath(long)
-@ stdcall -syscall NtGdiBitBlt(long long long long long long long long long long float)
+@ stdcall -syscall NtGdiBitBlt(long long long long long long long long long long long)
 @ stub NtGdiCLIPOBJ_bEnum
 @ stub NtGdiCLIPOBJ_cEnumStart
 @ stub NtGdiCLIPOBJ_ppoGetPath
@@ -295,7 +295,7 @@
 @ stub NtGdiDdDDIPresentMultiPlaneOverlay2
 @ stub NtGdiDdDDIPresentMultiPlaneOverlay3
 @ stub NtGdiDdDDIPresentRedirected
-@ stub NtGdiDdDDIQueryAdapterInfo
+@ stdcall -syscall NtGdiDdDDIQueryAdapterInfo(ptr)
 @ stub NtGdiDdDDIQueryAllocationResidency
 @ stub NtGdiDdDDIQueryClockCalibration
 @ stub NtGdiDdDDIQueryFSEBlock
@@ -530,7 +530,7 @@
 @ stub NtGdiHT_Get8BPPFormatPalette
 @ stub NtGdiHT_Get8BPPMaskPalette
 @ stdcall -syscall NtGdiHfontCreate(ptr long long long ptr)
-@ stub NtGdiIcmBrushInfo
+@ stdcall -syscall NtGdiIcmBrushInfo(long long ptr ptr ptr ptr ptr long)
 @ stub NtGdiInit
 @ stdcall -syscall NtGdiInitSpool()
 @ stdcall -syscall NtGdiIntersectClipRect(long long long long long)
@@ -597,7 +597,6 @@
 @ stdcall -syscall NtGdiSetBrushOrg(long long long ptr)
 @ stdcall -syscall NtGdiSetColorAdjustment(long ptr)
 @ stub NtGdiSetColorSpace
-@ stdcall -syscall NtGdiSetDIBits(long long long long ptr ptr long) # not present on Windows
 @ stdcall -syscall NtGdiSetDIBitsToDeviceInternal(long long long long long long long long long ptr ptr long long long long long)
 @ stdcall -syscall NtGdiSetDeviceGammaRamp(ptr ptr)
 @ stub NtGdiSetFontEnumeration
@@ -763,7 +762,7 @@
 @ stub NtUserBitBltSysBmp
 @ stub NtUserBlockInput
 @ stub NtUserBroadcastThemeChangeEvent
-@ stub NtUserBuildHimcList
+@ stdcall -syscall NtUserBuildHimcList(long long ptr ptr)
 @ stdcall -syscall NtUserBuildHwndList(long long long long long long ptr ptr)
 @ stub NtUserBuildNameList
 @ stub NtUserBuildPropList
@@ -862,7 +861,7 @@
 @ stub NtUserEnableChildWindowDpiMessage
 @ stub NtUserEnableIAMAccess
 @ stdcall -syscall NtUserEnableMenuItem(long long long)
-@ stub NtUserEnableMouseInPointer
+@ stdcall -syscall NtUserEnableMouseInPointer(long)
 @ stub NtUserEnableMouseInPointerForWindow
 @ stub NtUserEnableMouseInputForCursorSuppression
 @ stub NtUserEnableNonClientDpiScaling
@@ -972,7 +971,7 @@
 @ stub NtUserGetPointerDeviceRects
 @ stub NtUserGetPointerDevices
 @ stub NtUserGetPointerFrameTimes
-@ stub NtUserGetPointerInfoList
+@ stdcall -syscall NtUserGetPointerInfoList(long long long long long ptr ptr ptr)
 @ stub NtUserGetPointerInputTransform
 @ stub NtUserGetPointerProprietaryId
 @ stub NtUserGetPointerType
@@ -1052,7 +1051,7 @@
 @ stdcall -syscall NtUserInvalidateRgn(long long long)
 @ stub NtUserIsChildWindowDpiMessageEnabled
 @ stdcall -syscall NtUserIsClipboardFormatAvailable(long)
-@ stub NtUserIsMouseInPointerEnabled
+@ stdcall -syscall NtUserIsMouseInPointerEnabled()
 @ stub NtUserIsMouseInputEnabled
 @ stub NtUserIsNonClientDpiScalingEnabled
 @ stub NtUserIsResizeLayoutSynchronizationEnabled
@@ -1088,7 +1087,7 @@
 @ stdcall -syscall NtUserMoveWindow(long long long long long long)
 @ stdcall -syscall NtUserMsgWaitForMultipleObjectsEx(long ptr long long long)
 @ stub NtUserNavigateFocus
-@ stub NtUserNotifyIMEStatus
+@ stdcall -syscall NtUserNotifyIMEStatus(long long)
 @ stub NtUserNotifyProcessCreate
 @ stdcall -syscall NtUserNotifyWinEvent(long long long long)
 @ stdcall -syscall NtUserOpenClipboard(long long)
@@ -1113,7 +1112,7 @@
 @ stub NtUserPromotePointer
 @ stub NtUserQueryActivationObject
 @ stub NtUserQueryBSDRWindow
-@ stub NtUserQueryDisplayConfig
+@ stdcall -syscall NtUserQueryDisplayConfig(long ptr ptr ptr ptr ptr)
 @ stub NtUserQueryInformationThread
 @ stdcall -syscall NtUserQueryInputContext(long long)
 @ stub NtUserQuerySendMessage
@@ -1321,13 +1320,9 @@
 ################################################################
 # Wine internal extensions
 
-# Graphics drivers
-@ stdcall -syscall __wine_send_input(long ptr ptr)
-
-# gdi32
-@ stdcall -syscall __wine_get_brush_bitmap_info(long ptr ptr ptr)
 @ stdcall -syscall __wine_get_icm_profile(long long ptr ptr)
 @ stdcall -syscall __wine_get_file_outline_text_metric(wstr ptr ptr ptr)
+@ stdcall -syscall __wine_send_input(long ptr ptr)
 
 # shutil
 # CW Hack 22310

@@ -21,27 +21,33 @@
 #ifndef __WOW64_PRIVATE_H
 #define __WOW64_PRIVATE_H
 
-#include "syscall.h"
+#include "../ntdll/ntsyscalls.h"
 #include "struct32.h"
 
-#define SYSCALL_ENTRY(func) extern NTSTATUS WINAPI wow64_ ## func( UINT *args ) DECLSPEC_HIDDEN;
-ALL_SYSCALLS
+#define SYSCALL_ENTRY(id,name,_args) extern NTSTATUS WINAPI wow64_ ## name( UINT *args );
+ALL_SYSCALLS32
 #undef SYSCALL_ENTRY
 
-void * WINAPI Wow64AllocateTemp( SIZE_T size );
-void   WINAPI Wow64ApcRoutine( ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3, CONTEXT *context );
-void   WINAPI Wow64PassExceptionToGuest( EXCEPTION_POINTERS *ptrs );
+extern void init_image_mapping( HMODULE module );
+extern void init_file_redirects(void);
+extern BOOL get_file_redirect( OBJECT_ATTRIBUTES *attr );
 
-extern void init_image_mapping( HMODULE module ) DECLSPEC_HIDDEN;
-extern void init_file_redirects(void) DECLSPEC_HIDDEN;
-extern BOOL get_file_redirect( OBJECT_ATTRIBUTES *attr ) DECLSPEC_HIDDEN;
+extern USHORT native_machine;
+extern USHORT current_machine;
+extern ULONG_PTR args_alignment;
+extern ULONG_PTR highest_user_address;
+extern ULONG_PTR default_zero_bits;
+extern SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock;
 
-extern USHORT native_machine DECLSPEC_HIDDEN;
-extern USHORT current_machine DECLSPEC_HIDDEN;
-extern ULONG_PTR args_alignment DECLSPEC_HIDDEN;
-extern ULONG_PTR highest_user_address DECLSPEC_HIDDEN;
-extern ULONG_PTR default_zero_bits DECLSPEC_HIDDEN;
-extern SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock DECLSPEC_HIDDEN;
+extern void (WINAPI *pBTCpuNotifyFlushInstructionCache2)( const void *, SIZE_T );
+extern void (WINAPI *pBTCpuNotifyMapViewOfSection)( void * );
+extern void (WINAPI *pBTCpuNotifyMemoryAlloc)( void *, SIZE_T, ULONG, ULONG );
+extern void (WINAPI *pBTCpuNotifyMemoryDirty)( void *, SIZE_T );
+extern void (WINAPI *pBTCpuNotifyMemoryFree)( void *, SIZE_T, ULONG );
+extern void (WINAPI *pBTCpuNotifyMemoryProtect)( void *, SIZE_T, ULONG );
+extern void (WINAPI *pBTCpuNotifyUnmapViewOfSection)( void * );
+extern void (WINAPI *pBTCpuUpdateProcessorInformation)( SYSTEM_CPU_INFORMATION * );
+extern void (WINAPI *pBTCpuThreadTerm)( HANDLE );
 
 struct object_attr64
 {
@@ -49,11 +55,6 @@ struct object_attr64
     UNICODE_STRING      str;
     SECURITY_DESCRIPTOR sd;
 };
-
-static inline void *get_rva( HMODULE module, DWORD va )
-{
-    return (void *)((char *)module + va);
-}
 
 /* cf. GetSystemWow64Directory2 */
 static inline const WCHAR *get_machine_wow64_dir( USHORT machine )
@@ -63,8 +64,6 @@ static inline const WCHAR *get_machine_wow64_dir( USHORT machine )
     case IMAGE_FILE_MACHINE_TARGET_HOST: return L"\\??\\C:\\windows\\system32";
     case IMAGE_FILE_MACHINE_I386:        return L"\\??\\C:\\windows\\syswow64";
     case IMAGE_FILE_MACHINE_ARMNT:       return L"\\??\\C:\\windows\\sysarm32";
-    case IMAGE_FILE_MACHINE_AMD64:       return L"\\??\\C:\\windows\\sysx8664";
-    case IMAGE_FILE_MACHINE_ARM64:       return L"\\??\\C:\\windows\\sysarm64";
     default: return NULL;
     }
 }
@@ -187,6 +186,31 @@ static inline OBJECT_ATTRIBUTES *objattr_32to64_redirect( struct object_attr64 *
     return attr;
 }
 
+static inline TOKEN_USER *token_user_32to64( TOKEN_USER *out, const TOKEN_USER32 *in )
+{
+    out->User.Sid = ULongToPtr( in->User.Sid );
+    out->User.Attributes = in->User.Attributes;
+    return out;
+}
+
+static inline TOKEN_OWNER *token_owner_32to64( TOKEN_OWNER *out, const TOKEN_OWNER32 *in )
+{
+    out->Owner = ULongToPtr( in->Owner );
+    return out;
+}
+
+static inline TOKEN_PRIMARY_GROUP *token_primary_group_32to64( TOKEN_PRIMARY_GROUP *out, const TOKEN_PRIMARY_GROUP32 *in )
+{
+    out->PrimaryGroup = ULongToPtr( in->PrimaryGroup );
+    return out;
+}
+
+static inline TOKEN_DEFAULT_DACL *token_default_dacl_32to64( TOKEN_DEFAULT_DACL *out, const TOKEN_DEFAULT_DACL32 *in )
+{
+    out->DefaultDacl = ULongToPtr( in->DefaultDacl );
+    return out;
+}
+
 static inline void put_handle( ULONG *handle32, HANDLE handle )
 {
     *handle32 = HandleToULong( handle );
@@ -221,8 +245,8 @@ static inline void put_iosb( IO_STATUS_BLOCK32 *io32, const IO_STATUS_BLOCK *io 
 }
 
 extern void put_section_image_info( SECTION_IMAGE_INFORMATION32 *info32,
-                                    const SECTION_IMAGE_INFORMATION *info ) DECLSPEC_HIDDEN;
+                                    const SECTION_IMAGE_INFORMATION *info );
 extern void put_vm_counters( VM_COUNTERS_EX32 *info32, const VM_COUNTERS_EX *info,
-                             ULONG size ) DECLSPEC_HIDDEN;
+                             ULONG size );
 
 #endif /* __WOW64_PRIVATE_H */

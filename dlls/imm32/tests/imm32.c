@@ -18,14 +18,82 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdio.h>
+#include <stdarg.h>
+#include <stddef.h>
+
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
 
 #include "wine/test.h"
 #include "objbase.h"
 #include "winuser.h"
 #include "wingdi.h"
 #include "imm.h"
-#include "ddk/imm.h"
+#include "immdev.h"
+
+#include "ime_test.h"
+
+static const char *debugstr_wm_ime( UINT msg )
+{
+    switch (msg)
+    {
+    case WM_IME_STARTCOMPOSITION: return "WM_IME_STARTCOMPOSITION";
+    case WM_IME_ENDCOMPOSITION: return "WM_IME_ENDCOMPOSITION";
+    case WM_IME_COMPOSITION: return "WM_IME_COMPOSITION";
+    case WM_IME_SETCONTEXT: return "WM_IME_SETCONTEXT";
+    case WM_IME_NOTIFY: return "WM_IME_NOTIFY";
+    case WM_IME_CONTROL: return "WM_IME_CONTROL";
+    case WM_IME_COMPOSITIONFULL: return "WM_IME_COMPOSITIONFULL";
+    case WM_IME_SELECT: return "WM_IME_SELECT";
+    case WM_IME_CHAR: return "WM_IME_CHAR";
+    case WM_IME_REQUEST: return "WM_IME_REQUEST";
+    case WM_IME_KEYDOWN: return "WM_IME_KEYDOWN";
+    case WM_IME_KEYUP: return "WM_IME_KEYUP";
+    default: return wine_dbg_sprintf( "%#x", msg );
+    }
+}
+
+static const char *debugstr_ok( const char *cond )
+{
+    int c, n = 0;
+    /* skip possible casts */
+    while ((c = *cond++))
+    {
+        if (c == '(') n++;
+        if (!n) break;
+        if (c == ')') n--;
+    }
+    if (!strchr( cond - 1, '(' )) return wine_dbg_sprintf( "got %s", cond - 1 );
+    return wine_dbg_sprintf( "%.*s returned", (int)strcspn( cond - 1, "( " ), cond - 1 );
+}
+
+#define ok_eq( e, r, t, f, ... )                                                                   \
+    do                                                                                             \
+    {                                                                                              \
+        t v = (r);                                                                                 \
+        ok( v == (e), "%s " f "\n", debugstr_ok( #r ), v, ##__VA_ARGS__ );                         \
+    } while (0)
+#define ok_ne( e, r, t, f, ... )                                                                   \
+    do                                                                                             \
+    {                                                                                              \
+        t v = (r);                                                                                 \
+        ok( v != (e), "%s " f "\n", debugstr_ok( #r ), v, ##__VA_ARGS__ );                         \
+    } while (0)
+#define ok_wcs( e, r )                                                                             \
+    do                                                                                             \
+    {                                                                                              \
+        const WCHAR *v = (r);                                                                      \
+        ok( !wcscmp( v, (e) ), "%s %s\n", debugstr_ok(#r), debugstr_w(v) );                        \
+    } while (0)
+#define ok_str( e, r )                                                                             \
+    do                                                                                             \
+    {                                                                                              \
+        const char *v = (r);                                                                       \
+        ok( !strcmp( v, (e) ), "%s %s\n", debugstr_ok(#r), debugstr_a(v) );                        \
+    } while (0)
+#define ok_ret( e, r ) ok_eq( e, r, UINT_PTR, "%Iu, error %ld", GetLastError() )
 
 BOOL WINAPI ImmSetActiveContext(HWND, HIMC, BOOL);
 
@@ -33,6 +101,144 @@ static BOOL (WINAPI *pImmAssociateContextEx)(HWND,HIMC,DWORD);
 static UINT (WINAPI *pNtUserAssociateInputContext)(HWND,HIMC,ULONG);
 static BOOL (WINAPI *pImmIsUIMessageA)(HWND,UINT,WPARAM,LPARAM);
 static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
+
+extern BOOL WINAPI ImmFreeLayout(HKL);
+extern BOOL WINAPI ImmLoadIME(HKL);
+extern BOOL WINAPI ImmActivateLayout(HKL);
+
+#define check_member_( file, line, val, exp, fmt, member )                                         \
+    ok_(file, line)( (val).member == (exp).member, "got " #member " " fmt "\n", (val).member )
+#define check_member( val, exp, fmt, member )                                                      \
+    check_member_( __FILE__, __LINE__, val, exp, fmt, member )
+
+#define check_member_wstr_( file, line, val, exp, member )                                         \
+    ok_(file, line)( !wcscmp( (val).member, (exp).member ), "got " #member " %s\n",                \
+                     debugstr_w((val).member) )
+#define check_member_wstr( val, exp, member )                                                      \
+    check_member_wstr_( __FILE__, __LINE__, val, exp, member )
+
+#define check_member_str_( file, line, val, exp, member )                                          \
+    ok_(file, line)( !strcmp( (val).member, (exp).member ), "got " #member " %s\n",                \
+                     debugstr_a((val).member) )
+#define check_member_str( val, exp, member )                                                       \
+    check_member_str_( __FILE__, __LINE__, val, exp, member )
+
+#define check_member_point_( file, line, val, exp, member )                                        \
+    ok_(file, line)( !memcmp( &(val).member, &(exp).member, sizeof(POINT) ),                       \
+                     "got " #member " %s\n", wine_dbgstr_point( &(val).member ) )
+#define check_member_point( val, exp, member )                                                     \
+    check_member_point_( __FILE__, __LINE__, val, exp, member )
+
+#define check_member_rect_( file, line, val, exp, member )                                         \
+    ok_(file, line)( !memcmp( &(val).member, &(exp).member, sizeof(RECT) ),                        \
+                     "got " #member " %s\n", wine_dbgstr_rect( &(val).member ) )
+#define check_member_rect( val, exp, member )                                                      \
+    check_member_rect_( __FILE__, __LINE__, val, exp, member )
+
+#define check_composition_string( a, b ) check_composition_string_( __LINE__, a, b )
+static void check_composition_string_( int line, COMPOSITIONSTRING *string, const COMPOSITIONSTRING *expect )
+{
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwSize );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompReadAttrLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompReadAttrOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompReadClauseLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompReadClauseOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompReadStrLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompReadStrOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompAttrLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompAttrOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompClauseLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompClauseOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompStrLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCompStrOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwCursorPos );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwDeltaStart );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultReadClauseLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultReadClauseOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultReadStrLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultReadStrOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultClauseLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultClauseOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultStrLen );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwResultStrOffset );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwPrivateSize );
+    check_member_( __FILE__, line, *string, *expect, "%lu", dwPrivateOffset );
+}
+
+#define check_candidate_list( a, b ) check_candidate_list_( __LINE__, a, b, TRUE )
+static void check_candidate_list_( int line, CANDIDATELIST *list, const CANDIDATELIST *expect, BOOL unicode )
+{
+    UINT i;
+
+    check_member_( __FILE__, line, *list, *expect, "%lu", dwSize );
+    check_member_( __FILE__, line, *list, *expect, "%lu", dwStyle );
+    check_member_( __FILE__, line, *list, *expect, "%lu", dwCount );
+    check_member_( __FILE__, line, *list, *expect, "%lu", dwSelection );
+    check_member_( __FILE__, line, *list, *expect, "%lu", dwPageStart );
+    check_member_( __FILE__, line, *list, *expect, "%lu", dwPageSize );
+    for (i = 0; i < list->dwCount && i < expect->dwCount; ++i)
+    {
+        void *list_str = (BYTE *)list + list->dwOffset[i], *expect_str = (BYTE *)expect + expect->dwOffset[i];
+        check_member_( __FILE__, line, *list, *expect, "%lu", dwOffset[i] );
+        if (unicode) ok_( __FILE__, line )( !wcscmp( list_str, expect_str ), "got %s\n", debugstr_w(list_str) );
+        else ok_( __FILE__, line )( !strcmp( list_str, expect_str ), "got %s\n", debugstr_a(list_str) );
+    }
+}
+
+#define check_candidate_form( a, b ) check_candidate_form_( __LINE__, a, b )
+static void check_candidate_form_( int line, CANDIDATEFORM *form, const CANDIDATEFORM *expect )
+{
+    check_member_( __FILE__, line, *form, *expect, "%#lx", dwIndex );
+    check_member_( __FILE__, line, *form, *expect, "%#lx", dwStyle );
+    check_member_point_( __FILE__, line, *form, *expect, ptCurrentPos );
+    check_member_rect_( __FILE__, line, *form, *expect, rcArea );
+}
+
+#define check_composition_form( a, b ) check_composition_form_( __LINE__, a, b )
+static void check_composition_form_( int line, COMPOSITIONFORM *form, const COMPOSITIONFORM *expect )
+{
+    check_member_( __FILE__, line, *form, *expect, "%#lx", dwStyle );
+    check_member_point_( __FILE__, line, *form, *expect, ptCurrentPos );
+    check_member_rect_( __FILE__, line, *form, *expect, rcArea );
+}
+
+#define check_logfont_w( a, b ) check_logfont_w_( __LINE__, a, b )
+static void check_logfont_w_( int line, LOGFONTW *font, const LOGFONTW *expect )
+{
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfHeight );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfWidth );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfEscapement );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfOrientation );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfWeight );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfItalic );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfUnderline );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfStrikeOut );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfCharSet );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfOutPrecision );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfClipPrecision );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfQuality );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfPitchAndFamily );
+    check_member_wstr_( __FILE__, line, *font, *expect, lfFaceName );
+}
+
+#define check_logfont_a( a, b ) check_logfont_a_( __LINE__, a, b )
+static void check_logfont_a_( int line, LOGFONTA *font, const LOGFONTA *expect )
+{
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfHeight );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfWidth );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfEscapement );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfOrientation );
+    check_member_( __FILE__, line, *font, *expect, "%lu", lfWeight );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfItalic );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfUnderline );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfStrikeOut );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfCharSet );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfOutPrecision );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfClipPrecision );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfQuality );
+    check_member_( __FILE__, line, *font, *expect, "%u", lfPitchAndFamily );
+    check_member_str_( __FILE__, line, *font, *expect, lfFaceName );
+}
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE, enabled_ ## func = FALSE
@@ -66,6 +272,374 @@ static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
 DEFINE_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
 DEFINE_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
 
+#define process_messages() process_messages_(0)
+static void process_messages_(HWND hwnd)
+{
+    MSG msg;
+
+    while (PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ))
+    {
+        TranslateMessage( &msg );
+        DispatchMessageA( &msg );
+    }
+}
+
+/* try to make sure pending X events have been processed before continuing */
+#define flush_events() flush_events_( 100, 200 )
+static void flush_events_( int min_timeout, int max_timeout )
+{
+    DWORD time = GetTickCount() + max_timeout;
+    MSG msg;
+
+    while (max_timeout > 0)
+    {
+        if (MsgWaitForMultipleObjects( 0, NULL, FALSE, min_timeout, QS_ALLINPUT ) == WAIT_TIMEOUT) break;
+        while (PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ))
+        {
+            TranslateMessage( &msg );
+            DispatchMessageA( &msg );
+        }
+        max_timeout = time - GetTickCount();
+    }
+}
+
+#define ime_trace( msg, ... ) if (winetest_debug > 1) trace( "%04lx:%s " msg, GetCurrentThreadId(), __func__, ## __VA_ARGS__ )
+
+static BOOL ImeSelect_init_status;
+static BOOL todo_ImeInquire;
+DEFINE_EXPECT( ImeInquire );
+static BOOL todo_ImeDestroy;
+DEFINE_EXPECT( ImeDestroy );
+DEFINE_EXPECT( ImeEscape );
+DEFINE_EXPECT( ImeEnumRegisterWord );
+DEFINE_EXPECT( ImeRegisterWord );
+DEFINE_EXPECT( ImeGetRegisterWordStyle );
+DEFINE_EXPECT( ImeUnregisterWord );
+static BOOL todo_ImeSetCompositionString;
+DEFINE_EXPECT( ImeSetCompositionString );
+static BOOL todo_IME_DLL_PROCESS_ATTACH;
+DEFINE_EXPECT( IME_DLL_PROCESS_ATTACH );
+static BOOL todo_IME_DLL_PROCESS_DETACH;
+DEFINE_EXPECT( IME_DLL_PROCESS_DETACH );
+
+static IMEINFO ime_info;
+static UINT ime_count;
+static WCHAR ime_path[MAX_PATH];
+static HIMC default_himc;
+static HKL default_hkl, wineime_hkl;
+static HKL expect_ime = (HKL)(int)0xe020047f;
+
+enum ime_function
+{
+    IME_SELECT = 1,
+    IME_NOTIFY,
+    IME_PROCESS_KEY,
+    IME_TO_ASCII_EX,
+    IME_SET_ACTIVE_CONTEXT,
+    MSG_IME_UI,
+    MSG_TEST_WIN,
+};
+
+struct ime_call
+{
+    HKL hkl;
+    HIMC himc;
+    enum ime_function func;
+
+    WCHAR comp[16];
+    WCHAR result[16];
+
+    union
+    {
+        int select;
+        struct
+        {
+            int action;
+            int index;
+            int value;
+        } notify;
+        struct
+        {
+            WORD vkey;
+            LPARAM lparam;
+        } process_key;
+        struct
+        {
+            UINT vkey;
+            UINT vsc;
+            UINT flags;
+        } to_ascii_ex;
+        struct
+        {
+            int flag;
+        } set_active_context;
+        struct
+        {
+            UINT msg;
+            WPARAM wparam;
+            LPARAM lparam;
+        } message;
+    };
+
+    BOOL todo;
+    BOOL broken;
+    BOOL flaky_himc;
+    BOOL todo_value;
+};
+
+struct ime_call empty_sequence[] = {{0}};
+static struct ime_call ime_calls[1024];
+static ULONG ime_call_count;
+
+#define ok_call( a, b ) ok_call_( __FILE__, __LINE__, a, b )
+static int ok_call_( const char *file, int line, const struct ime_call *expected, const struct ime_call *received )
+{
+    int ret;
+
+    if ((ret = expected->func - received->func)) goto done;
+    /* Wine doesn't allocate HIMC in a deterministic order, ignore them when they are enumerated */
+    if (expected->flaky_himc && (ret = !!(UINT_PTR)expected->himc - !!(UINT_PTR)received->himc)) goto done;
+    if (!expected->flaky_himc && (ret = (UINT_PTR)expected->himc - (UINT_PTR)received->himc)) goto done;
+    if ((ret = (UINT)(UINT_PTR)expected->hkl - (UINT)(UINT_PTR)received->hkl)) goto done;
+    switch (expected->func)
+    {
+    case IME_SELECT:
+        if ((ret = expected->select - received->select)) goto done;
+        break;
+    case IME_NOTIFY:
+        if ((ret = expected->notify.action - received->notify.action)) goto done;
+        if ((ret = expected->notify.index - received->notify.index)) goto done;
+        if ((ret = expected->notify.value - received->notify.value)) goto done;
+        break;
+    case IME_PROCESS_KEY:
+        if ((ret = expected->process_key.vkey - received->process_key.vkey)) goto done;
+        if ((ret = expected->process_key.lparam - received->process_key.lparam)) goto done;
+        break;
+    case IME_TO_ASCII_EX:
+        if ((ret = expected->to_ascii_ex.vkey - received->to_ascii_ex.vkey)) goto done;
+        if ((ret = expected->to_ascii_ex.vsc - received->to_ascii_ex.vsc)) goto done;
+        if ((ret = expected->to_ascii_ex.flags - received->to_ascii_ex.flags)) goto done;
+        break;
+    case IME_SET_ACTIVE_CONTEXT:
+        if ((ret = expected->set_active_context.flag - received->set_active_context.flag)) goto done;
+        break;
+    case MSG_IME_UI:
+    case MSG_TEST_WIN:
+        if ((ret = expected->message.msg - received->message.msg)) goto done;
+        if ((ret = (expected->message.wparam - received->message.wparam))) goto done;
+        if ((ret = (expected->message.lparam - received->message.lparam))) goto done;
+        if ((ret = wcscmp( expected->comp, received->comp ))) goto done;
+        if ((ret = wcscmp( expected->result, received->result ))) goto done;
+        break;
+    }
+
+done:
+    if (ret && broken( expected->broken )) return ret;
+
+    switch (received->func)
+    {
+    case IME_SELECT:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "got hkl %p, himc %p, IME_SELECT select %u\n", received->hkl, received->himc, received->select );
+        return ret;
+    case IME_NOTIFY:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "got hkl %p, himc %p, IME_NOTIFY action %#x, index %#x, value %#x\n",
+                         received->hkl, received->himc, received->notify.action, received->notify.index,
+                         received->notify.value );
+        return ret;
+    case IME_PROCESS_KEY:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "got hkl %p, himc %p, IME_PROCESS_KEY vkey %#x, lparam %#Ix\n",
+                         received->hkl, received->himc, received->process_key.vkey, received->process_key.lparam );
+        return ret;
+    case IME_TO_ASCII_EX:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "got hkl %p, himc %p, IME_TO_ASCII_EX vkey %#x, vsc %#x, flags %#x\n",
+                         received->hkl, received->himc, received->to_ascii_ex.vkey, received->to_ascii_ex.vsc,
+                         received->to_ascii_ex.flags );
+        return ret;
+    case IME_SET_ACTIVE_CONTEXT:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "got hkl %p, himc %p, IME_SET_ACTIVE_CONTEXT flag %u\n", received->hkl, received->himc,
+                         received->set_active_context.flag );
+        return ret;
+    case MSG_IME_UI:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "got hkl %p, himc %p, MSG_IME_UI msg %s, wparam %#Ix, lparam %#Ix\n", received->hkl,
+                         received->himc, debugstr_wm_ime(received->message.msg), received->message.wparam, received->message.lparam );
+        return ret;
+    case MSG_TEST_WIN:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "got hkl %p, himc %p, MSG_TEST_WIN msg %s, wparam %#Ix, lparam %#Ix, comp %s, result %s\n", received->hkl,
+                         received->himc, debugstr_wm_ime(received->message.msg), received->message.wparam, received->message.lparam,
+                         debugstr_w(received->comp), debugstr_w(received->result) );
+        return ret;
+    }
+
+    switch (expected->func)
+    {
+    case IME_SELECT:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "hkl %p, himc %p, IME_SELECT select %u\n", expected->hkl, expected->himc, expected->select );
+        break;
+    case IME_NOTIFY:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "hkl %p, himc %p, IME_NOTIFY action %#x, index %#x, value %#x\n",
+                         expected->hkl, expected->himc, expected->notify.action, expected->notify.index,
+                         expected->notify.value );
+        break;
+    case IME_PROCESS_KEY:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "hkl %p, himc %p, IME_PROCESS_KEY vkey %#x, lparam %#Ix\n",
+                         expected->hkl, expected->himc, expected->process_key.vkey, expected->process_key.lparam );
+        break;
+    case IME_TO_ASCII_EX:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "hkl %p, himc %p, IME_TO_ASCII_EX vkey %#x, vsc %#x, flags %#x\n",
+                         expected->hkl, expected->himc, expected->to_ascii_ex.vkey, expected->to_ascii_ex.vsc,
+                         expected->to_ascii_ex.flags );
+        break;
+    case IME_SET_ACTIVE_CONTEXT:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "hkl %p, himc %p, IME_SET_ACTIVE_CONTEXT flag %u\n", expected->hkl, expected->himc,
+                         expected->set_active_context.flag );
+        break;
+    case MSG_IME_UI:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "hkl %p, himc %p, MSG_IME_UI msg %s, wparam %#Ix, lparam %#Ix\n", expected->hkl,
+                         expected->himc, debugstr_wm_ime(expected->message.msg), expected->message.wparam, expected->message.lparam );
+        break;
+    case MSG_TEST_WIN:
+        todo_wine_if( expected->todo || expected->todo_value )
+        ok_(file, line)( !ret, "hkl %p, himc %p, MSG_TEST_WIN msg %s, wparam %#Ix, lparam %#Ix, comp %s, result %s\n", expected->hkl,
+                         expected->himc, debugstr_wm_ime(expected->message.msg), expected->message.wparam, expected->message.lparam,
+                         debugstr_w(expected->comp), debugstr_w(expected->result) );
+        break;
+    }
+
+    return 0;
+}
+
+#define ok_seq( a ) ok_seq_( __FILE__, __LINE__, a, #a )
+static void ok_seq_( const char *file, int line, const struct ime_call *expected, const char *context )
+{
+    const struct ime_call *received = ime_calls;
+    UINT i = 0, ret;
+
+    while (expected->func || received->func)
+    {
+        winetest_push_context( "%u%s%s", i++, !expected->func ? " (spurious)" : "",
+                               !received->func ? " (missing)" : "" );
+        ret = ok_call_( file, line, expected, received );
+        if (ret && expected->todo && expected->func &&
+            !strcmp( winetest_platform, "wine" ))
+            expected++;
+        else if (ret && broken(expected->broken))
+            expected++;
+        else
+        {
+            if (expected->func) expected++;
+            if (received->func) received++;
+        }
+        winetest_pop_context();
+    }
+
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static BOOL check_WM_SHOWWINDOW;
+static BOOL ignore_WM_IME_NOTIFY;
+static BOOL ignore_WM_IME_REQUEST;
+
+static BOOL ignore_message( UINT msg, WPARAM wparam )
+{
+    switch (msg)
+    {
+    case WM_IME_NOTIFY:
+        if (ignore_WM_IME_NOTIFY) return TRUE;
+        return wparam > IMN_PRIVATE;
+    case WM_IME_REQUEST:
+        if (ignore_WM_IME_REQUEST) return TRUE;
+        return FALSE;
+    case WM_IME_STARTCOMPOSITION:
+    case WM_IME_ENDCOMPOSITION:
+    case WM_IME_COMPOSITION:
+    case WM_IME_SETCONTEXT:
+    case WM_IME_CONTROL:
+    case WM_IME_COMPOSITIONFULL:
+    case WM_IME_SELECT:
+    case WM_IME_CHAR:
+    case 0x287:
+    case WM_IME_KEYDOWN:
+    case WM_IME_KEYUP:
+        return FALSE;
+    case WM_SHOWWINDOW:
+        return !check_WM_SHOWWINDOW;
+    default:
+        return TRUE;
+    }
+}
+
+static LRESULT CALLBACK ime_ui_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct ime_call call =
+    {
+        .hkl = GetKeyboardLayout( 0 ), .himc = (HIMC)GetWindowLongPtrW( hwnd, IMMGWL_IMC ),
+        .func = MSG_IME_UI, .message = {.msg = msg, .wparam = wparam, .lparam = lparam}
+    };
+    LONG_PTR ptr;
+
+    ime_trace( "hwnd %p, msg %#x, wparam %#Ix, lparam %#Ix\n", hwnd, msg, wparam, lparam );
+
+    if (ignore_message( msg, wparam )) return DefWindowProcW( hwnd, msg, wparam, lparam );
+
+    ptr = GetWindowLongPtrW( hwnd, IMMGWL_PRIVATE );
+    ok( !ptr, "got IMMGWL_PRIVATE %#Ix\n", ptr );
+
+    ime_calls[ime_call_count++] = call;
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static LRESULT CALLBACK test_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct ime_call call =
+    {
+        .hkl = GetKeyboardLayout( 0 ), .himc = ImmGetContext( hwnd ),
+        .func = MSG_TEST_WIN, .message = {.msg = msg, .wparam = wparam, .lparam = lparam}
+    };
+
+    ime_trace( "hwnd %p, msg %#x, wparam %#Ix, lparam %#Ix\n", hwnd, msg, wparam, lparam );
+
+    if (ignore_message( msg, wparam )) return DefWindowProcW( hwnd, msg, wparam, lparam );
+
+    if (msg == WM_IME_COMPOSITION)
+    {
+        ImmGetCompositionStringW( call.himc, GCS_COMPSTR, call.comp, sizeof(call.comp) );
+        ImmGetCompositionStringW( call.himc, GCS_RESULTSTR, call.result, sizeof(call.result) );
+    }
+
+    ime_calls[ime_call_count++] = call;
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static WNDCLASSEXW ime_ui_class =
+{
+    .cbSize = sizeof(WNDCLASSEXW),
+    .style = CS_IME,
+    .lpfnWndProc = ime_ui_window_proc,
+    .cbWndExtra = 2 * sizeof(LONG_PTR),
+    .lpszClassName = L"WineTestIME",
+};
+
+static WNDCLASSEXW test_class =
+{
+    .cbSize = sizeof(WNDCLASSEXW),
+    .lpfnWndProc = test_window_proc,
+    .lpszClassName = L"WineTest",
+};
+
 /*
  * msgspy - record and analyse message traces sent to a certain window
  */
@@ -92,12 +666,6 @@ typedef struct
         HARDWAREINPUT   hi;
     } u;
 } TEST_INPUT;
-
-typedef struct _tagTRANSMSG {
-    UINT message;
-    WPARAM wParam;
-    LPARAM lParam;
-} TRANSMSG, *LPTRANSMSG;
 
 static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
 
@@ -211,6 +779,28 @@ static enum { PHASE_UNKNOWN, FIRST_WINDOW, SECOND_WINDOW,
 static HWND hwnd, child;
 
 static HWND get_ime_window(void);
+
+static void load_resource( const WCHAR *name, WCHAR *filename )
+{
+    static WCHAR path[MAX_PATH];
+    DWORD written;
+    HANDLE file;
+    HRSRC res;
+    void *ptr;
+
+    GetTempPathW( ARRAY_SIZE(path), path );
+    GetTempFileNameW( path, name, 0, filename );
+
+    file = CreateFileW( filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( file != INVALID_HANDLE_VALUE, "failed to create %s, error %lu\n", debugstr_w(filename), GetLastError() );
+
+    res = FindResourceW( NULL, name, L"TESTDLL" );
+    ok( res != 0, "couldn't find resource\n" );
+    ptr = LockResource( LoadResource( GetModuleHandleW( NULL ), res ) );
+    WriteFile( file, ptr, SizeofResource( GetModuleHandleW( NULL ), res ), &written, NULL );
+    ok( written == SizeofResource( GetModuleHandleW( NULL ), res ), "couldn't write resource\n" );
+    CloseHandle( file );
+}
 
 static LRESULT WINAPI wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -475,7 +1065,7 @@ static LRESULT WINAPI test_ime_wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                            hWnd, msg, wParam, lParam);
 }
 
-static void test_ImmGetCompositionString(void)
+static void test_SCS_SETSTR(void)
 {
     HIMC imc;
     static const WCHAR string[] = {'w','i','n','e',0x65e5,0x672c,0x8a9e};
@@ -617,12 +1207,6 @@ static void test_ImmGetCompositionString(void)
             skip("WM_IME_COMPOSITION(GCS_RESULTSTR) isn't tested\n");
         msg_spy_flush_msgs();
     }
-}
-
-static void test_ImmSetCompositionString(void)
-{
-    HIMC imc;
-    BOOL ret;
 
     SetLastError(0xdeadbeef);
     imc = ImmGetContext(hwnd);
@@ -831,248 +1415,438 @@ static void test_NtUserAssociateInputContext(void)
     ImmReleaseContext(hwnd,imc);
 }
 
-typedef struct _igc_threadinfo {
+struct test_cross_thread_himc_params
+{
     HWND hwnd;
     HANDLE event;
-    HIMC himc;
-    HIMC u_himc;
-} igc_threadinfo;
+    HIMC himc[2];
+    INPUTCONTEXT *contexts[2];
+};
 
-
-static DWORD WINAPI ImmGetContextThreadFunc( LPVOID lpParam)
+static DWORD WINAPI test_cross_thread_himc_thread( void *arg )
 {
-    HIMC h1,h2;
-    HWND hwnd2;
-    COMPOSITIONFORM cf;
-    CANDIDATEFORM cdf;
-    POINT pt;
+    CANDIDATEFORM candidate = {.dwIndex = 1, .dwStyle = CFS_CANDIDATEPOS};
+    struct test_cross_thread_himc_params *params = arg;
+    COMPOSITIONFORM composition = {0};
+    INPUTCONTEXT *contexts[2];
+    HIMC himc[2], tmp_himc;
+    LOGFONTW fontW = {0};
+    HWND hwnd, tmp_hwnd;
+    POINT pos = {0};
     MSG msg;
 
-    igc_threadinfo *info= (igc_threadinfo*)lpParam;
-    info->hwnd = CreateWindowExA(WS_EX_CLIENTEDGE, wndcls, "Wine imm32.dll test",
-                                 WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                                 240, 120, NULL, NULL, GetModuleHandleW(NULL), NULL);
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok_ne( NULL, hwnd, HWND, "%p" );
+    himc[0] = ImmGetContext( hwnd );
+    ok_ne( NULL, himc[0], HIMC, "%p" );
+    contexts[0] = ImmLockIMC( himc[0] );
+    ok_ne( NULL, contexts[0], INPUTCONTEXT *, "%p" );
+    contexts[0]->hWnd = hwnd;
 
-    h1 = ImmGetContext(hwnd);
-    ok(info->himc == h1, "hwnd context changed in new thread\n");
-    h2 = ImmGetContext(info->hwnd);
-    ok(h2 != h1, "new hwnd in new thread should have different context\n");
-    info->himc = h2;
-    ImmReleaseContext(hwnd,h1);
+    tmp_hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                              100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    tmp_himc = ImmGetContext( tmp_hwnd );
+    ok_eq( himc[0], tmp_himc, HIMC, "%p" );
+    ok_ret( 1, ImmReleaseContext( tmp_hwnd, tmp_himc ) );
+    ok_ret( 1, DestroyWindow( tmp_hwnd ) );
 
-    hwnd2 = CreateWindowExA(WS_EX_CLIENTEDGE, wndcls, "Wine imm32.dll test",
-                            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                            240, 120, NULL, NULL, GetModuleHandleW(NULL), NULL);
-    h1 = ImmGetContext(hwnd2);
+    himc[1] = ImmCreateContext();
+    ok_ne( NULL, himc[1], HIMC, "%p" );
+    contexts[1] = ImmLockIMC( himc[1] );
+    ok_ne( NULL, contexts[1], INPUTCONTEXT *, "%p" );
+    contexts[1]->hWnd = hwnd;
 
-    ok(h1 == h2, "Windows in same thread should have same default context\n");
-    ImmReleaseContext(hwnd2,h1);
-    ImmReleaseContext(info->hwnd,h2);
-    DestroyWindow(hwnd2);
+    ok_ret( 1, ImmSetOpenStatus( himc[0], 0xdeadbeef ) );
+    ok_ret( 1, ImmSetOpenStatus( himc[1], 0xfeedcafe ) );
+    ok_ret( 1, ImmSetCompositionWindow( himc[0], &composition ) );
+    ok_ret( 1, ImmSetCompositionWindow( himc[1], &composition ) );
+    ok_ret( 1, ImmSetCandidateWindow( himc[0], &candidate ) );
+    ok_ret( 1, ImmSetCandidateWindow( himc[1], &candidate ) );
+    ok_ret( 1, ImmSetStatusWindowPos( himc[0], &pos ) );
+    ok_ret( 1, ImmSetStatusWindowPos( himc[1], &pos ) );
+    ok_ret( 1, ImmSetCompositionFontW( himc[0], &fontW ) );
+    ok_ret( 1, ImmSetCompositionFontW( himc[1], &fontW ) );
 
-    /* priming for later tests */
-    ImmSetCompositionWindow(h1, &cf);
-    ImmSetStatusWindowPos(h1, &pt);
-    info->u_himc = ImmCreateContext();
-    ImmSetOpenStatus(info->u_himc, TRUE);
-    cdf.dwIndex = 0;
-    cdf.dwStyle = CFS_CANDIDATEPOS;
-    cdf.ptCurrentPos.x = 0;
-    cdf.ptCurrentPos.y = 0;
-    ImmSetCandidateWindow(info->u_himc, &cdf);
+    params->hwnd = hwnd;
+    params->himc[0] = himc[0];
+    params->himc[1] = himc[1];
+    params->contexts[0] = contexts[0];
+    params->contexts[1] = contexts[1];
+    SetEvent( params->event );
 
-    SetEvent(info->event);
-
-    while(GetMessageW(&msg, 0, 0, 0))
+    while (GetMessageW( &msg, 0, 0, 0 ))
     {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+        TranslateMessage( &msg );
+        DispatchMessageW( &msg );
     }
+
+    ok_ret( 1, ImmUnlockIMC( himc[0] ) );
+    ok_ret( 1, ImmUnlockIMC( himc[1] ) );
+
+    ok_ret( 1, ImmDestroyContext( himc[1] ) );
+    ok_ret( 1, ImmReleaseContext( hwnd, himc[0] ) );
+    ok_ret( 0, DestroyWindow( hwnd ) );
+
     return 1;
 }
 
-static void test_ImmThreads(void)
+static void test_cross_thread_himc(void)
 {
-    HIMC himc, otherHimc, h1;
-    igc_threadinfo threadinfo;
-    HANDLE hThread;
-    DWORD dwThreadId;
-    BOOL rc;
-    LOGFONTA lf;
-    COMPOSITIONFORM cf;
-    CANDIDATEFORM cdf;
-    DWORD status, sentence;
-    POINT pt;
+    static const WCHAR comp_string[] = L"CompString";
+    RECONVERTSTRING reconv = {.dwSize = sizeof(RECONVERTSTRING)};
+    struct test_cross_thread_himc_params params;
+    COMPOSITIONFORM composition = {0};
+    DWORD tid, conversion, sentence;
+    IMECHARPOSITION char_pos = {0};
+    CANDIDATEFORM candidate = {0};
+    COMPOSITIONSTRING *string;
+    HIMC himc[2], tmp_himc;
+    INPUTCONTEXT *tmp_ctx;
+    LOGFONTW fontW = {0};
+    LOGFONTA fontA = {0};
+    char buffer[512];
+    POINT pos = {0};
+    HANDLE thread;
+    BYTE *dst;
+    UINT ret;
 
-    himc = ImmGetContext(hwnd);
-    threadinfo.event = CreateEventA(NULL, TRUE, FALSE, NULL);
-    threadinfo.himc = himc;
-    hThread = CreateThread(NULL, 0, ImmGetContextThreadFunc, &threadinfo, 0, &dwThreadId );
-    WaitForSingleObject(threadinfo.event, INFINITE);
+    himc[0] = ImmGetContext( hwnd );
+    ok_ne( NULL, himc[0], HIMC, "%p" );
+    ok_ne( NULL, ImmLockIMC( himc[0] ), INPUTCONTEXT *, "%p" );
+    ok_ret( 1, ImmUnlockIMC( himc[0] ) );
 
-    otherHimc = ImmGetContext(threadinfo.hwnd);
+    params.event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    ok_ne( NULL, params.event, HANDLE, "%p" );
+    thread = CreateThread( NULL, 0, test_cross_thread_himc_thread, &params, 0, &tid );
+    ok_ne( NULL, thread, HANDLE, "%p" );
+    WaitForSingleObject( params.event, INFINITE );
 
-    ok(himc != otherHimc, "Windows from other threads should have different himc\n");
-    ok(otherHimc == threadinfo.himc, "Context from other thread should not change in main thread\n");
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
 
-    SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, TRUE);
-    SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, TRUE);
-    SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
-    rc = ImmSetActiveContext(hwnd, otherHimc, TRUE);
-    ok(rc, "ImmSetActiveContext failed\n");
-    CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
-    SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
-    rc = ImmSetActiveContext(hwnd, otherHimc, FALSE);
-    ok(rc, "ImmSetActiveContext failed\n");
-    CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
-    SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, FALSE);
-    SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, FALSE);
+    tmp_himc = ImmGetContext( params.hwnd );
+    ok_ne( himc[0], tmp_himc, HIMC, "%p" );
+    ok_eq( params.himc[0], tmp_himc, HIMC, "%p" );
+    ok_ret( 1, ImmReleaseContext( params.hwnd, tmp_himc ) );
 
-    h1 = ImmAssociateContext(hwnd,otherHimc);
-    ok(h1 == NULL, "Should fail to be able to Associate a default context from a different thread\n");
-    h1 = ImmGetContext(hwnd);
-    ok(h1 == himc, "Context for window should remain unchanged\n");
-    ImmReleaseContext(hwnd,h1);
+    himc[1] = ImmCreateContext();
+    ok_ne( NULL, himc[1], HIMC, "%p" );
+    tmp_ctx = ImmLockIMC( himc[1] );
+    ok_ne( NULL, tmp_ctx, INPUTCONTEXT *, "%p" );
 
-    h1 = ImmAssociateContext(hwnd, threadinfo.u_himc);
-    ok (h1 == NULL, "Should fail to associate a context from a different thread\n");
-    h1 = ImmGetContext(hwnd);
-    ok(h1 == himc, "Context for window should remain unchanged\n");
-    ImmReleaseContext(hwnd,h1);
+    tmp_ctx->hCompStr = ImmReSizeIMCC( tmp_ctx->hCompStr, 512 );
+    ok_ne( NULL, tmp_ctx->hCompStr, HIMCC, "%p" );
+    string = ImmLockIMCC( tmp_ctx->hCompStr );
+    ok_ne( NULL, string, COMPOSITIONSTRING *, "%p" );
+    string->dwSize = sizeof(COMPOSITIONSTRING);
+    string->dwCompStrLen = wcslen( comp_string );
+    string->dwCompStrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompStrOffset;
+    memcpy( dst, comp_string, string->dwCompStrLen * sizeof(WCHAR) );
+    string->dwSize += string->dwCompStrLen * sizeof(WCHAR);
 
-    h1 = ImmAssociateContext(threadinfo.hwnd, threadinfo.u_himc);
-    ok (h1 == NULL, "Should fail to associate a context from a different thread into a window from that thread.\n");
-    h1 = ImmGetContext(threadinfo.hwnd);
-    ok(h1 == threadinfo.himc, "Context for window should remain unchanged\n");
-    ImmReleaseContext(threadinfo.hwnd,h1);
+    string->dwCompClauseLen = 2 * sizeof(DWORD);
+    string->dwCompClauseOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompClauseOffset;
+    *(DWORD *)(dst + 0 * sizeof(DWORD)) = 0;
+    *(DWORD *)(dst + 1 * sizeof(DWORD)) = string->dwCompStrLen;
+    string->dwSize += 2 * sizeof(DWORD);
 
-    /* OpenStatus */
-    rc = ImmSetOpenStatus(himc, TRUE);
-    ok(rc != 0, "ImmSetOpenStatus failed\n");
-    rc = ImmGetOpenStatus(himc);
-    ok(rc != 0, "ImmGetOpenStatus failed\n");
-    rc = ImmSetOpenStatus(himc, FALSE);
-    ok(rc != 0, "ImmSetOpenStatus failed\n");
-    rc = ImmGetOpenStatus(himc);
-    ok(rc == 0, "ImmGetOpenStatus failed\n");
+    string->dwCompAttrLen = string->dwCompStrLen;
+    string->dwCompAttrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompAttrOffset;
+    memset( dst, ATTR_INPUT, string->dwCompStrLen );
+    string->dwSize += string->dwCompStrLen;
+    ok_ret( 0, ImmUnlockIMCC( tmp_ctx->hCompStr ) );
 
-    rc = ImmSetOpenStatus(otherHimc, TRUE);
-    ok(rc == 0, "ImmSetOpenStatus should fail\n");
-    rc = ImmSetOpenStatus(threadinfo.u_himc, TRUE);
-    ok(rc == 0, "ImmSetOpenStatus should fail\n");
-    rc = ImmGetOpenStatus(otherHimc);
-    ok(rc == 0, "ImmGetOpenStatus failed\n");
-    rc = ImmGetOpenStatus(threadinfo.u_himc);
-    ok (rc == 1 || broken(rc == 0), "ImmGetOpenStatus should return 1\n");
-    rc = ImmSetOpenStatus(otherHimc, FALSE);
-    ok(rc == 0, "ImmSetOpenStatus should fail\n");
-    rc = ImmGetOpenStatus(otherHimc);
-    ok(rc == 0, "ImmGetOpenStatus failed\n");
+    ok_ret( 1, ImmUnlockIMC( himc[1] ) );
 
-    /* CompositionFont */
-    rc = ImmGetCompositionFontA(himc, &lf);
-    ok(rc != 0, "ImmGetCompositionFont failed\n");
-    rc = ImmSetCompositionFontA(himc, &lf);
-    ok(rc != 0, "ImmSetCompositionFont failed\n");
+    /* ImmLockIMC should succeed with cross thread HIMC */
 
-    rc = ImmGetCompositionFontA(otherHimc, &lf);
-    ok(rc != 0 || broken(rc == 0), "ImmGetCompositionFont failed\n");
-    rc = ImmGetCompositionFontA(threadinfo.u_himc, &lf);
-    ok(rc != 0 || broken(rc == 0), "ImmGetCompositionFont user himc failed\n");
-    rc = ImmSetCompositionFontA(otherHimc, &lf);
-    ok(rc == 0, "ImmSetCompositionFont should fail\n");
-    rc = ImmSetCompositionFontA(threadinfo.u_himc, &lf);
-    ok(rc == 0, "ImmSetCompositionFont should fail\n");
+    tmp_ctx = ImmLockIMC( params.himc[0] );
+    ok_eq( params.contexts[0], tmp_ctx, INPUTCONTEXT *, "%p" );
+    ret = ImmGetIMCLockCount( params.himc[0] );
+    ok( ret >= 2, "got ret %u\n", ret );
 
-    /* CompositionWindow */
-    rc = ImmSetCompositionWindow(himc, &cf);
-    ok(rc != 0, "ImmSetCompositionWindow failed\n");
-    rc = ImmGetCompositionWindow(himc, &cf);
-    ok(rc != 0, "ImmGetCompositionWindow failed\n");
+    tmp_ctx->hCompStr = ImmReSizeIMCC( tmp_ctx->hCompStr, 512 );
+    ok_ne( NULL, tmp_ctx->hCompStr, HIMCC, "%p" );
+    string = ImmLockIMCC( tmp_ctx->hCompStr );
+    ok_ne( NULL, string, COMPOSITIONSTRING *, "%p" );
+    string->dwSize = sizeof(COMPOSITIONSTRING);
+    string->dwCompStrLen = wcslen( comp_string );
+    string->dwCompStrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompStrOffset;
+    memcpy( dst, comp_string, string->dwCompStrLen * sizeof(WCHAR) );
+    string->dwSize += string->dwCompStrLen * sizeof(WCHAR);
 
-    rc = ImmSetCompositionWindow(otherHimc, &cf);
-    ok(rc == 0, "ImmSetCompositionWindow should fail\n");
-    rc = ImmSetCompositionWindow(threadinfo.u_himc, &cf);
-    ok(rc == 0, "ImmSetCompositionWindow should fail\n");
-    rc = ImmGetCompositionWindow(otherHimc, &cf);
-    ok(rc != 0 || broken(rc == 0), "ImmGetCompositionWindow failed\n");
-    rc = ImmGetCompositionWindow(threadinfo.u_himc, &cf);
-    ok(rc != 0 || broken(rc == 0), "ImmGetCompositionWindow failed\n");
+    string->dwCompClauseLen = 2 * sizeof(DWORD);
+    string->dwCompClauseOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompClauseOffset;
+    *(DWORD *)(dst + 0 * sizeof(DWORD)) = 0;
+    *(DWORD *)(dst + 1 * sizeof(DWORD)) = string->dwCompStrLen;
+    string->dwSize += 2 * sizeof(DWORD);
 
-    /* ConversionStatus */
-    rc = ImmGetConversionStatus(himc, &status, &sentence);
-    ok(rc != 0, "ImmGetConversionStatus failed\n");
-    rc = ImmSetConversionStatus(himc, status, sentence);
-    ok(rc != 0, "ImmSetConversionStatus failed\n");
+    string->dwCompAttrLen = string->dwCompStrLen;
+    string->dwCompAttrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompAttrOffset;
+    memset( dst, ATTR_INPUT, string->dwCompStrLen );
+    string->dwSize += string->dwCompStrLen;
+    ok_ret( 0, ImmUnlockIMCC( tmp_ctx->hCompStr ) );
 
-    rc = ImmGetConversionStatus(otherHimc, &status, &sentence);
-    ok(rc != 0 || broken(rc == 0), "ImmGetConversionStatus failed\n");
-    rc = ImmGetConversionStatus(threadinfo.u_himc, &status, &sentence);
-    ok(rc != 0 || broken(rc == 0), "ImmGetConversionStatus failed\n");
-    rc = ImmSetConversionStatus(otherHimc, status, sentence);
-    ok(rc == 0, "ImmSetConversionStatus should fail\n");
-    rc = ImmSetConversionStatus(threadinfo.u_himc, status, sentence);
-    ok(rc == 0, "ImmSetConversionStatus should fail\n");
+    ok_ret( 1, ImmUnlockIMC( params.himc[0] ) );
 
-    /* StatusWindowPos */
-    rc = ImmSetStatusWindowPos(himc, &pt);
-    ok(rc != 0, "ImmSetStatusWindowPos failed\n");
-    rc = ImmGetStatusWindowPos(himc, &pt);
-    ok(rc != 0, "ImmGetStatusWindowPos failed\n");
+    tmp_ctx = ImmLockIMC( params.himc[1] );
+    ok_eq( params.contexts[1], tmp_ctx, INPUTCONTEXT *, "%p" );
+    ret = ImmGetIMCLockCount( params.himc[1] );
+    ok( ret >= 2, "got ret %u\n", ret );
+    ok_ret( 1, ImmUnlockIMC( params.himc[1] ) );
 
-    rc = ImmSetStatusWindowPos(otherHimc, &pt);
-    ok(rc == 0, "ImmSetStatusWindowPos should fail\n");
-    rc = ImmSetStatusWindowPos(threadinfo.u_himc, &pt);
-    ok(rc == 0, "ImmSetStatusWindowPos should fail\n");
-    rc = ImmGetStatusWindowPos(otherHimc, &pt);
-    ok(rc != 0 || broken(rc == 0), "ImmGetStatusWindowPos failed\n");
-    rc = ImmGetStatusWindowPos(threadinfo.u_himc, &pt);
-    ok(rc != 0 || broken(rc == 0), "ImmGetStatusWindowPos failed\n");
+    /* ImmSetActiveContext should succeed with cross thread HIMC */
 
-    h1 = ImmAssociateContext(threadinfo.hwnd, NULL);
-    ok (h1 == otherHimc, "ImmAssociateContext cross thread with NULL should work\n");
-    h1 = ImmGetContext(threadinfo.hwnd);
-    ok (h1 == NULL, "CrossThread window context should be NULL\n");
-    h1 = ImmAssociateContext(threadinfo.hwnd, h1);
-    ok (h1 == NULL, "Resetting cross thread context should fail\n");
-    h1 = ImmGetContext(threadinfo.hwnd);
-    ok (h1 == NULL, "CrossThread window context should still be NULL\n");
+    SET_ENABLE( WM_IME_SETCONTEXT_DEACTIVATE, TRUE );
+    SET_ENABLE( WM_IME_SETCONTEXT_ACTIVATE, TRUE );
 
-    rc = ImmDestroyContext(threadinfo.u_himc);
-    ok (rc == 0, "ImmDestroyContext Cross Thread should fail\n");
+    SET_EXPECT( WM_IME_SETCONTEXT_ACTIVATE );
+    ok_ret( 1, ImmSetActiveContext( hwnd, params.himc[0], TRUE ) );
+    CHECK_CALLED( WM_IME_SETCONTEXT_ACTIVATE );
 
-    /* Candidate Window */
-    rc = ImmGetCandidateWindow(himc, 0, &cdf);
-    ok (rc == 0, "ImmGetCandidateWindow should fail\n");
-    cdf.dwIndex = 0;
-    cdf.dwStyle = CFS_CANDIDATEPOS;
-    cdf.ptCurrentPos.x = 0;
-    cdf.ptCurrentPos.y = 0;
-    rc = ImmSetCandidateWindow(himc, &cdf);
-    ok (rc == 1, "ImmSetCandidateWindow should succeed\n");
-    rc = ImmGetCandidateWindow(himc, 0, &cdf);
-    ok (rc == 1, "ImmGetCandidateWindow should succeed\n");
+    SET_EXPECT( WM_IME_SETCONTEXT_DEACTIVATE );
+    ok_ret( 1, ImmSetActiveContext( hwnd, params.himc[0], FALSE ) );
+    CHECK_CALLED( WM_IME_SETCONTEXT_DEACTIVATE );
 
-    rc = ImmGetCandidateWindow(otherHimc, 0, &cdf);
-    ok (rc == 0, "ImmGetCandidateWindow should fail\n");
-    rc = ImmSetCandidateWindow(otherHimc, &cdf);
-    ok (rc == 0, "ImmSetCandidateWindow should fail\n");
-    rc = ImmGetCandidateWindow(threadinfo.u_himc, 0, &cdf);
-    ok (rc == 1 || broken( rc == 0), "ImmGetCandidateWindow should succeed\n");
-    rc = ImmSetCandidateWindow(threadinfo.u_himc, &cdf);
-    ok (rc == 0, "ImmSetCandidateWindow should fail\n");
+    SET_ENABLE( WM_IME_SETCONTEXT_DEACTIVATE, FALSE );
+    SET_ENABLE( WM_IME_SETCONTEXT_ACTIVATE, FALSE );
 
-    ImmReleaseContext(threadinfo.hwnd,otherHimc);
-    ImmReleaseContext(hwnd,himc);
+    /* ImmSetOpenStatus should fail with cross thread HIMC */
 
-    SendMessageA(threadinfo.hwnd, WM_CLOSE, 0, 0);
-    rc = PostThreadMessageA(dwThreadId, WM_QUIT, 1, 0);
-    ok(rc == 1, "PostThreadMessage should succeed\n");
-    WaitForSingleObject(hThread, INFINITE);
-    CloseHandle(hThread);
+    ok_ret( 1, ImmSetOpenStatus( himc[1], 0xdeadbeef ) );
+    ok_ret( (int)0xdeadbeef, ImmGetOpenStatus( himc[1] ) );
 
-    himc = ImmGetContext(GetDesktopWindow());
-    ok(himc == NULL, "Should not be able to get himc from other process window\n");
+    ok_ret( 0, ImmSetOpenStatus( params.himc[0], TRUE ) );
+    ok_ret( 0, ImmSetOpenStatus( params.himc[1], TRUE ) );
+    ok_ret( (int)0xdeadbeef, ImmGetOpenStatus( params.himc[0] ) );
+    ok_ret( (int)0xfeedcafe, ImmGetOpenStatus( params.himc[1] ) );
+    ok_ret( 0, ImmSetOpenStatus( params.himc[0], FALSE ) );
+    ok_ret( (int)0xdeadbeef, ImmGetOpenStatus( params.himc[0] ) );
+
+    /* ImmSetConversionStatus should fail with cross thread HIMC */
+
+    ok_ret( 1, ImmGetConversionStatus( himc[1], &conversion, &sentence ) );
+    ok_ret( 1, ImmSetConversionStatus( himc[1], conversion, sentence ) );
+
+    ok_ret( 1, ImmGetConversionStatus( params.himc[0], &conversion, &sentence ) );
+    ok_ret( 1, ImmGetConversionStatus( params.himc[1], &conversion, &sentence ) );
+    ok_ret( 0, ImmSetConversionStatus( params.himc[0], conversion, sentence ) );
+    ok_ret( 0, ImmSetConversionStatus( params.himc[1], conversion, sentence ) );
+
+    /* ImmSetCompositionFont(W|A) should fail with cross thread HIMC */
+
+    ok_ret( 1, ImmSetCompositionFontA( himc[1], &fontA ) );
+    ok_ret( 1, ImmGetCompositionFontA( himc[1], &fontA ) );
+    ok_ret( 1, ImmSetCompositionFontW( himc[1], &fontW ) );
+    ok_ret( 1, ImmGetCompositionFontW( himc[1], &fontW ) );
+
+    ok_ret( 0, ImmSetCompositionFontA( params.himc[0], &fontA ) );
+    ok_ret( 0, ImmSetCompositionFontA( params.himc[1], &fontA ) );
+    ok_ret( 1, ImmGetCompositionFontA( params.himc[0], &fontA ) );
+    ok_ret( 1, ImmGetCompositionFontA( params.himc[1], &fontA ) );
+    ok_ret( 0, ImmSetCompositionFontW( params.himc[0], &fontW ) );
+    ok_ret( 0, ImmSetCompositionFontW( params.himc[1], &fontW ) );
+    ok_ret( 1, ImmGetCompositionFontW( params.himc[0], &fontW ) );
+    ok_ret( 1, ImmGetCompositionFontW( params.himc[1], &fontW ) );
+
+    /* ImmRequestMessage(W|A) should fail with cross thread HIMC */
+
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_COMPOSITIONFONT, (LPARAM)&fontW ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_COMPOSITIONFONT, (LPARAM)&fontA ) );
+
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_COMPOSITIONFONT, (LPARAM)&fontW ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_COMPOSITIONFONT, (LPARAM)&fontA ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_COMPOSITIONFONT, (LPARAM)&fontW ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_COMPOSITIONFONT, (LPARAM)&fontA ) );
+
+    ok_seq( empty_sequence );
+
+    /* ImmSetCompositionString(W|A) should fail with cross thread HIMC */
+
+    ok_ret( 10, ImmGetCompositionStringA( himc[1], GCS_COMPSTR, buffer, sizeof(buffer) ) );
+    ok_ret( 20, ImmGetCompositionStringW( himc[1], GCS_COMPSTR, buffer, sizeof(buffer) ) );
+    ok_ret( 1, ImmSetCompositionStringA( himc[1], SCS_SETSTR, "a", 2, NULL, 0 ) );
+    ok_ret( 1, ImmSetCompositionStringW( himc[1], SCS_SETSTR, L"a", 4, NULL, 0 ) );
+
+    ok_ret( 0, ImmSetCompositionStringA( params.himc[0], SCS_SETSTR, "a", 2, NULL, 0 ) );
+    ok_ret( 0, ImmSetCompositionStringA( params.himc[1], SCS_SETSTR, "a", 2, NULL, 0 ) );
+    ok_ret( 0, ImmSetCompositionStringW( params.himc[0], SCS_SETSTR, L"a", 4, NULL, 0 ) );
+    ok_ret( 0, ImmSetCompositionStringW( params.himc[1], SCS_SETSTR, L"a", 4, NULL, 0 ) );
+    ok_ret( 10, ImmGetCompositionStringA( params.himc[0], GCS_COMPSTR, buffer, sizeof(buffer) ) );
+    ok_ret( 0, ImmGetCompositionStringA( params.himc[1], GCS_COMPSTR, buffer, sizeof(buffer) ) );
+    ok_ret( 20, ImmGetCompositionStringW( params.himc[0], GCS_COMPSTR, buffer, sizeof(buffer) ) );
+    ok_ret( 0, ImmGetCompositionStringW( params.himc[1], GCS_COMPSTR, buffer, sizeof(buffer) ) );
+
+    /* ImmRequestMessage(W|A) should fail with cross thread HIMC */
+
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_RECONVERTSTRING, 0 ) );
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_RECONVERTSTRING, 0 ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_RECONVERTSTRING, 0 ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_RECONVERTSTRING, 0 ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_RECONVERTSTRING, 0 ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_RECONVERTSTRING, 0 ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_DOCUMENTFEED, 0 ) );
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_DOCUMENTFEED, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_DOCUMENTFEED, 0 ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_DOCUMENTFEED, (LPARAM)&reconv ) );
+
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_DOCUMENTFEED, 0 ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_DOCUMENTFEED, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_DOCUMENTFEED, 0 ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_DOCUMENTFEED, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_DOCUMENTFEED, 0 ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_DOCUMENTFEED, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_DOCUMENTFEED, 0 ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_DOCUMENTFEED, (LPARAM)&reconv ) );
+
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_CONFIRMRECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_CONFIRMRECONVERTSTRING, (LPARAM)&reconv ) );
+
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_CONFIRMRECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_CONFIRMRECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_CONFIRMRECONVERTSTRING, (LPARAM)&reconv ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_CONFIRMRECONVERTSTRING, (LPARAM)&reconv ) );
+
+    ok_seq( empty_sequence );
+
+    /* ImmSetCompositionWindow should fail with cross thread HIMC */
+
+    ok_ret( 1, ImmSetCompositionWindow( himc[1], &composition ) );
+    ok_ret( 1, ImmGetCompositionWindow( himc[1], &composition ) );
+
+    ok_ret( 0, ImmSetCompositionWindow( params.himc[0], &composition ) );
+    ok_ret( 0, ImmSetCompositionWindow( params.himc[1], &composition ) );
+    ok_ret( 1, ImmGetCompositionWindow( params.himc[0], &composition ) );
+    ok_ret( 1, ImmGetCompositionWindow( params.himc[1], &composition ) );
+
+    /* ImmRequestMessage(W|A) should fail with cross thread HIMC */
+
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_COMPOSITIONWINDOW, (LPARAM)&composition ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_COMPOSITIONWINDOW, (LPARAM)&composition ) );
+
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_COMPOSITIONWINDOW, (LPARAM)&composition ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_COMPOSITIONWINDOW, (LPARAM)&composition ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_COMPOSITIONWINDOW, (LPARAM)&composition ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_COMPOSITIONWINDOW, (LPARAM)&composition ) );
+
+    ok_seq( empty_sequence );
+
+    /* ImmSetCandidateWindow should fail with cross thread HIMC */
+
+    ok_ret( 1, ImmSetCandidateWindow( himc[1], &candidate ) );
+    ok_ret( 1, ImmGetCandidateWindow( himc[1], 0, &candidate ) );
+
+    ok_ret( 1, ImmGetCandidateWindow( params.himc[0], 1, &candidate ) );
+    ok_ret( 1, ImmGetCandidateWindow( params.himc[1], 1, &candidate ) );
+    ok_ret( 0, ImmSetCandidateWindow( params.himc[0], &candidate ) );
+    ok_ret( 0, ImmSetCandidateWindow( params.himc[1], &candidate ) );
+
+    /* ImmRequestMessage(W|A) should fail with cross thread HIMC */
+
+    candidate.dwIndex = -1;
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+
+    candidate.dwIndex = 0;
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_CANDIDATEWINDOW, (LPARAM)&candidate ) );
+
+    ok_seq( empty_sequence );
+
+    /* ImmSetStatusWindowPos should fail with cross thread HIMC */
+
+    ok_ret( 1, ImmSetStatusWindowPos( himc[1], &pos ) );
+    ok_ret( 1, ImmGetStatusWindowPos( himc[1], &pos ) );
+
+    ok_ret( 0, ImmSetStatusWindowPos( params.himc[0], &pos ) );
+    ok_ret( 0, ImmSetStatusWindowPos( params.himc[1], &pos ) );
+    ok_ret( 1, ImmGetStatusWindowPos( params.himc[0], &pos ) );
+    ok_ret( 1, ImmGetStatusWindowPos( params.himc[1], &pos ) );
+
+    /* ImmRequestMessage(W|A) should fail with cross thread HIMC */
+
+    ok_ret( 0, ImmRequestMessageW( himc[1], IMR_QUERYCHARPOSITION, (LPARAM)&char_pos ) );
+    ok_ret( 0, ImmRequestMessageA( himc[1], IMR_QUERYCHARPOSITION, (LPARAM)&char_pos ) );
+
+    ok_ret( 0, ImmRequestMessageW( params.himc[0], IMR_QUERYCHARPOSITION, (LPARAM)&char_pos ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[0], IMR_QUERYCHARPOSITION, (LPARAM)&char_pos ) );
+    ok_ret( 0, ImmRequestMessageW( params.himc[1], IMR_QUERYCHARPOSITION, (LPARAM)&char_pos ) );
+    ok_ret( 0, ImmRequestMessageA( params.himc[1], IMR_QUERYCHARPOSITION, (LPARAM)&char_pos ) );
+
+    ok_seq( empty_sequence );
+
+    /* ImmGenerateMessage should fail with cross thread HIMC */
+
+    ok_ret( 1, ImmGenerateMessage( himc[1] ) );
+
+    ok_ret( 0, ImmGenerateMessage( params.himc[0] ) );
+    ok_ret( 0, ImmGenerateMessage( params.himc[1] ) );
+
+    /* ImmAssociateContext should fail with cross thread HWND or HIMC */
+
+    tmp_himc = ImmAssociateContext( hwnd, params.himc[0] );
+    ok_eq( NULL, tmp_himc, HIMC, "%p" );
+    tmp_himc = ImmGetContext( hwnd );
+    ok_eq( himc[0], tmp_himc, HIMC, "%p" );
+    ok_ret( 1, ImmReleaseContext( hwnd, tmp_himc ) );
+
+    tmp_himc = ImmAssociateContext( hwnd, params.himc[1] );
+    ok_eq( NULL, tmp_himc, HIMC, "%p" );
+    tmp_himc = ImmGetContext( hwnd );
+    ok_eq( himc[0], tmp_himc, HIMC, "%p" );
+    ok_ret( 1, ImmReleaseContext( hwnd, tmp_himc ) );
+
+    tmp_himc = ImmAssociateContext( params.hwnd, params.himc[1] );
+    ok_eq( NULL, tmp_himc, HIMC, "%p" );
+    tmp_himc = ImmGetContext( params.hwnd );
+    ok_eq( params.himc[0], tmp_himc, HIMC, "%p" );
+    ok_ret( 1, ImmReleaseContext( params.hwnd, tmp_himc ) );
+
+    /* ImmAssociateContext should succeed with cross thread HWND and NULL HIMC */
+
+    tmp_himc = ImmAssociateContext( params.hwnd, NULL );
+    ok_eq( params.himc[0], tmp_himc, HIMC, "%p" );
+    tmp_himc = ImmGetContext( params.hwnd );
+    ok_eq( NULL, tmp_himc, HIMC, "%p" );
+
+    /* ImmReleaseContext / ImmDestroyContext should fail with cross thread HIMC */
+
+    ok_ret( 1, ImmReleaseContext( params.hwnd, params.himc[0] ) );
+    ok_ret( 0, ImmDestroyContext( params.himc[1] ) );
+
+    /* ImmGetContext should fail with another process HWND */
+
+    tmp_himc = ImmGetContext( GetDesktopWindow() );
+    ok_eq( NULL, tmp_himc, HIMC, "%p" );
+
+    ok_ret( 0, SendMessageW( params.hwnd, WM_CLOSE, 0, 0 ) );
+    ok_ret( 1, PostThreadMessageW( tid, WM_QUIT, 1, 0 ) );
+    ok_ret( 0, WaitForSingleObject( thread, 5000 ) );
+    ok_ret( 1, CloseHandle( thread ) );
+    ok_ret( 1, CloseHandle( params.event ) );
+
+    ok_ret( 1, ImmReleaseContext( hwnd, himc[0] ) );
+    ok_ret( 1, ImmDestroyContext( himc[1] ) );
 }
 
 static void test_ImmIsUIMessage(void)
@@ -1160,61 +1934,6 @@ static void test_ImmGetContext(void)
     himc = ImmGetContext(hwnd);
     ok(himc != NULL, "ImmGetContext failed\n");
     ok(ImmReleaseContext(hwnd, himc), "ImmReleaseContext failed\n");
-}
-
-static void test_ImmGetDescription(void)
-{
-    HKL hkl;
-    WCHAR descW[100];
-    CHAR descA[100];
-    UINT ret, lret;
-
-    /* FIXME: invalid keyboard layouts should not pass */
-    ret = ImmGetDescriptionW(NULL, NULL, 0);
-    ok(!ret, "ImmGetDescriptionW failed, expected 0 received %d.\n", ret);
-    ret = ImmGetDescriptionA(NULL, NULL, 0);
-    ok(!ret, "ImmGetDescriptionA failed, expected 0 received %d.\n", ret);
-
-    /* load a language with valid IMM descriptions */
-    hkl = GetKeyboardLayout(0);
-    ok(hkl != 0, "GetKeyboardLayout failed, expected != 0.\n");
-
-    ret = ImmGetDescriptionW(hkl, NULL, 0);
-    if(!ret)
-    {
-        win_skip("ImmGetDescriptionW is not working for current loaded keyboard.\n");
-        return;
-    }
-
-    SetLastError(0xdeadcafe);
-    ret = ImmGetDescriptionW(0, NULL, 100);
-    ok (ret == 0, "ImmGetDescriptionW with 0 hkl should return 0\n");
-    ret = GetLastError();
-    ok (ret == 0xdeadcafe, "Last Error should remain unchanged\n");
-
-    ret = ImmGetDescriptionW(hkl, descW, 0);
-    ok(ret, "ImmGetDescriptionW failed, expected != 0 received 0.\n");
-
-    lret = ImmGetDescriptionW(hkl, descW, ret + 1);
-    ok(lret, "ImmGetDescriptionW failed, expected != 0 received 0.\n");
-    ok(lret == ret, "ImmGetDescriptionW failed to return the correct amount of data. Expected %d, got %d.\n", ret, lret);
-
-    lret = ImmGetDescriptionA(hkl, descA, ret + 1);
-    ok(lret, "ImmGetDescriptionA failed, expected != 0 received 0.\n");
-    ok(lret == ret, "ImmGetDescriptionA failed to return the correct amount of data. Expected %d, got %d.\n", ret, lret);
-
-    ret /= 2; /* try to copy partially */
-    lret = ImmGetDescriptionW(hkl, descW, ret + 1);
-    ok(lret, "ImmGetDescriptionW failed, expected != 0 received 0.\n");
-    ok(lret == ret, "ImmGetDescriptionW failed to return the correct amount of data. Expected %d, got %d.\n", ret, lret);
-
-    lret = ImmGetDescriptionA(hkl, descA, ret + 1);
-    ok(!lret, "ImmGetDescriptionA should fail\n");
-
-    ret = ImmGetDescriptionW(hkl, descW, 1);
-    ok(!ret, "ImmGetDescriptionW failed, expected 0 received %d.\n", ret);
-
-    UnloadKeyboardLayout(hkl);
 }
 
 static LRESULT (WINAPI *old_imm_wnd_proc)(HWND, UINT, WPARAM, LPARAM);
@@ -2283,7 +3002,9 @@ static DWORD WINAPI com_initialization_thread(void *arg)
 
 static void test_com_initialization(void)
 {
+    APTTYPEQUALIFIER qualifier;
     HANDLE thread;
+    APTTYPE type;
     HRESULT hr;
     HWND wnd;
     BOOL r;
@@ -2338,13 +3059,17 @@ static void test_com_initialization(void)
     ok(hr == S_OK, "CoInitialize returned %lx\n", hr);
     test_apttype(APTTYPE_MTA);
     DestroyWindow(wnd);
-    test_apttype(-1);
+
+    hr = CoGetApartmentType(&type, &qualifier);
+    ok(hr == CO_E_NOTINITIALIZED || broken(hr == S_OK) /* w10v22H2 */,
+       "CoGetApartmentType returned %#lx\n", hr);
+    test_apttype(hr == S_OK ? APTTYPE_MTA : -1);
 
     wnd = CreateWindowA("static", "static", WS_POPUP, 0, 0, 100, 100, 0, 0, 0, 0);
     ok(wnd != NULL, "CreateWindow failed\n");
-    test_apttype(-1);
+    test_apttype(hr == S_OK ? APTTYPE_MTA : -1);
     ShowWindow(wnd, SW_SHOW);
-    test_apttype(APTTYPE_MAINSTA);
+    test_apttype(hr == S_OK ? APTTYPE_MTA : APTTYPE_MAINSTA);
     DestroyWindow(wnd);
     test_apttype(-1);
 }
@@ -2445,7 +3170,4501 @@ static void test_ImmDisableIME(void)
     ok(!def, "ImmGetDefaultIMEWnd(hwnd) returned %p\n", def);
 }
 
-START_TEST(imm32) {
+static BOOL WINAPI ime_ImeConfigure( HKL hkl, HWND hwnd, DWORD mode, void *data )
+{
+    ime_trace( "hkl %p, hwnd %p, mode %lu, data %p\n", hkl, hwnd, mode, data );
+    ok( 0, "unexpected call\n" );
+    return FALSE;
+}
+
+static DWORD WINAPI ime_ImeConversionList( HIMC himc, const WCHAR *source, CANDIDATELIST *dest,
+                                           DWORD dest_len, UINT flag )
+{
+    ime_trace( "himc %p, source %s, dest %p, dest_len %lu, flag %#x\n",
+               himc, debugstr_w(source), dest, dest_len, flag );
+    ok( 0, "unexpected call\n" );
+    return 0;
+}
+
+static BOOL WINAPI ime_ImeDestroy( UINT force )
+{
+    ime_trace( "force %u\n", force );
+
+    todo_wine_if( todo_ImeDestroy )
+    CHECK_EXPECT( ImeDestroy );
+
+    ok( !force, "got force %u\n", force );
+
+    return TRUE;
+}
+
+static UINT WINAPI ime_ImeEnumRegisterWord( REGISTERWORDENUMPROCW proc, const WCHAR *reading, DWORD style,
+                                            const WCHAR *string, void *data )
+{
+    ime_trace( "proc %p, reading %s, style %lu, string %s, data %p\n",
+               proc, debugstr_w(reading), style, debugstr_w(string), data );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    CHECK_EXPECT( ImeEnumRegisterWord );
+
+    if (!style)
+    {
+        ok_eq( 0, reading, const void *, "%p" );
+        ok_eq( 0, string, const void *, "%p" );
+    }
+    else if (ime_info.fdwProperty & IME_PROP_UNICODE)
+    {
+        ok_eq( 0xdeadbeef, style, UINT, "%#x" );
+        ok_wcs( L"Reading", reading );
+        ok_wcs( L"String", string );
+    }
+    else
+    {
+        ok_eq( 0xdeadbeef, style, UINT, "%#x" );
+        ok_str( "Reading", (char *)reading );
+        ok_str( "String", (char *)string );
+    }
+
+    if (style) return proc( reading, style, string, data );
+    return 0;
+}
+
+static LRESULT WINAPI ime_ImeEscape( HIMC himc, UINT escape, void *data )
+{
+    ime_trace( "himc %p, escape %#x, data %p\n", himc, escape, data );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    CHECK_EXPECT( ImeEscape );
+
+    switch (escape)
+    {
+    case IME_ESC_SET_EUDC_DICTIONARY:
+        if (!data) return 4;
+        if (ime_info.fdwProperty & IME_PROP_UNICODE)
+            ok_wcs( L"EscapeIme", data );
+        else
+            ok_str( "EscapeIme", data );
+        /* fallthrough */
+    case IME_ESC_QUERY_SUPPORT:
+    case IME_ESC_SEQUENCE_TO_INTERNAL:
+    case IME_ESC_GET_EUDC_DICTIONARY:
+    case IME_ESC_MAX_KEY:
+    case IME_ESC_IME_NAME:
+    case IME_ESC_HANJA_MODE:
+    case IME_ESC_GETHELPFILENAME:
+        if (!data) return 4;
+        if (ime_info.fdwProperty & IME_PROP_UNICODE) wcscpy( data, L"ImeEscape" );
+        else strcpy( data, "ImeEscape" );
+        return 4;
+    }
+
+    ok_eq( 0xdeadbeef, escape, UINT, "%#x" );
+    ok_eq( NULL, data, void *, "%p" );
+
+    return TRUE;
+}
+
+static DWORD WINAPI ime_ImeGetImeMenuItems( HIMC himc, DWORD flags, DWORD type, IMEMENUITEMINFOW *parent,
+                                            IMEMENUITEMINFOW *menu, DWORD size )
+{
+    ime_trace( "himc %p, flags %#lx, type %lu, parent %p, menu %p, size %#lx\n",
+               himc, flags, type, parent, menu, size );
+    ok( 0, "unexpected call\n" );
+    return 0;
+}
+
+static UINT WINAPI ime_ImeGetRegisterWordStyle( UINT item, STYLEBUFW *style )
+{
+    ime_trace( "item %u, style %p\n", item, style );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    CHECK_EXPECT( ImeGetRegisterWordStyle );
+
+    if (!style)
+        ok_eq( 16, item, UINT, "%u" );
+    else if (ime_info.fdwProperty & IME_PROP_UNICODE)
+    {
+        STYLEBUFW *styleW = style;
+        styleW->dwStyle = 0xdeadbeef;
+        wcscpy( styleW->szDescription, L"StyleDescription" );
+    }
+    else
+    {
+        STYLEBUFA *styleA = (STYLEBUFA *)style;
+        styleA->dwStyle = 0xdeadbeef;
+        strcpy( styleA->szDescription, "StyleDescription" );
+    }
+
+    return 0xdeadbeef;
+}
+
+static BOOL WINAPI ime_ImeInquire( IMEINFO *info, WCHAR *ui_class, DWORD flags )
+{
+    ime_trace( "info %p, ui_class %p, flags %#lx\n", info, ui_class, flags );
+
+    todo_wine_if( todo_ImeInquire )
+    CHECK_EXPECT( ImeInquire );
+
+    ok( !!info, "got info %p\n", info );
+    ok( !!ui_class, "got ui_class %p\n", ui_class );
+    ok( !flags, "got flags %#lx\n", flags );
+
+    *info = ime_info;
+
+    if (ime_info.fdwProperty & IME_PROP_UNICODE)
+        wcscpy( ui_class, ime_ui_class.lpszClassName );
+    else
+        WideCharToMultiByte( CP_ACP, 0, ime_ui_class.lpszClassName, -1,
+                             (char *)ui_class, 17, NULL, NULL );
+
+    return TRUE;
+}
+
+static BOOL WINAPI ime_ImeProcessKey( HIMC himc, UINT vkey, LPARAM lparam, BYTE *state )
+{
+    struct ime_call call =
+    {
+        .hkl = GetKeyboardLayout( 0 ), .himc = himc,
+        .func = IME_PROCESS_KEY, .process_key = {.vkey = vkey, .lparam = lparam}
+    };
+    ime_trace( "himc %p, vkey %u, lparam %#Ix, state %p\n",
+               himc, vkey, lparam, state );
+    ime_calls[ime_call_count++] = call;
+    return LOWORD(lparam);
+}
+
+static BOOL WINAPI ime_ImeRegisterWord( const WCHAR *reading, DWORD style, const WCHAR *string )
+{
+    ime_trace( "reading %s, style %lu, string %s\n", debugstr_w(reading), style, debugstr_w(string) );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    CHECK_EXPECT( ImeRegisterWord );
+
+    if (style) ok_eq( 0xdeadbeef, style, UINT, "%#x" );
+    if (ime_info.fdwProperty & IME_PROP_UNICODE)
+    {
+        if (reading) ok_wcs( L"Reading", reading );
+        if (string) ok_wcs( L"String", string );
+    }
+    else
+    {
+        if (reading) ok_str( "Reading", (char *)reading );
+        if (string) ok_str( "String", (char *)string );
+    }
+
+    return FALSE;
+}
+
+static BOOL WINAPI ime_ImeSelect( HIMC himc, BOOL select )
+{
+    struct ime_call call =
+    {
+        .hkl = GetKeyboardLayout( 0 ), .himc = himc,
+        .func = IME_SELECT, .select = select
+    };
+    INPUTCONTEXT *ctx;
+
+    ime_trace( "himc %p, select %d\n", himc, select );
+    ime_calls[ime_call_count++] = call;
+
+    if (ImeSelect_init_status && select)
+    {
+        ctx = ImmLockIMC( himc );
+        ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+        ctx->fOpen = ~0;
+        ctx->fdwConversion = ~0;
+        ctx->fdwSentence = ~0;
+        ImmUnlockIMC( himc );
+    }
+
+    return TRUE;
+}
+
+static BOOL WINAPI ime_ImeSetActiveContext( HIMC himc, BOOL flag )
+{
+    struct ime_call call =
+    {
+        .hkl = GetKeyboardLayout( 0 ), .himc = himc,
+        .func = IME_SET_ACTIVE_CONTEXT, .set_active_context = {.flag = flag}
+    };
+    ime_trace( "himc %p, flag %#x\n", himc, flag );
+    ime_calls[ime_call_count++] = call;
+    return TRUE;
+}
+
+static BOOL WINAPI ime_ImeSetCompositionString( HIMC himc, DWORD index, const void *comp, DWORD comp_len,
+                                                const void *read, DWORD read_len )
+{
+    ime_trace( "himc %p, index %lu, comp %p, comp_len %lu, read %p, read_len %lu\n",
+               himc, index, comp, comp_len, read, read_len );
+    CHECK_EXPECT( ImeSetCompositionString );
+
+    ok_eq( expect_ime, GetKeyboardLayout( 0 ), HKL, "%p" );
+    ok_ne( default_himc, himc, HIMC, "%p" );
+
+    if (ime_info.fdwProperty & IME_PROP_UNICODE)
+    {
+        switch (index)
+        {
+        case SCS_SETSTR:
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 22, comp_len, UINT, "%#x" );
+            ok_wcs( L"CompString", comp );
+            break;
+        case SCS_CHANGECLAUSE:
+        {
+            const UINT *clause = comp;
+            ok_eq( 8, comp_len, UINT, "%#x" );
+            ok_eq( 0, clause[0], UINT, "%#x" );
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 1, clause[1], UINT, "%#x");
+            break;
+        }
+        case SCS_CHANGEATTR:
+        {
+            const BYTE *attr = comp;
+            todo_wine_if( todo_ImeSetCompositionString && comp_len != 4 )
+            ok_eq( 4, comp_len, UINT, "%#x" );
+            todo_wine_if( todo_ImeSetCompositionString && attr[0] != 0xcd )
+            ok_eq( 0xcd, attr[0], UINT, "%#x" );
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 0xcd, attr[1], UINT, "%#x" );
+            break;
+        }
+        default:
+            ok( 0, "unexpected index %#lx\n", index );
+            break;
+        }
+    }
+    else
+    {
+        switch (index)
+        {
+        case SCS_SETSTR:
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 11, comp_len, UINT, "%#x" );
+            ok_str( "CompString", comp );
+            break;
+        case SCS_CHANGECLAUSE:
+        {
+            const UINT *clause = comp;
+            ok_eq( 8, comp_len, UINT, "%#x" );
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 0, clause[0], UINT, "%#x" );
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 1, clause[1], UINT, "%#x");
+            break;
+        }
+        case SCS_CHANGEATTR:
+        {
+            const BYTE *attr = comp;
+            todo_wine_if( todo_ImeSetCompositionString && comp_len != 4 )
+            ok_eq( 4, comp_len, UINT, "%#x" );
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 0xcd, attr[0], UINT, "%#x" );
+            todo_wine_if( todo_ImeSetCompositionString )
+            ok_eq( 0xcd, attr[1], UINT, "%#x" );
+            break;
+        }
+        default:
+            ok( 0, "unexpected index %#lx\n", index );
+            break;
+        }
+    }
+
+    ok_eq( NULL, read, const void *, "%p" );
+    ok_eq( 0, read_len, UINT, "%#x" );
+
+    return TRUE;
+}
+
+static UINT WINAPI ime_ImeToAsciiEx( UINT vkey, UINT vsc, BYTE *state, TRANSMSGLIST *msgs, UINT flags, HIMC himc )
+{
+    struct ime_call call =
+    {
+        .hkl = GetKeyboardLayout( 0 ), .himc = himc,
+        .func = IME_TO_ASCII_EX, .to_ascii_ex = {.vkey = vkey, .vsc = vsc, .flags = flags}
+    };
+    INPUTCONTEXT *ctx;
+    UINT count = 0;
+
+    ime_trace( "vkey %#x, vsc %#x, state %p, msgs %p, flags %#x, himc %p\n",
+           vkey, vsc, state, msgs, flags, himc );
+    ime_calls[ime_call_count++] = call;
+
+    ok_ne( NULL, msgs, TRANSMSGLIST *, "%p" );
+    todo_wine ok_eq( 256, msgs->uMsgCount, UINT, "%u" );
+
+    ctx = ImmLockIMC( himc );
+    ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( ctx->hWnd ) );
+
+    if (vsc & 0x200)
+    {
+        msgs->TransMsg[0].message = WM_IME_STARTCOMPOSITION;
+        msgs->TransMsg[0].wParam = 1;
+        msgs->TransMsg[0].lParam = 0;
+        count++;
+        msgs->TransMsg[1].message = WM_IME_ENDCOMPOSITION;
+        msgs->TransMsg[1].wParam = 1;
+        msgs->TransMsg[1].lParam = 0;
+        count++;
+    }
+
+    if (vsc & 0x400)
+    {
+        TRANSMSG *msgs;
+
+        ctx = ImmLockIMC( himc );
+        ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+
+        ok_ne( NULL, ctx->hMsgBuf, HIMCC, "%p" );
+        ok_eq( 0, ctx->dwNumMsgBuf, UINT, "%u" );
+
+        ctx->hMsgBuf = ImmReSizeIMCC( ctx->hMsgBuf, 64 * sizeof(*msgs) );
+        ok_ne( NULL, ctx->hMsgBuf, HIMCC, "%p" );
+
+        msgs = ImmLockIMCC( ctx->hMsgBuf );
+        ok_ne( NULL, msgs, TRANSMSG *, "%p" );
+
+        msgs[ctx->dwNumMsgBuf].message = WM_IME_STARTCOMPOSITION;
+        msgs[ctx->dwNumMsgBuf].wParam = 2;
+        msgs[ctx->dwNumMsgBuf].lParam = 0;
+        ctx->dwNumMsgBuf++;
+        msgs[ctx->dwNumMsgBuf].message = WM_IME_ENDCOMPOSITION;
+        msgs[ctx->dwNumMsgBuf].wParam = 2;
+        msgs[ctx->dwNumMsgBuf].lParam = 0;
+        ctx->dwNumMsgBuf++;
+
+        ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
+    }
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+
+    if (vsc & 0x800) count = ~0;
+    return count;
+}
+
+static BOOL WINAPI ime_ImeUnregisterWord( const WCHAR *reading, DWORD style, const WCHAR *string )
+{
+    ime_trace( "reading %s, style %lu, string %s\n", debugstr_w(reading), style, debugstr_w(string) );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    CHECK_EXPECT( ImeUnregisterWord );
+
+    if (style) ok_eq( 0xdeadbeef, style, UINT, "%#x" );
+    if (ime_info.fdwProperty & IME_PROP_UNICODE)
+    {
+        if (reading) ok_wcs( L"Reading", reading );
+        if (string) ok_wcs( L"String", string );
+    }
+    else
+    {
+        if (reading) ok_str( "Reading", (char *)reading );
+        if (string) ok_str( "String", (char *)string );
+    }
+
+    return FALSE;
+}
+
+static BOOL WINAPI ime_NotifyIME( HIMC himc, DWORD action, DWORD index, DWORD value )
+{
+    struct ime_call call =
+    {
+        .hkl = GetKeyboardLayout( 0 ), .himc = himc,
+        .func = IME_NOTIFY, .notify = {.action = action, .index = index, .value = value}
+    };
+    ime_trace( "himc %p, action %#lx, index %lu, value %lu\n", himc, action, index, value );
+    ime_calls[ime_call_count++] = call;
+    return FALSE;
+}
+
+static BOOL WINAPI ime_DllMain( HINSTANCE instance, DWORD reason, LPVOID reserved )
+{
+    ime_trace( "instance %p, reason %lu, reserved %p.\n", instance, reason, reserved );
+
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls( instance );
+        ime_ui_class.hInstance = instance;
+        RegisterClassExW( &ime_ui_class );
+        todo_wine_if(todo_IME_DLL_PROCESS_ATTACH)
+        CHECK_EXPECT( IME_DLL_PROCESS_ATTACH );
+        break;
+
+    case DLL_PROCESS_DETACH:
+        UnregisterClassW( ime_ui_class.lpszClassName, instance );
+        todo_wine_if(todo_IME_DLL_PROCESS_DETACH)
+        CHECK_EXPECT( IME_DLL_PROCESS_DETACH );
+        break;
+    }
+
+    return TRUE;
+}
+
+static struct ime_functions ime_functions =
+{
+    ime_ImeConfigure,
+    ime_ImeConversionList,
+    ime_ImeDestroy,
+    ime_ImeEnumRegisterWord,
+    ime_ImeEscape,
+    ime_ImeGetImeMenuItems,
+    ime_ImeGetRegisterWordStyle,
+    ime_ImeInquire,
+    ime_ImeProcessKey,
+    ime_ImeRegisterWord,
+    ime_ImeSelect,
+    ime_ImeSetActiveContext,
+    ime_ImeSetCompositionString,
+    ime_ImeToAsciiEx,
+    ime_ImeUnregisterWord,
+    ime_NotifyIME,
+    ime_DllMain,
+};
+
+static HKL ime_install(void)
+{
+    WCHAR buffer[MAX_PATH];
+    HMODULE module;
+    DWORD len, ret;
+    HKEY hkey;
+    HKL hkl;
+
+    /* IME module gets cached and won't reload from disk as soon as a window has
+     * loaded it. To workaround the issue we load the module first as a DLL,
+     * set its function pointers from the test, and later when the cached IME
+     * gets loaded, read the function pointers from the separately loaded DLL.
+     */
+
+    load_resource( L"ime_wrapper.dll", buffer );
+
+    SetLastError( 0xdeadbeef );
+    ret = MoveFileW( buffer, L"c:\\windows\\system32\\winetest_ime.dll" );
+    if (!ret)
+    {
+        ok( GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError() );
+        win_skip( "Failed to copy DLL to system directory\n" );
+        return 0;
+    }
+
+    module = LoadLibraryW( L"c:\\windows\\system32\\winetest_ime.dll" );
+    ok( !!module, "LoadLibraryW failed, error %lu\n", GetLastError() );
+    *(struct ime_functions *)GetProcAddress( module, "ime_functions" ) = ime_functions;
+
+    /* install the actual IME module, it will lookup the functions from the DLL */
+    load_resource( L"ime_wrapper.dll", buffer );
+
+    SetLastError( 0xdeadbeef );
+    swprintf( ime_path, ARRAY_SIZE(ime_path), L"c:\\windows\\system32\\wine%04x.ime", ime_count++ );
+    ret = MoveFileW( buffer, ime_path );
+    todo_wine_if( GetLastError() == ERROR_ALREADY_EXISTS )
+    ok( ret || broken( !ret ) /* sometimes still in use */,
+        "MoveFileW failed, error %lu\n", GetLastError() );
+
+    hkl = ImmInstallIMEW( ime_path, L"WineTest IME" );
+    ok( hkl == expect_ime, "ImmInstallIMEW returned %p, error %lu\n", hkl, GetLastError() );
+
+    swprintf( buffer, ARRAY_SIZE(buffer), L"System\\CurrentControlSet\\Control\\Keyboard Layouts\\%08x", hkl );
+    ret = RegOpenKeyW( HKEY_LOCAL_MACHINE, buffer, &hkey );
+    ok( !ret, "RegOpenKeyW returned %#lx, error %lu\n", ret, GetLastError() );
+
+    len = sizeof(buffer);
+    memset( buffer, 0xcd, sizeof(buffer) );
+    ret = RegQueryValueExW( hkey, L"Ime File", NULL, NULL, (BYTE *)buffer, &len );
+    ok( !ret, "RegQueryValueExW returned %#lx, error %lu\n", ret, GetLastError() );
+    ok( !wcsicmp( buffer, wcsrchr( ime_path, '\\' ) + 1 ), "got Ime File %s\n", debugstr_w(buffer) );
+
+    len = sizeof(buffer);
+    memset( buffer, 0xcd, sizeof(buffer) );
+    ret = RegQueryValueExW( hkey, L"Layout Text", NULL, NULL, (BYTE *)buffer, &len );
+    ok( !ret, "RegQueryValueExW returned %#lx, error %lu\n", ret, GetLastError() );
+    ok( !wcscmp( buffer, L"WineTest IME" ), "got Layout Text %s\n", debugstr_w(buffer) );
+
+    len = sizeof(buffer);
+    memset( buffer, 0, sizeof(buffer) );
+    ret = RegQueryValueExW( hkey, L"Layout File", NULL, NULL, (BYTE *)buffer, &len );
+    todo_wine
+    ok( !ret, "RegQueryValueExW returned %#lx, error %lu\n", ret, GetLastError() );
+    todo_wine
+    ok( !wcscmp( buffer, L"kbdus.dll" ), "got Layout File %s\n", debugstr_w(buffer) );
+
+    ret = RegCloseKey( hkey );
+    ok( !ret, "RegCloseKey returned %#lx, error %lu\n", ret, GetLastError() );
+
+    return hkl;
+}
+
+static void ime_cleanup( HKL hkl, BOOL free )
+{
+    HMODULE module = GetModuleHandleW( L"winetest_ime.dll" );
+    WCHAR buffer[MAX_PATH], value[MAX_PATH];
+    DWORD i, buffer_len, value_len, ret;
+    HKEY hkey;
+
+    ret = UnloadKeyboardLayout( hkl );
+    todo_wine
+    ok( ret, "UnloadKeyboardLayout failed, error %lu\n", GetLastError() );
+
+    if (free) ok_ret( 1, ImmFreeLayout( hkl ) );
+
+    swprintf( buffer, ARRAY_SIZE(buffer), L"System\\CurrentControlSet\\Control\\Keyboard Layouts\\%08x", hkl );
+    ret = RegDeleteKeyW( HKEY_LOCAL_MACHINE, buffer );
+    ok( !ret, "RegDeleteKeyW returned %#lx, error %lu\n", ret, GetLastError() );
+
+    ret = RegOpenKeyW( HKEY_CURRENT_USER, L"Keyboard Layout\\Preload", &hkey );
+    ok( !ret, "RegOpenKeyW returned %#lx, error %lu\n", ret, GetLastError() );
+
+    value_len = ARRAY_SIZE(value);
+    buffer_len = sizeof(buffer);
+    for (i = 0; !RegEnumValueW( hkey, i, value, &value_len, NULL, NULL, (void *)buffer, &buffer_len ); i++)
+    {
+        value_len = ARRAY_SIZE(value);
+        buffer_len = sizeof(buffer);
+        if (HandleToUlong( hkl ) != wcstoul( buffer, NULL, 16 )) continue;
+        ret = RegDeleteValueW( hkey, value );
+        ok( !ret, "RegDeleteValueW returned %#lx, error %lu\n", ret, GetLastError() );
+    }
+
+    ret = RegCloseKey( hkey );
+    ok( !ret, "RegCloseKey returned %#lx, error %lu\n", ret, GetLastError() );
+
+    ret = DeleteFileW( ime_path );
+    todo_wine_if( GetLastError() == ERROR_ACCESS_DENIED )
+    ok( ret || broken( !ret ) /* sometimes still in use */,
+        "DeleteFileW failed, error %lu\n", GetLastError() );
+
+    ret = FreeLibrary( module );
+    ok( ret, "FreeLibrary failed, error %lu\n", GetLastError() );
+
+    ret = DeleteFileW( L"c:\\windows\\system32\\winetest_ime.dll" );
+    ok( ret, "DeleteFileW failed, error %lu\n", GetLastError() );
+}
+
+static BOOL CALLBACK enum_get_context( HIMC himc, LPARAM lparam )
+{
+    ime_trace( "himc %p\n", himc );
+    *(HIMC *)lparam = himc;
+    return TRUE;
+}
+
+static BOOL CALLBACK enum_find_context( HIMC himc, LPARAM lparam )
+{
+    ime_trace( "himc %p\n", himc );
+    if (lparam && lparam == (LPARAM)himc) return FALSE;
+    return TRUE;
+}
+
+static void test_ImmEnumInputContext(void)
+{
+    HIMC himc;
+
+    ok_ret( 1, ImmEnumInputContext( 0, enum_get_context, (LPARAM)&default_himc ) );
+    ok_ret( 1, ImmEnumInputContext( -1, enum_find_context, 0 ) );
+    ok_ret( 1, ImmEnumInputContext( GetCurrentThreadId(), enum_find_context, 0 ) );
+
+    todo_wine
+    ok_ret( 0, ImmEnumInputContext( 1, enum_find_context, 0 ) );
+    todo_wine
+    ok_ret( 0, ImmEnumInputContext( GetCurrentProcessId(), enum_find_context, 0 ) );
+
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ok_ret( 0, ImmEnumInputContext( GetCurrentThreadId(), enum_find_context, (LPARAM)himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+    ok_ret( 1, ImmEnumInputContext( GetCurrentThreadId(), enum_find_context, (LPARAM)himc ) );
+}
+
+static void test_ImmInstallIME(void)
+{
+    UINT ret;
+    HKL hkl;
+
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, TRUE );
+    SET_ENABLE( ImeInquire, TRUE );
+    SET_ENABLE( ImeDestroy, TRUE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, TRUE );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+
+    if (!(hkl = ime_install())) goto cleanup;
+
+    SET_EXPECT( IME_DLL_PROCESS_ATTACH );
+    SET_EXPECT( ImeInquire );
+    ret = ImmLoadIME( hkl );
+    ok( ret, "ImmLoadIME returned %#x\n", ret );
+    CHECK_CALLED( IME_DLL_PROCESS_ATTACH );
+    CHECK_CALLED( ImeInquire );
+
+    ret = ImmLoadIME( hkl );
+    ok( ret, "ImmLoadIME returned %#x\n", ret );
+
+    SET_EXPECT( ImeDestroy );
+    SET_EXPECT( IME_DLL_PROCESS_DETACH );
+    ret = ImmFreeLayout( hkl );
+    ok( ret, "ImmFreeLayout returned %#x\n", ret );
+    CHECK_CALLED( ImeDestroy );
+    CHECK_CALLED( IME_DLL_PROCESS_DETACH );
+
+    ret = ImmFreeLayout( hkl );
+    ok( ret, "ImmFreeLayout returned %#x\n", ret );
+
+    ime_info.fdwProperty = 0;
+
+    SET_EXPECT( IME_DLL_PROCESS_ATTACH );
+    SET_EXPECT( ImeInquire );
+    ret = ImmLoadIME( hkl );
+    ok( ret, "ImmLoadIME returned %#x\n", ret );
+    CHECK_CALLED( IME_DLL_PROCESS_ATTACH );
+    CHECK_CALLED( ImeInquire );
+
+    ret = ImmLoadIME( hkl );
+    ok( ret, "ImmLoadIME returned %#x\n", ret );
+
+    SET_EXPECT( ImeDestroy );
+    SET_EXPECT( IME_DLL_PROCESS_DETACH );
+    ret = ImmFreeLayout( hkl );
+    ok( ret, "ImmFreeLayout returned %#x\n", ret );
+    CHECK_CALLED( ImeDestroy );
+    CHECK_CALLED( IME_DLL_PROCESS_DETACH );
+
+    ret = ImmFreeLayout( hkl );
+    ok( ret, "ImmFreeLayout returned %#x\n", ret );
+
+    ime_cleanup( hkl, FALSE );
+
+cleanup:
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, FALSE );
+    SET_ENABLE( ImeInquire, FALSE );
+    SET_ENABLE( ImeDestroy, FALSE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, FALSE );
+}
+
+static void test_ImmIsIME(void)
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, TRUE );
+    SET_ENABLE( ImeInquire, TRUE );
+    SET_ENABLE( ImeDestroy, TRUE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, TRUE );
+
+    SetLastError( 0xdeadbeef );
+    ok_ret( 0, ImmIsIME( 0 ) );
+    ok_ret( 0xdeadbeef, GetLastError() );
+    ok_ret( 1, ImmIsIME( hkl ) );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    todo_ImeInquire = TRUE;
+    todo_ImeDestroy = TRUE;
+    todo_IME_DLL_PROCESS_ATTACH = TRUE;
+    todo_IME_DLL_PROCESS_DETACH = TRUE;
+    ok_ret( 1, ImmIsIME( hkl ) );
+    todo_IME_DLL_PROCESS_ATTACH = FALSE;
+    todo_IME_DLL_PROCESS_DETACH = FALSE;
+    todo_ImeInquire = FALSE;
+    todo_ImeDestroy = FALSE;
+
+cleanup:
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, FALSE );
+    SET_ENABLE( ImeInquire, FALSE );
+    SET_ENABLE( ImeDestroy, FALSE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, FALSE );
+}
+
+static void test_ImmGetProperty(void)
+{
+    static const IMEINFO expect_ime_info =
+    {
+        .fdwProperty = IME_PROP_UNICODE | IME_PROP_AT_CARET,
+    };
+    static const IMEINFO expect_ime_info_0411 = /* MS Japanese IME */
+    {
+        .fdwProperty = IME_PROP_CANDLIST_START_FROM_1 | IME_PROP_UNICODE | IME_PROP_AT_CARET | 0xa,
+        .fdwConversionCaps = IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_KATAKANA,
+        .fdwSentenceCaps = IME_SMODE_PLAURALCLAUSE | IME_SMODE_CONVERSATION,
+        .fdwSCSCaps = SCS_CAP_COMPSTR | SCS_CAP_SETRECONVERTSTRING | SCS_CAP_MAKEREAD,
+        .fdwSelectCaps = SELECT_CAP_CONVERSION | SELECT_CAP_SENTENCE,
+        .fdwUICaps = UI_CAP_ROT90,
+    };
+    static const IMEINFO expect_ime_info_0412 = /* MS Korean IME */
+    {
+        .fdwProperty = IME_PROP_CANDLIST_START_FROM_1 | IME_PROP_UNICODE | IME_PROP_AT_CARET | 0xa,
+        .fdwConversionCaps = IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE,
+        .fdwSentenceCaps = IME_SMODE_NONE,
+        .fdwSCSCaps = SCS_CAP_COMPSTR | SCS_CAP_SETRECONVERTSTRING,
+        .fdwSelectCaps = SELECT_CAP_CONVERSION,
+        .fdwUICaps = UI_CAP_ROT90,
+    };
+    static const IMEINFO expect_ime_info_0804 = /* MS Chinese IME */
+    {
+        .fdwProperty = IME_PROP_CANDLIST_START_FROM_1 | IME_PROP_UNICODE | IME_PROP_AT_CARET | 0xa,
+        .fdwConversionCaps = IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE,
+        .fdwSentenceCaps = IME_SMODE_PLAURALCLAUSE,
+        .fdwSCSCaps = SCS_CAP_COMPSTR | SCS_CAP_SETRECONVERTSTRING | SCS_CAP_MAKEREAD,
+        .fdwUICaps = UI_CAP_ROT90,
+    };
+    HKL hkl = GetKeyboardLayout( 0 );
+    const IMEINFO *expect;
+
+    SET_ENABLE( ImeInquire, TRUE );
+    SET_ENABLE( ImeDestroy, TRUE );
+
+    SetLastError( 0xdeadbeef );
+    ok_ret( 0, ImmGetProperty( 0, 0 ) );
+    ok_ret( 0, ImmGetProperty( hkl, 0 ) );
+
+    if (hkl == (HKL)0x04110411) expect = &expect_ime_info_0411;
+    else if (hkl == (HKL)0x04120412) expect = &expect_ime_info_0412;
+    else if (hkl == (HKL)0x08040804) expect = &expect_ime_info_0804;
+    else expect = &expect_ime_info;
+
+    /* IME_PROP_COMPLETE_ON_UNSELECT seems to be sometimes set on CJK locales IMEs, sometimes not */
+    ok_ret( expect->fdwProperty,       ImmGetProperty( hkl, IGP_PROPERTY ) & ~IME_PROP_COMPLETE_ON_UNSELECT );
+    todo_wine
+    ok_ret( expect->fdwConversionCaps, ImmGetProperty( hkl, IGP_CONVERSION ) );
+    todo_wine
+    ok_ret( expect->fdwSentenceCaps,   ImmGetProperty( hkl, IGP_SENTENCE ) );
+    ok_ret( expect->fdwSCSCaps,        ImmGetProperty( hkl, IGP_SETCOMPSTR ) );
+    todo_wine
+    ok_ret( expect->fdwSelectCaps,     ImmGetProperty( hkl, IGP_SELECT ) );
+    ok_ret( IMEVER_0400,               ImmGetProperty( hkl, IGP_GETIMEVERSION ) );
+    ok_ret( expect->fdwUICaps,         ImmGetProperty( hkl, IGP_UI ) );
+    todo_wine
+    ok_ret( 0xdeadbeef, GetLastError() );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    SET_EXPECT( ImeInquire );
+    SET_EXPECT( ImeDestroy );
+    ok_ret( 0, ImmGetProperty( hkl, 0 ) );
+    CHECK_CALLED( ImeInquire );
+    CHECK_CALLED( ImeDestroy );
+
+    expect = &ime_info;
+    todo_ImeInquire = TRUE;
+    todo_ImeDestroy = TRUE;
+    ok_ret( expect->fdwProperty,       ImmGetProperty( hkl, IGP_PROPERTY ) );
+    ok_ret( expect->fdwConversionCaps, ImmGetProperty( hkl, IGP_CONVERSION ) );
+    ok_ret( expect->fdwSentenceCaps,   ImmGetProperty( hkl, IGP_SENTENCE ) );
+    ok_ret( expect->fdwSCSCaps,        ImmGetProperty( hkl, IGP_SETCOMPSTR ) );
+    ok_ret( expect->fdwSelectCaps,     ImmGetProperty( hkl, IGP_SELECT ) );
+    ok_ret( IMEVER_0400,               ImmGetProperty( hkl, IGP_GETIMEVERSION ) );
+    ok_ret( expect->fdwUICaps,         ImmGetProperty( hkl, IGP_UI ) );
+    todo_ImeInquire = FALSE;
+    called_ImeInquire = FALSE;
+    todo_ImeDestroy = FALSE;
+    called_ImeDestroy = FALSE;
+
+cleanup:
+    SET_ENABLE( ImeInquire, FALSE );
+    SET_ENABLE( ImeDestroy, FALSE );
+}
+
+static void test_ImmGetDescription(void)
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+    WCHAR bufferW[MAX_PATH];
+    char bufferA[MAX_PATH];
+    DWORD ret;
+
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, TRUE );
+    SET_ENABLE( ImeInquire, TRUE );
+    SET_ENABLE( ImeDestroy, TRUE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, TRUE );
+
+    SetLastError( 0xdeadbeef );
+    ret = ImmGetDescriptionW( NULL, NULL, 0 );
+    ok( !ret, "ImmGetDescriptionW returned %lu\n", ret );
+    ret = ImmGetDescriptionA( NULL, NULL, 0 );
+    ok( !ret, "ImmGetDescriptionA returned %lu\n", ret );
+    ret = ImmGetDescriptionW( NULL, NULL, 100 );
+    ok( !ret, "ImmGetDescriptionW returned %lu\n", ret );
+    ret = ImmGetDescriptionA( NULL, NULL, 100 );
+    ok( !ret, "ImmGetDescriptionA returned %lu\n", ret );
+    ret = ImmGetDescriptionW( hkl, bufferW, 100 );
+    ok( !ret, "ImmGetDescriptionW returned %lu\n", ret );
+    ret = ImmGetDescriptionA( hkl, bufferA, 100 );
+    ok( !ret, "ImmGetDescriptionA returned %lu\n", ret );
+    ret = GetLastError();
+    ok( ret == 0xdeadbeef, "got error %lu\n", ret );
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetDescriptionW( hkl, bufferW, 2 );
+    ok( ret == 1, "ImmGetDescriptionW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, L"W" ), "got bufferW %s\n", debugstr_w(bufferW) );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetDescriptionA( hkl, bufferA, 2 );
+    ok( ret == 0, "ImmGetDescriptionA returned %lu\n", ret );
+    ok( !strcmp( bufferA, "" ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetDescriptionW( hkl, bufferW, 11 );
+    ok( ret == 10, "ImmGetDescriptionW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, L"WineTest I" ), "got bufferW %s\n", debugstr_w(bufferW) );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetDescriptionA( hkl, bufferA, 11 );
+    ok( ret == 0, "ImmGetDescriptionA returned %lu\n", ret );
+    ok( !strcmp( bufferA, "" ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetDescriptionW( hkl, bufferW, 12 );
+    ok( ret == 11, "ImmGetDescriptionW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, L"WineTest IM" ), "got bufferW %s\n", debugstr_w(bufferW) );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetDescriptionA( hkl, bufferA, 12 );
+    ok( ret == 12, "ImmGetDescriptionA returned %lu\n", ret );
+    ok( !strcmp( bufferA, "WineTest IME" ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetDescriptionW( hkl, bufferW, 13 );
+    ok( ret == 12, "ImmGetDescriptionW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, L"WineTest IME" ), "got bufferW %s\n", debugstr_w(bufferW) );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetDescriptionA( hkl, bufferA, 13 );
+    ok( ret == 12, "ImmGetDescriptionA returned %lu\n", ret );
+    ok( !strcmp( bufferA, "WineTest IME" ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+cleanup:
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, FALSE );
+    SET_ENABLE( ImeInquire, FALSE );
+    SET_ENABLE( ImeDestroy, FALSE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, FALSE );
+}
+
+static void test_ImmGetIMEFileName(void)
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+    WCHAR bufferW[MAX_PATH], expectW[16];
+    char bufferA[MAX_PATH], expectA[16];
+    DWORD ret;
+
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, TRUE );
+    SET_ENABLE( ImeInquire, TRUE );
+    SET_ENABLE( ImeDestroy, TRUE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, TRUE );
+
+    SetLastError( 0xdeadbeef );
+    ret = ImmGetIMEFileNameW( NULL, NULL, 0 );
+    ok( !ret, "ImmGetIMEFileNameW returned %lu\n", ret );
+    ret = ImmGetIMEFileNameA( NULL, NULL, 0 );
+    ok( !ret, "ImmGetIMEFileNameA returned %lu\n", ret );
+    ret = ImmGetIMEFileNameW( NULL, NULL, 100 );
+    ok( !ret, "ImmGetIMEFileNameW returned %lu\n", ret );
+    ret = ImmGetIMEFileNameA( NULL, NULL, 100 );
+    ok( !ret, "ImmGetIMEFileNameA returned %lu\n", ret );
+    ret = ImmGetIMEFileNameW( hkl, bufferW, 100 );
+    ok( !ret, "ImmGetIMEFileNameW returned %lu\n", ret );
+    ret = ImmGetIMEFileNameA( hkl, bufferA, 100 );
+    ok( !ret, "ImmGetIMEFileNameA returned %lu\n", ret );
+    ret = GetLastError();
+    ok( ret == 0xdeadbeef, "got error %lu\n", ret );
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetIMEFileNameW( hkl, bufferW, 2 );
+    ok( ret == 1, "ImmGetIMEFileNameW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, L"W" ), "got bufferW %s\n", debugstr_w(bufferW) );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetIMEFileNameA( hkl, bufferA, 2 );
+    ok( ret == 0, "ImmGetIMEFileNameA returned %lu\n", ret );
+    ok( !strcmp( bufferA, "" ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+    swprintf( expectW, ARRAY_SIZE(expectW), L"WINE%04X.I", ime_count - 1 );
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetIMEFileNameW( hkl, bufferW, 11 );
+    ok( ret == 10, "ImmGetIMEFileNameW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, expectW ), "got bufferW %s\n", debugstr_w(bufferW) );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetIMEFileNameA( hkl, bufferA, 11 );
+    ok( ret == 0, "ImmGetIMEFileNameA returned %lu\n", ret );
+    ok( !strcmp( bufferA, "" ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+    swprintf( expectW, ARRAY_SIZE(expectW), L"WINE%04X.IM", ime_count - 1 );
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetIMEFileNameW( hkl, bufferW, 12 );
+    ok( ret == 11, "ImmGetIMEFileNameW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, expectW ), "got bufferW %s\n", debugstr_w(bufferW) );
+    snprintf( expectA, ARRAY_SIZE(expectA), "WINE%04X.IME", ime_count - 1 );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetIMEFileNameA( hkl, bufferA, 12 );
+    ok( ret == 12, "ImmGetIMEFileNameA returned %lu\n", ret );
+    ok( !strcmp( bufferA, expectA ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+    swprintf( expectW, ARRAY_SIZE(expectW), L"WINE%04X.IME", ime_count - 1 );
+    memset( bufferW, 0xcd, sizeof(bufferW) );
+    ret = ImmGetIMEFileNameW( hkl, bufferW, 13 );
+    ok( ret == 12, "ImmGetIMEFileNameW returned %lu\n", ret );
+    ok( !wcscmp( bufferW, expectW ), "got bufferW %s\n", debugstr_w(bufferW) );
+    memset( bufferA, 0xcd, sizeof(bufferA) );
+    ret = ImmGetIMEFileNameA( hkl, bufferA, 13 );
+    ok( ret == 12, "ImmGetIMEFileNameA returned %lu\n", ret );
+    ok( !strcmp( bufferA, expectA ), "got bufferA %s\n", debugstr_a(bufferA) );
+
+cleanup:
+    SET_ENABLE( IME_DLL_PROCESS_ATTACH, FALSE );
+    SET_ENABLE( ImeInquire, FALSE );
+    SET_ENABLE( ImeDestroy, FALSE );
+    SET_ENABLE( IME_DLL_PROCESS_DETACH, FALSE );
+}
+
+static void test_ImmEscape( BOOL unicode )
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+    DWORD i, codes[] =
+    {
+        IME_ESC_QUERY_SUPPORT,
+        IME_ESC_SEQUENCE_TO_INTERNAL,
+        IME_ESC_GET_EUDC_DICTIONARY,
+        IME_ESC_SET_EUDC_DICTIONARY,
+        IME_ESC_MAX_KEY,
+        IME_ESC_IME_NAME,
+        IME_ESC_HANJA_MODE,
+        IME_ESC_GETHELPFILENAME,
+    };
+    WCHAR bufferW[512];
+    char bufferA[512];
+
+    SET_ENABLE( ImeEscape, TRUE );
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    ok_ret( 0, ImmEscapeW( hkl, 0, 0, NULL ) );
+    ok_ret( 0, ImmEscapeA( hkl, 0, 0, NULL ) );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    for (i = 0; i < ARRAY_SIZE(codes); ++i)
+    {
+        winetest_push_context( "esc %#lx", codes[i] );
+
+        SET_EXPECT( ImeEscape );
+        ok_ret( 4, ImmEscapeW( hkl, 0, codes[i], NULL ) );
+        CHECK_CALLED( ImeEscape );
+
+        SET_EXPECT( ImeEscape );
+        memset( bufferW, 0xcd, sizeof(bufferW) );
+        if (codes[i] == IME_ESC_SET_EUDC_DICTIONARY) wcscpy( bufferW, L"EscapeIme" );
+        ok_ret( 4, ImmEscapeW( hkl, 0, codes[i], bufferW ) );
+        if (unicode || codes[i] == IME_ESC_GET_EUDC_DICTIONARY || codes[i] == IME_ESC_IME_NAME ||
+            codes[i] == IME_ESC_GETHELPFILENAME)
+        {
+            ok_wcs( L"ImeEscape", bufferW );
+            ok_eq( 0xcdcd, bufferW[10], WORD, "%#x" );
+        }
+        else if (codes[i] == IME_ESC_SET_EUDC_DICTIONARY)
+        {
+            ok_wcs( L"EscapeIme", bufferW );
+            ok_eq( 0xcdcd, bufferW[10], WORD, "%#x" );
+        }
+        else if (codes[i] == IME_ESC_HANJA_MODE)
+        {
+            todo_wine
+            ok_eq( 0xcdcd, bufferW[0], WORD, "%#x" );
+        }
+        else
+        {
+            ok( !memcmp( bufferW, "ImeEscape", 10 ), "got bufferW %s\n", debugstr_w(bufferW) );
+            ok_eq( 0xcdcd, bufferW[5], WORD, "%#x" );
+        }
+        CHECK_CALLED( ImeEscape );
+
+        SET_EXPECT( ImeEscape );
+        ok_ret( 4, ImmEscapeA( hkl, 0, codes[i], NULL ) );
+        CHECK_CALLED( ImeEscape );
+
+        SET_EXPECT( ImeEscape );
+        memset( bufferA, 0xcd, sizeof(bufferA) );
+        if (codes[i] == IME_ESC_SET_EUDC_DICTIONARY) strcpy( bufferA, "EscapeIme" );
+        ok_ret( 4, ImmEscapeA( hkl, 0, codes[i], bufferA ) );
+        if (!unicode || codes[i] == IME_ESC_GET_EUDC_DICTIONARY || codes[i] == IME_ESC_IME_NAME ||
+            codes[i] == IME_ESC_GETHELPFILENAME)
+        {
+            ok_str( "ImeEscape", bufferA );
+            ok_eq( 0xcd, bufferA[10], BYTE, "%#x" );
+        }
+        else if (codes[i] == IME_ESC_SET_EUDC_DICTIONARY)
+        {
+            ok_str( "EscapeIme", bufferA );
+            ok_eq( 0xcd, bufferA[10], BYTE, "%#x" );
+        }
+        else if (codes[i] == IME_ESC_HANJA_MODE)
+        {
+            todo_wine
+            ok_eq( 0xcd, bufferA[0], BYTE, "%#x" );
+        }
+        else
+        {
+            ok( !memcmp( bufferA, L"ImeEscape", 10 * sizeof(WCHAR) ), "got bufferA %s\n", debugstr_a(bufferA) );
+            ok_eq( 0xcd, bufferA[20], BYTE, "%#x" );
+        }
+        CHECK_CALLED( ImeEscape );
+
+        winetest_pop_context();
+    }
+
+cleanup:
+    SET_ENABLE( ImeEscape, FALSE );
+
+    winetest_pop_context();
+}
+
+static int CALLBACK enum_register_wordA( const char *reading, DWORD style, const char *string, void *user )
+{
+    ime_trace( "reading %s, style %#lx, string %s, user %p\n", debugstr_a(reading), style, debugstr_a(string), user );
+
+    ok_eq( 0xdeadbeef, style, UINT, "%#x" );
+    ok_str( "Reading", reading );
+    ok_str( "String", string );
+
+    return 0xdeadbeef;
+}
+
+static int CALLBACK enum_register_wordW( const WCHAR *reading, DWORD style, const WCHAR *string, void *user )
+{
+    ime_trace( "reading %s, style %#lx, string %s, user %p\n", debugstr_w(reading), style, debugstr_w(string), user );
+
+    ok_eq( 0xdeadbeef, style, UINT, "%#x" );
+    ok_wcs( L"Reading", reading );
+    ok_wcs( L"String", string );
+
+    return 0xdeadbeef;
+}
+
+static void test_ImmEnumRegisterWord( BOOL unicode )
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    SET_ENABLE( ImeEnumRegisterWord, TRUE );
+
+    SetLastError( 0xdeadbeef );
+    ok_ret( 0, ImmEnumRegisterWordW( NULL, enum_register_wordW, NULL, 0, NULL, NULL ) );
+    ok_ret( 0, ImmEnumRegisterWordA( NULL, enum_register_wordA, NULL, 0, NULL, NULL ) );
+    ok_ret( 0, ImmEnumRegisterWordW( hkl, enum_register_wordW, NULL, 0, NULL, NULL ) );
+    ok_ret( 0, ImmEnumRegisterWordA( hkl, enum_register_wordA, NULL, 0, NULL, NULL ) );
+    todo_wine
+    ok_ret( 0xdeadbeef, GetLastError() );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    SET_EXPECT( ImeEnumRegisterWord );
+    ok_ret( 0, ImmEnumRegisterWordW( hkl, enum_register_wordW, NULL, 0, NULL, NULL ) );
+    CHECK_CALLED( ImeEnumRegisterWord );
+
+    SET_EXPECT( ImeEnumRegisterWord );
+    ok_ret( 0, ImmEnumRegisterWordA( hkl, enum_register_wordA, NULL, 0, NULL, NULL ) );
+    CHECK_CALLED( ImeEnumRegisterWord );
+
+    SET_EXPECT( ImeEnumRegisterWord );
+    ok_ret( 0xdeadbeef, ImmEnumRegisterWordW( hkl, enum_register_wordW, L"Reading", 0xdeadbeef, L"String", NULL ) );
+    CHECK_CALLED( ImeEnumRegisterWord );
+
+    SET_EXPECT( ImeEnumRegisterWord );
+    ok_ret( 0xdeadbeef, ImmEnumRegisterWordA( hkl, enum_register_wordA, "Reading", 0xdeadbeef, "String", NULL ) );
+    CHECK_CALLED( ImeEnumRegisterWord );
+
+cleanup:
+    SET_ENABLE( ImeEnumRegisterWord, FALSE );
+
+    winetest_pop_context();
+}
+
+static void test_ImmRegisterWord( BOOL unicode )
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+
+    SET_ENABLE( ImeRegisterWord, TRUE );
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    SetLastError( 0xdeadbeef );
+    ok_ret( 0, ImmRegisterWordW( NULL, NULL, 0, NULL ) );
+    ok_ret( 0, ImmRegisterWordA( NULL, NULL, 0, NULL ) );
+    ok_ret( 0, ImmRegisterWordW( hkl, NULL, 0, NULL ) );
+    ok_ret( 0, ImmRegisterWordA( hkl, NULL, 0, NULL ) );
+    todo_wine
+    ok_ret( 0xdeadbeef, GetLastError() );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordW( hkl, NULL, 0, NULL ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordA( hkl, NULL, 0, NULL ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordW( hkl, L"Reading", 0, NULL ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordA( hkl, "Reading", 0, NULL ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordW( hkl, NULL, 0xdeadbeef, NULL ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordA( hkl, NULL, 0xdeadbeef, NULL ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordW( hkl, NULL, 0, L"String" ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+    SET_EXPECT( ImeRegisterWord );
+    ok_ret( 0, ImmRegisterWordA( hkl, NULL, 0, "String" ) );
+    CHECK_CALLED( ImeRegisterWord );
+
+cleanup:
+    SET_ENABLE( ImeRegisterWord, FALSE );
+
+    winetest_pop_context();
+}
+
+static void test_ImmGetRegisterWordStyle( BOOL unicode )
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+    STYLEBUFW styleW;
+    STYLEBUFA styleA;
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    SET_ENABLE( ImeGetRegisterWordStyle, TRUE );
+
+    SetLastError( 0xdeadbeef );
+    ok_ret( 0, ImmGetRegisterWordStyleW( NULL, 0, &styleW ) );
+    ok_ret( 0, ImmGetRegisterWordStyleA( NULL, 0, &styleA ) );
+    ok_ret( 0, ImmGetRegisterWordStyleW( hkl, 0, &styleW ) );
+    ok_ret( 0, ImmGetRegisterWordStyleA( hkl, 0, &styleA ) );
+    todo_wine
+    ok_ret( 0xdeadbeef, GetLastError() );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    if (!strcmp( winetest_platform, "wine" )) goto skip_null;
+
+    SET_EXPECT( ImeGetRegisterWordStyle );
+    ok_ret( 0xdeadbeef, ImmGetRegisterWordStyleW( hkl, 16, NULL ) );
+    CHECK_CALLED( ImeGetRegisterWordStyle );
+
+    SET_EXPECT( ImeGetRegisterWordStyle );
+    ok_ret( 0xdeadbeef, ImmGetRegisterWordStyleA( hkl, 16, NULL ) );
+    CHECK_CALLED( ImeGetRegisterWordStyle );
+
+skip_null:
+    SET_EXPECT( ImeGetRegisterWordStyle );
+    memset( &styleW, 0xcd, sizeof(styleW) );
+    ok_ret( 0xdeadbeef, ImmGetRegisterWordStyleW( hkl, 1, &styleW ) );
+    if (ime_info.fdwProperty & IME_PROP_UNICODE)
+    {
+        ok_eq( 0xdeadbeef, styleW.dwStyle, UINT, "%#x" );
+        ok_wcs( L"StyleDescription", styleW.szDescription );
+    }
+    else
+    {
+        todo_wine
+        ok_eq( 0xcdcdcdcd, styleW.dwStyle, UINT, "%#x" );
+        todo_wine
+        ok_eq( 0xcdcd, styleW.szDescription[0], WORD, "%#x" );
+    }
+    CHECK_CALLED( ImeGetRegisterWordStyle );
+
+    SET_EXPECT( ImeGetRegisterWordStyle );
+    memset( &styleA, 0xcd, sizeof(styleA) );
+    ok_ret( 0xdeadbeef, ImmGetRegisterWordStyleA( hkl, 1, &styleA ) );
+    if (ime_info.fdwProperty & IME_PROP_UNICODE)
+    {
+        todo_wine
+        ok_eq( 0xcdcdcdcd, styleA.dwStyle, UINT, "%#x" );
+        todo_wine
+        ok_eq( 0xcd, styleA.szDescription[0], BYTE, "%#x" );
+    }
+    else
+    {
+        ok_eq( 0xdeadbeef, styleA.dwStyle, UINT, "%#x" );
+        ok_str( "StyleDescription", styleA.szDescription );
+    }
+    CHECK_CALLED( ImeGetRegisterWordStyle );
+
+cleanup:
+    SET_ENABLE( ImeGetRegisterWordStyle, FALSE );
+
+    winetest_pop_context();
+}
+
+static void test_ImmUnregisterWord( BOOL unicode )
+{
+    HKL hkl = GetKeyboardLayout( 0 );
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    SET_ENABLE( ImeUnregisterWord, TRUE );
+
+    SetLastError( 0xdeadbeef );
+    ok_ret( 0, ImmUnregisterWordW( NULL, NULL, 0, NULL ) );
+    ok_ret( 0, ImmUnregisterWordA( NULL, NULL, 0, NULL ) );
+    ok_ret( 0, ImmUnregisterWordW( hkl, NULL, 0, NULL ) );
+    ok_ret( 0, ImmUnregisterWordA( hkl, NULL, 0, NULL ) );
+    todo_wine
+    ok_ret( 0xdeadbeef, GetLastError() );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordW( hkl, NULL, 0, NULL ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordA( hkl, NULL, 0, NULL ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordW( hkl, L"Reading", 0, NULL ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordA( hkl, "Reading", 0, NULL ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordW( hkl, NULL, 0xdeadbeef, NULL ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordA( hkl, NULL, 0xdeadbeef, NULL ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordW( hkl, NULL, 0, L"String" ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+    SET_EXPECT( ImeUnregisterWord );
+    ok_ret( 0, ImmUnregisterWordA( hkl, NULL, 0, "String" ) );
+    CHECK_CALLED( ImeUnregisterWord );
+
+cleanup:
+    SET_ENABLE( ImeUnregisterWord, FALSE );
+
+    winetest_pop_context();
+}
+
+struct ime_windows
+{
+    HWND ime_hwnd;
+    HWND ime_ui_hwnd;
+};
+
+static BOOL CALLBACK enum_thread_ime_windows( HWND hwnd, LPARAM lparam )
+{
+    struct ime_windows *params = (void *)lparam;
+    WCHAR buffer[256];
+    UINT ret;
+
+    ime_trace( "hwnd %p, lparam %#Ix\n", hwnd, lparam );
+
+    ret = RealGetWindowClassW( hwnd, buffer, ARRAY_SIZE(buffer) );
+    ok( ret, "RealGetWindowClassW returned %#x\n", ret );
+
+    if (!wcscmp( buffer, L"IME" ))
+    {
+        ok( !params->ime_hwnd, "Found extra IME window %p\n", hwnd );
+        params->ime_hwnd = hwnd;
+    }
+    if (!wcscmp( buffer, ime_ui_class.lpszClassName ))
+    {
+        ok( !params->ime_ui_hwnd, "Found extra IME UI window %p\n", hwnd );
+        params->ime_ui_hwnd = hwnd;
+    }
+
+    return TRUE;
+}
+
+static void test_ImmSetConversionStatus(void)
+{
+    const struct ime_call set_conversion_status_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCONVERSIONMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCONVERSIONMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCONVERSIONMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETSENTENCEMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETSENTENCEMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETSENTENCEMODE},
+        },
+        {0},
+    };
+    const struct ime_call set_conversion_status_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0xdeadbeef, .value = IMC_SETCONVERSIONMODE},
+        },
+        {0},
+    };
+    const struct ime_call set_conversion_status_2_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCONVERSIONMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCONVERSIONMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCONVERSIONMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0xfeedcafe, .value = IMC_SETSENTENCEMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETSENTENCEMODE},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETSENTENCEMODE},
+        },
+        {0},
+    };
+    DWORD old_conversion, old_sentence, conversion, sentence;
+    HKL hkl;
+    INPUTCONTEXT *ctx;
+    HWND hwnd;
+
+    ok_ret( 0, ImmGetConversionStatus( 0, &old_conversion, &old_sentence ) );
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &old_conversion, &old_sentence ) );
+
+    ctx = ImmLockIMC( default_himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    ok_eq( old_conversion, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( old_sentence, ctx->fdwSentence, UINT, "%#x" );
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    process_messages();
+
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, &sentence ) );
+    ok_eq( old_conversion, conversion, UINT, "%#x" );
+    ok_eq( old_sentence, sentence, UINT, "%#x" );
+    ok_eq( old_conversion, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( old_sentence, ctx->fdwSentence, UINT, "%#x" );
+
+    ok_ret( 1, ImmSetConversionStatus( default_himc, 0, 0 ) );
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, &sentence ) );
+    ok_eq( 0, conversion, UINT, "%#x" );
+    ok_eq( 0, sentence, UINT, "%#x" );
+    ok_eq( 0, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( 0, ctx->fdwSentence, UINT, "%#x" );
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    process_messages();
+    /* initial values are dependent on both old and new IME */
+    ok_ret( 1, ImmSetConversionStatus( default_himc, 0, 0 ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, &sentence ) );
+    ok_eq( 0, conversion, UINT, "%#x" );
+    ok_eq( 0, sentence, UINT, "%#x" );
+    ok_eq( 0, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( 0, ctx->fdwSentence, UINT, "%#x" );
+
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmSetConversionStatus( default_himc, 0xdeadbeef, 0xfeedcafe ) );
+    ok_seq( set_conversion_status_0_seq );
+
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, &sentence ) );
+    ok_eq( 0xdeadbeef, conversion, UINT, "%#x" );
+    ok_eq( 0xfeedcafe, sentence, UINT, "%#x" );
+    ok_eq( 0xdeadbeef, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( 0xfeedcafe, ctx->fdwSentence, UINT, "%#x" );
+
+    ok_ret( 1, ImmSetConversionStatus( default_himc, 0xdeadbeef, 0xfeedcafe ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, NULL ) );
+    ok_eq( 0xdeadbeef, conversion, UINT, "%#x" );
+    ok_eq( 0xdeadbeef, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( 0xfeedcafe, ctx->fdwSentence, UINT, "%#x" );
+
+    ctx->hWnd = 0;
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmSetConversionStatus( default_himc, 0, 0xfeedcafe ) );
+    ok_seq( set_conversion_status_1_seq );
+
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, &sentence ) );
+    ok_eq( 0, conversion, UINT, "%#x" );
+    ok_eq( 0xfeedcafe, sentence, UINT, "%#x" );
+    ok_eq( 0, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( 0xfeedcafe, ctx->fdwSentence, UINT, "%#x" );
+
+    ctx->hWnd = hwnd;
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmSetConversionStatus( default_himc, ~0, ~0 ) );
+    ok_seq( set_conversion_status_2_seq );
+
+    ok_ret( 1, ImmGetConversionStatus( default_himc, NULL, &sentence ) );
+    ok_eq( ~0, sentence, UINT, "%#x" );
+    ok_eq( ~0, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( ~0, ctx->fdwSentence, UINT, "%#x" );
+
+    ok_ret( 1, ImmSetConversionStatus( default_himc, ~0, ~0 ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, &sentence ) );
+    ok_eq( ~0, conversion, UINT, "%#x" );
+    ok_eq( ~0, sentence, UINT, "%#x" );
+    ok_eq( ~0, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( ~0, ctx->fdwSentence, UINT, "%#x" );
+
+    /* status is cached and some bits are kept from the previous active IME */
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    todo_wine ok_eq( 0x200, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( old_sentence, ctx->fdwSentence, UINT, "%#x" );
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_eq( ~0, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( ~0, ctx->fdwSentence, UINT, "%#x" );
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    todo_wine ok_eq( 0x200, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( old_sentence, ctx->fdwSentence, UINT, "%#x" );
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+
+cleanup:
+    /* sanitize conversion status to some sane default */
+    ok_ret( 1, ImmSetConversionStatus( default_himc, 0, 0 ) );
+    ok_ret( 1, ImmGetConversionStatus( default_himc, &conversion, &sentence ) );
+    ok_eq( 0, conversion, UINT, "%#x" );
+    ok_eq( 0, sentence, UINT, "%#x" );
+    ok_eq( 0, ctx->fdwConversion, UINT, "%#x" );
+    ok_eq( 0, ctx->fdwSentence, UINT, "%#x" );
+
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 1, ImmUnlockIMC( default_himc ) );
+}
+
+static void test_ImmSetOpenStatus(void)
+{
+    const struct ime_call set_open_status_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETOPENSTATUS},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETOPENSTATUS},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETOPENSTATUS},
+        },
+        {0},
+    };
+    const struct ime_call set_open_status_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETOPENSTATUS},
+        },
+        {0},
+    };
+    const struct ime_call set_open_status_2_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETOPENSTATUS},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETOPENSTATUS},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETOPENSTATUS},
+        },
+        {0},
+    };
+    HKL hkl;
+    struct ime_windows ime_windows = {0};
+    DWORD old_status, status;
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+
+    ok_ret( 0, ImmGetOpenStatus( 0 ) );
+    old_status = ImmGetOpenStatus( default_himc );
+
+    ctx = ImmLockIMC( default_himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    ok_eq( old_status, ctx->fOpen, UINT, "%#x" );
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    process_messages();
+
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( old_status, status, UINT, "%#x" );
+    ok_eq( old_status, ctx->fOpen, UINT, "%#x" );
+
+    ok_ret( 1, ImmSetOpenStatus( default_himc, 0 ) );
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( 0, status, UINT, "%#x" );
+    ok_eq( 0, ctx->fOpen, UINT, "%#x" );
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    process_messages();
+    /* initial values are dependent on both old and new IME */
+    ok_ret( 1, ImmSetOpenStatus( default_himc, 0 ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( 0, status, UINT, "%#x" );
+    ok_eq( 0, ctx->fOpen, UINT, "%#x" );
+
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmSetOpenStatus( default_himc, 0xdeadbeef ) );
+    ok_seq( set_open_status_0_seq );
+
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( 0xdeadbeef, status, UINT, "%#x" );
+    ok_eq( 0xdeadbeef, ctx->fOpen, UINT, "%#x" );
+
+    ok_ret( 1, ImmSetOpenStatus( default_himc, 0xdeadbeef ) );
+    ok_seq( empty_sequence );
+
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ok_ret( 1, EnumThreadWindows( GetCurrentThreadId(), enum_thread_ime_windows, (LPARAM)&ime_windows ) );
+    ok_ne( NULL, ime_windows.ime_hwnd, HWND, "%p" );
+    ok_ne( NULL, ime_windows.ime_ui_hwnd, HWND, "%p" );
+    ok_eq( default_himc, (HIMC)GetWindowLongPtrW( ime_windows.ime_ui_hwnd, IMMGWL_IMC ), HIMC, "%p" );
+    ok_ret( 1, ImmSetOpenStatus( himc, TRUE ) );
+    ok_eq( default_himc, (HIMC)GetWindowLongPtrW( ime_windows.ime_ui_hwnd, IMMGWL_IMC ), HIMC, "%p" );
+    ok_ret( 1, ImmSetOpenStatus( himc, FALSE ) );
+    ok_eq( default_himc, (HIMC)GetWindowLongPtrW( ime_windows.ime_ui_hwnd, IMMGWL_IMC ), HIMC, "%p" );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    status = ImmGetOpenStatus( default_himc );
+    ok( status == 0xdeadbeef || status == 0 /* MS Korean IME */, "got status %#lx\n", status );
+    ok_eq( status, ctx->fOpen, UINT, "%#x" );
+
+    ctx->hWnd = 0;
+    ok_ret( 1, ImmSetOpenStatus( default_himc, 0xfeedcafe ) );
+    ok_seq( set_open_status_1_seq );
+
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( 0xfeedcafe, status, UINT, "%#x" );
+    ok_eq( 0xfeedcafe, ctx->fOpen, UINT, "%#x" );
+
+    ctx->hWnd = hwnd;
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmSetOpenStatus( default_himc, ~0 ) );
+    ok_seq( set_open_status_2_seq );
+
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( ~0, status, UINT, "%#x" );
+    ok_eq( ~0, ctx->fOpen, UINT, "%#x" );
+
+    ok_ret( 1, ImmSetOpenStatus( default_himc, ~0 ) );
+    ok_seq( empty_sequence );
+
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( ~0, status, UINT, "%#x" );
+    ok_eq( ~0, ctx->fOpen, UINT, "%#x" );
+
+    /* status is cached between IME activations */
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( old_status, status, UINT, "%#x" );
+    ok_eq( old_status, ctx->fOpen, UINT, "%#x" );
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    status = ImmGetOpenStatus( default_himc );
+    todo_wine ok_eq( 1, status, UINT, "%#x" );
+    todo_wine ok_eq( 1, ctx->fOpen, UINT, "%#x" );
+    ok_ret( 1, ImmSetOpenStatus( default_himc, 0 ) );
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( old_status, status, UINT, "%#x" );
+    ok_eq( old_status, ctx->fOpen, UINT, "%#x" );
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+
+cleanup:
+    /* sanitize open status to some sane default */
+    ok_ret( 1, ImmSetOpenStatus( default_himc, 0 ) );
+    status = ImmGetOpenStatus( default_himc );
+    ok_eq( 0, status, UINT, "%#x" );
+    ok_eq( 0, ctx->fOpen, UINT, "%#x" );
+
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 1, ImmUnlockIMC( default_himc ) );
+}
+
+static void test_ImmProcessKey(void)
+{
+    const struct ime_call process_key_0[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_PROCESS_KEY, .process_key = {.vkey = 'A', .lparam = MAKELONG(0, 0x1e)},
+        },
+        {0},
+    };
+    const struct ime_call process_key_1[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_PROCESS_KEY, .process_key = {.vkey = 'A', .lparam = MAKELONG(1, 0x1e)},
+        },
+        {0},
+    };
+    const struct ime_call process_key_2[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_PROCESS_KEY, .process_key = {.vkey = 'A', .lparam = MAKELONG(2, 0x1e)},
+        },
+        {0},
+    };
+    HKL hkl;
+    UINT_PTR ret;
+    HIMC himc;
+    HWND hwnd;
+
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    process_messages();
+
+    ok_ret( 0, ImmProcessKey( hwnd, default_hkl, 'A', MAKELONG(1, 0x1e), 0 ) );
+    ok_seq( empty_sequence );
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 0, ImmProcessKey( 0, hkl, 'A', MAKELONG(1, 0x1e), 0 ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 0, ImmProcessKey( hwnd, hkl, 'A', MAKELONG(0, 0x1e), 0 ) );
+    ok_seq( process_key_0 );
+    ret = ImmProcessKey( hwnd, hkl, 'A', MAKELONG(1, 0x1e), 0 );
+    todo_wine
+    ok_ret( 2, ret );
+    ok_seq( process_key_1 );
+    ok_ret( 2, ImmProcessKey( hwnd, hkl, 'A', MAKELONG(2, 0x1e), 0 ) );
+    ok_seq( process_key_2 );
+
+    ok_eq( hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    ok_ret( 0, ImmProcessKey( hwnd, default_hkl, 'A', MAKELONG(1, 0x1e), 0 ) );
+    ok_seq( empty_sequence );
+    ok_eq( hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ok_ret( 'A', ImmGetVirtualKey( hwnd ) );
+    ok_eq( default_himc, ImmAssociateContext( hwnd, himc ), HIMC, "%p" );
+    todo_wine ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( hwnd ) );
+    ok_eq( himc, ImmAssociateContext( hwnd, default_himc ), HIMC, "%p" );
+    ok_ret( 'A', ImmGetVirtualKey( hwnd ) );
+    ImmDestroyContext( himc );
+
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'A', 0 ) );
+    ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( hwnd ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+cleanup:
+    ok_ret( 1, DestroyWindow( hwnd ) );
+}
+
+static void test_ImmActivateLayout(void)
+{
+    const struct ime_call activate_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_SELECT, .select = 1,
+        },
+        {0},
+    };
+    const struct ime_call deactivate_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_COMPOSITIONSTR, .index = CPS_CANCEL, .value = 0},
+            .todo = TRUE,
+        },
+        {
+            .hkl = default_hkl, .himc = default_himc,
+            .func = IME_SELECT, .select = 0,
+        },
+        {0},
+    };
+    struct ime_call activate_with_window_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_SELECT, .select = 1,
+            .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_SELECT, .select = 1,
+            .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SELECT, .wparam = 1, .lparam = (LPARAM)expect_ime},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_OPENSTATUSWINDOW},
+            .todo = TRUE, .broken = TRUE, /* broken after SetForegroundWindow(GetDesktopWindow()) as in d3d8:device  */
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETOPENSTATUS},
+            .todo = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCONVERSIONMODE},
+            .todo = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETSENTENCEMODE},
+            .todo = TRUE,
+        },
+        {0},
+    };
+    struct ime_call deactivate_with_window_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_COMPOSITIONSTR, .index = CPS_CANCEL, .value = 0},
+            .todo = TRUE, .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_COMPOSITIONSTR, .index = CPS_CANCEL, .value = 0},
+            .todo = TRUE, .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_CLOSESTATUSWINDOW},
+            .todo = TRUE, .broken = TRUE, /* broken after SetForegroundWindow(GetDesktopWindow()) as in d3d8:device  */
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SELECT, .wparam = 0, .lparam = (LPARAM)expect_ime},
+        },
+        {
+            .hkl = default_hkl, .himc = default_himc,
+            .func = IME_SELECT, .select = 0,
+            .flaky_himc = TRUE,
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/,
+            .func = IME_SELECT, .select = 0,
+            .flaky_himc = TRUE,
+        },
+        {0},
+    };
+    HKL hkl;
+    struct ime_windows ime_windows = {0};
+    HIMC himc;
+    HWND hwnd;
+    UINT ret;
+
+    SET_ENABLE( ImeInquire, TRUE );
+    SET_ENABLE( ImeDestroy, TRUE );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    /* ActivateKeyboardLayout doesn't call ImeInquire / ImeDestroy */
+
+    ok_seq( empty_sequence );
+    ok_eq( default_hkl, ActivateKeyboardLayout( hkl, 0 ), HKL, "%p" );
+    ok_eq( hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    ok_eq( hkl, ActivateKeyboardLayout( default_hkl, 0 ), HKL, "%p" );
+    ok_seq( empty_sequence );
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+
+    /* ImmActivateLayout changes active HKL */
+
+    SET_EXPECT( ImeInquire );
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_seq( activate_seq );
+    CHECK_CALLED( ImeInquire );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+
+    ok_eq( hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_seq( deactivate_seq );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+
+    /* ImmActivateLayout leaks the IME, we need to free it manually */
+
+    SET_EXPECT( ImeDestroy );
+    ret = ImmFreeLayout( hkl );
+    ok( ret, "ImmFreeLayout returned %u\n", ret );
+    CHECK_CALLED( ImeDestroy );
+    ok_seq( empty_sequence );
+
+
+    /* when there's a window, ActivateKeyboardLayout calls ImeInquire */
+
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    process_messages();
+    ok_seq( empty_sequence );
+
+    himc = ImmCreateContext();
+    ok( !!himc, "got himc %p\n", himc );
+    ok_seq( empty_sequence );
+
+    SET_EXPECT( ImeInquire );
+    ok_eq( default_hkl, ActivateKeyboardLayout( hkl, 0 ), HKL, "%p" );
+    CHECK_CALLED( ImeInquire );
+    activate_with_window_seq[1].himc = himc;
+    ok_seq( activate_with_window_seq );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+
+    ok_eq( hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+    /* FIXME: ignore spurious VK_CONTROL ImeProcessKey / ImeToAsciiEx calls */
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_eq( hkl, ActivateKeyboardLayout( default_hkl, 0 ), HKL, "%p" );
+    deactivate_with_window_seq[1].himc = himc;
+    deactivate_with_window_seq[5].himc = himc;
+    ok_seq( deactivate_with_window_seq );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+    ok_ret( 1, ImmDestroyContext( himc ) );
+    ok_seq( empty_sequence );
+
+
+    ok_eq( default_hkl, ActivateKeyboardLayout( hkl, 0 ), HKL, "%p" );
+    ok_eq( hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+    ok_ret( 1, EnumThreadWindows( GetCurrentThreadId(), enum_thread_ime_windows, (LPARAM)&ime_windows ) );
+    ok( !!ime_windows.ime_hwnd, "missing IME window\n" );
+    ok( !!ime_windows.ime_ui_hwnd, "missing IME UI window\n" );
+    ok_ret( (UINT_PTR)ime_windows.ime_hwnd, (UINT_PTR)GetParent( ime_windows.ime_ui_hwnd ) );
+
+    ok_eq( hkl, ActivateKeyboardLayout( default_hkl, 0 ), HKL, "%p" );
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+    process_messages();
+
+
+    SET_EXPECT( ImeDestroy );
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    CHECK_CALLED( ImeDestroy );
+
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+
+cleanup:
+    SET_ENABLE( ImeInquire, FALSE );
+    SET_ENABLE( ImeDestroy, FALSE );
+}
+
+static void test_ImmCreateInputContext(void)
+{
+    struct ime_call activate_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_SELECT, .select = 1,
+            .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc[0]*/,
+            .func = IME_SELECT, .select = 1,
+            .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SELECT, .wparam = 1, .lparam = (LPARAM)expect_ime},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_OPENSTATUSWINDOW},
+            .todo = TRUE, .broken = TRUE, /* broken after SetForegroundWindow(GetDesktopWindow()) as in d3d8:device  */
+        },
+        {0},
+    };
+    struct ime_call select1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc[0]*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETOPENSTATUS},
+            .todo = TRUE, .flaky_himc = TRUE, .broken = TRUE /* sometimes */,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETOPENSTATUS},
+            .todo = TRUE, .flaky_himc = TRUE, .broken = TRUE /* sometimes */,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETOPENSTATUS},
+            .todo = TRUE, .broken = TRUE /* sometimes */,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCONVERSIONMODE},
+            .todo = TRUE, .broken = TRUE /* sometimes */,
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc[1]*/,
+            .func = IME_SELECT, .select = 1,
+        },
+        {0},
+    };
+    struct ime_call select0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc[1]*/,
+            .func = IME_SELECT, .select = 0,
+        },
+        {0},
+    };
+    struct ime_call deactivate_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_COMPOSITIONSTR, .index = CPS_CANCEL, .value = 0},
+            .todo = TRUE, .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc[0]*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_COMPOSITIONSTR, .index = CPS_CANCEL, .value = 0},
+            .todo = TRUE, .flaky_himc = TRUE,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_CLOSESTATUSWINDOW},
+            .todo = TRUE, .broken = TRUE, /* broken after SetForegroundWindow(GetDesktopWindow()) as in d3d8:device  */
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SELECT, .wparam = 0, .lparam = (LPARAM)expect_ime},
+        },
+        {
+            .hkl = default_hkl, .himc = default_himc,
+            .func = IME_SELECT, .select = 0,
+            .flaky_himc = TRUE,
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc[0]*/,
+            .func = IME_SELECT, .select = 0,
+            .flaky_himc = TRUE,
+        },
+        {0},
+    };
+    HKL hkl;
+    INPUTCONTEXT *ctx;
+    HIMC himc[2];
+    HWND hwnd;
+
+    ctx = ImmLockIMC( default_himc );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    ok_ret( 0, IsWindow( ctx->hWnd ) );
+    ok_ret( 1, ImmUnlockIMC( default_himc ) );
+
+
+    /* new input contexts cannot be locked before IME window has been created */
+
+    himc[0] = ImmCreateContext();
+    ok( !!himc[0], "ImmCreateContext failed, error %lu\n", GetLastError() );
+    ctx = ImmLockIMC( himc[0] );
+    todo_wine
+    ok( !ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    if (ctx) ImmUnlockIMCC( himc[0] );
+
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    process_messages();
+
+    ctx = ImmLockIMC( default_himc );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    ok_ret( 1, ImmUnlockIMC( default_himc ) );
+
+    ctx = ImmLockIMC( himc[0] );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    ok_ret( 1, ImmUnlockIMC( himc[0] ) );
+
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+    ime_info.dwPrivateDataSize = 123;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    ok_ret( 1, ImmLoadIME( hkl ) );
+
+    /* Activating the layout calls ImeSelect 1 on existing HIMC */
+
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    activate_seq[1].himc = himc[0];
+    ok_seq( activate_seq );
+
+    ok_eq( hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+    ctx = ImmLockIMC( default_himc );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    ok_ret( 1, ImmUnlockIMC( default_himc ) );
+
+    ctx = ImmLockIMC( himc[0] );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    ok_ret( 1, ImmUnlockIMC( himc[0] ) );
+
+
+    /* ImmLockIMC triggers the ImeSelect call, to allocate private data */
+
+    himc[1] = ImmCreateContext();
+    ok( !!himc[1], "ImmCreateContext failed, error %lu\n", GetLastError() );
+
+    ok_seq( empty_sequence );
+    ctx = ImmLockIMC( himc[1] );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    select1_seq[0].himc = himc[0];
+    select1_seq[4].himc = himc[1];
+    ok_seq( select1_seq );
+
+    ok_ret( 1, ImmUnlockIMC( himc[1] ) );
+
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmDestroyContext( himc[1] ) );
+    select0_seq[0].himc = himc[1];
+    ok_seq( select0_seq );
+
+
+    /* Deactivating the layout calls ImeSelect 0 on existing HIMC */
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    deactivate_seq[1].himc = himc[0];
+    deactivate_seq[5].himc = himc[0];
+    ok_seq( deactivate_seq );
+
+    ok_eq( default_hkl, GetKeyboardLayout( 0 ), HKL, "%p" );
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    ok_seq( empty_sequence );
+
+cleanup:
+    ok_ret( 1, ImmDestroyContext( himc[0] ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ime_info.dwPrivateDataSize = 0;
+}
+
+static void test_DefWindowProc(void)
+{
+    const struct ime_call start_composition_seq[] =
+    {
+        {.hkl = expect_ime, .himc = default_himc, .func = MSG_IME_UI, .message = {.msg = WM_IME_STARTCOMPOSITION}},
+        {0},
+    };
+    const struct ime_call end_composition_seq[] =
+    {
+        {.hkl = expect_ime, .himc = default_himc, .func = MSG_IME_UI, .message = {.msg = WM_IME_ENDCOMPOSITION}},
+        {0},
+    };
+    const struct ime_call composition_seq[] =
+    {
+        {.hkl = expect_ime, .himc = default_himc, .func = MSG_IME_UI, .message = {.msg = WM_IME_COMPOSITION}},
+        {0},
+    };
+    const struct ime_call set_context_seq[] =
+    {
+        {.hkl = expect_ime, .himc = default_himc, .func = MSG_IME_UI, .message = {.msg = WM_IME_SETCONTEXT}},
+        {0},
+    };
+    const struct ime_call notify_seq[] =
+    {
+        {.hkl = expect_ime, .himc = default_himc, .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY}},
+        {0},
+    };
+    HKL hkl;
+    UINT_PTR ret;
+    HWND hwnd;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_STARTCOMPOSITION, 0, 0 ) );
+    ok_seq( start_composition_seq );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_ENDCOMPOSITION, 0, 0 ) );
+    ok_seq( end_composition_seq );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_COMPOSITION, 0, 0 ) );
+    ok_seq( composition_seq );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_SETCONTEXT, 0, 0 ) );
+    ok_seq( set_context_seq );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_NOTIFY, 0, 0 ) );
+    ok_seq( notify_seq );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_CONTROL, 0, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_COMPOSITIONFULL, 0, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_SELECT, 0, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_CHAR, 0, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, DefWindowProcW( hwnd, 0x287, 0, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, DefWindowProcW( hwnd, WM_IME_REQUEST, 0, 0 ) );
+    ok_seq( empty_sequence );
+    ret = DefWindowProcW( hwnd, WM_IME_KEYDOWN, 0, 0 );
+    todo_wine
+    ok_ret( 0, ret );
+    ok_seq( empty_sequence );
+    ret = DefWindowProcW( hwnd, WM_IME_KEYUP, 0, 0 );
+    todo_wine
+    ok_ret( 0, ret );
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmSetActiveContext(void)
+{
+    const struct ime_call activate_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_SET_ACTIVE_CONTEXT, .set_active_context = {.flag = 1}
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SETCONTEXT, .wparam = 1, .lparam = ISC_SHOWUIALL}
+        },
+        {0},
+    };
+    const struct ime_call deactivate_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_SET_ACTIVE_CONTEXT, .set_active_context = {.flag = 0}
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SETCONTEXT, .wparam = 0, .lparam = ISC_SHOWUIALL}
+        },
+        {0},
+    };
+    struct ime_call deactivate_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETOPENSTATUS},
+            .todo = TRUE, .flaky_himc = TRUE, .broken = TRUE /* sometimes */,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETOPENSTATUS},
+            .todo = TRUE, .broken = TRUE /* sometimes */,
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCONVERSIONMODE},
+            .todo = TRUE, .broken = TRUE /* sometimes */,
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_SELECT, .select = 1,
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_SET_ACTIVE_CONTEXT, .set_active_context = {.flag = 0}
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SETCONTEXT, .wparam = 0, .lparam = ISC_SHOWUIALL}
+        },
+        {0},
+    };
+    struct ime_call deactivate_2_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_SET_ACTIVE_CONTEXT, .set_active_context = {.flag = 0}
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SETCONTEXT, .wparam = 0, .lparam = ISC_SHOWUIALL}
+        },
+        {0},
+    };
+    struct ime_call activate_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_SET_ACTIVE_CONTEXT, .set_active_context = {.flag = 1}
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_SETCONTEXT, .wparam = 1, .lparam = ISC_SHOWUIALL}
+        },
+        {0},
+    };
+    HKL hkl;
+    struct ime_windows ime_windows = {0};
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 1, EnumThreadWindows( GetCurrentThreadId(), enum_thread_ime_windows, (LPARAM)&ime_windows ) );
+    ok_ne( NULL, ime_windows.ime_hwnd, HWND, "%p" );
+    ok_ne( NULL, ime_windows.ime_ui_hwnd, HWND, "%p" );
+    ok_ret( 0, IsWindowVisible( ime_windows.ime_ui_hwnd ) );
+
+    SetLastError( 0xdeadbeef );
+    ok_ret( 1, ImmSetActiveContext( hwnd, default_himc, TRUE ) );
+    ok_seq( activate_0_seq );
+    ok_ret( 0, GetLastError() );
+    ok_ret( 0, IsWindowVisible( ime_windows.ime_ui_hwnd ) );
+    ok_ret( 1, ImmSetActiveContext( hwnd, default_himc, TRUE ) );
+    ok_seq( activate_0_seq );
+    ok_ret( 1, ImmSetActiveContext( hwnd, default_himc, FALSE ) );
+    ok_seq( deactivate_0_seq );
+
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    ok_eq( 0, ctx->hWnd, HWND, "%p" );
+
+    ok_ret( 1, ImmSetActiveContext( hwnd, himc, FALSE ) );
+    deactivate_1_seq[3].himc = himc;
+    deactivate_1_seq[4].himc = himc;
+    ok_seq( deactivate_1_seq );
+    ok_ret( 1, ImmSetActiveContext( hwnd, himc, TRUE ) );
+    activate_1_seq[0].himc = himc;
+    ok_seq( activate_1_seq );
+
+    ctx->hWnd = (HWND)0xdeadbeef;
+    ok_ret( 1, ImmSetActiveContext( hwnd, himc, FALSE ) );
+    ok_eq( (HWND)0xdeadbeef, ctx->hWnd, HWND, "%p" );
+    deactivate_2_seq[0].himc = himc;
+    ok_seq( deactivate_2_seq );
+
+    ctx->hWnd = 0;
+    ok_ret( 1, ImmSetActiveContext( hwnd, himc, TRUE ) );
+    ok_eq( hwnd, ctx->hWnd, HWND, "%p" );
+    activate_1_seq[0].himc = himc;
+    ok_seq( activate_1_seq );
+
+    ok_eq( default_himc, (HIMC)GetWindowLongPtrW( ime_windows.ime_ui_hwnd, IMMGWL_IMC ), HIMC, "%p" );
+    ok_ret( 1, ImmSetActiveContext( hwnd, himc, TRUE ) );
+    ok_ret( 0, IsWindowVisible( ime_windows.ime_ui_hwnd ) );
+    ok_eq( default_himc, (HIMC)GetWindowLongPtrW( ime_windows.ime_ui_hwnd, IMMGWL_IMC ), HIMC, "%p" );
+
+    ctx->hWnd = 0;
+    ok_eq( default_himc, ImmAssociateContext( hwnd, himc ), HIMC, "%p" );
+    ok_eq( himc, (HIMC)GetWindowLongPtrW( ime_windows.ime_ui_hwnd, IMMGWL_IMC ), HIMC, "%p" );
+    ok_ret( 0, IsWindowVisible( ime_windows.ime_ui_hwnd ) );
+    ok_eq( hwnd, ctx->hWnd, HWND, "%p" );
+
+    ctx->hWnd = (HWND)0xdeadbeef;
+    ok_eq( himc, ImmGetContext( hwnd ), HIMC, "%p" );
+    ok_eq( (HWND)0xdeadbeef, ctx->hWnd, HWND, "%p" );
+    ok_ret( 1, ImmReleaseContext( hwnd, himc ) );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmRequestMessage(void)
+{
+    struct ime_call composition_window_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_REQUEST, .wparam = IMR_COMPOSITIONWINDOW, .lparam = 0/*&comp_form*/}
+        },
+        {0},
+    };
+    struct ime_call candidate_window_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_REQUEST, .wparam = IMR_CANDIDATEWINDOW, .lparam = 0/*&cand_form*/}
+        },
+        {0},
+    };
+    struct ime_call composition_font_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_REQUEST, .wparam = IMR_COMPOSITIONFONT, .lparam = 0/*&log_font*/}
+        },
+        {0},
+    };
+    struct ime_call reconvert_string_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_REQUEST, .wparam = IMR_RECONVERTSTRING, .lparam = 0/*&reconv*/}
+        },
+        {0},
+    };
+    struct ime_call confirm_reconvert_string_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_REQUEST, .wparam = IMR_CONFIRMRECONVERTSTRING, .lparam = 0/*&reconv*/}
+        },
+        {0},
+    };
+    struct ime_call query_char_position_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_REQUEST, .wparam = IMR_QUERYCHARPOSITION, .lparam = 0/*&char_pos*/}
+        },
+        {0},
+    };
+    struct ime_call document_feed_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_REQUEST, .wparam = IMR_DOCUMENTFEED, .lparam = 0/*&reconv*/}
+        },
+        {0},
+    };
+    HKL hkl;
+    COMPOSITIONFORM comp_form = {0};
+    IMECHARPOSITION char_pos = {0};
+    RECONVERTSTRING reconv = {0};
+    CANDIDATEFORM cand_form = {0};
+    LOGFONTW log_font = {0};
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 0, ImmRequestMessageW( default_himc, 0xdeadbeef, 0 ) );
+    todo_wine ok_seq( empty_sequence );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_COMPOSITIONWINDOW, (LPARAM)&comp_form ) );
+    composition_window_seq[0].message.lparam = (LPARAM)&comp_form;
+    ok_seq( composition_window_seq );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_CANDIDATEWINDOW, (LPARAM)&cand_form ) );
+    candidate_window_seq[0].message.lparam = (LPARAM)&cand_form;
+    ok_seq( candidate_window_seq );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_COMPOSITIONFONT, (LPARAM)&log_font ) );
+    composition_font_seq[0].message.lparam = (LPARAM)&log_font;
+    ok_seq( composition_font_seq );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+    todo_wine ok_seq( empty_sequence );
+    reconv.dwSize = sizeof(RECONVERTSTRING);
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_RECONVERTSTRING, (LPARAM)&reconv ) );
+    reconvert_string_seq[0].message.lparam = (LPARAM)&reconv;
+    ok_seq( reconvert_string_seq );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_CONFIRMRECONVERTSTRING, (LPARAM)&reconv ) );
+    confirm_reconvert_string_seq[0].message.lparam = (LPARAM)&reconv;
+    ok_seq( confirm_reconvert_string_seq );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_QUERYCHARPOSITION, (LPARAM)&char_pos ) );
+    query_char_position_seq[0].message.lparam = (LPARAM)&char_pos;
+    ok_seq( query_char_position_seq );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_DOCUMENTFEED, (LPARAM)&reconv ) );
+    document_feed_seq[0].message.lparam = (LPARAM)&reconv;
+    ok_seq( document_feed_seq );
+
+    ok_ret( 0, ImmRequestMessageW( himc, IMR_CANDIDATEWINDOW, (LPARAM)&cand_form ) );
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmSetActiveContext( hwnd, himc, TRUE ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+    ok_ret( 0, ImmRequestMessageW( himc, IMR_CANDIDATEWINDOW, (LPARAM)&cand_form ) );
+    candidate_window_seq[0].message.lparam = (LPARAM)&cand_form;
+    ok_seq( candidate_window_seq );
+    ok_ret( 0, ImmRequestMessageW( default_himc, IMR_CANDIDATEWINDOW, (LPARAM)&cand_form ) );
+    ok_seq( candidate_window_seq );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmGetCandidateList( BOOL unicode )
+{
+    char buffer[512], expect_bufW[512] = {0}, expect_bufA[512] = {0};
+    CANDIDATELIST *cand_list = (CANDIDATELIST *)buffer, *expect_listW, *expect_listA;
+    HKL hkl;
+    CANDIDATEINFO *cand_info;
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+
+    expect_listW = (CANDIDATELIST *)expect_bufW;
+    expect_listW->dwSize = offsetof(CANDIDATELIST, dwOffset[2]) + 32 * sizeof(WCHAR);
+    expect_listW->dwStyle = 0xdeadbeef;
+    expect_listW->dwCount = 2;
+    expect_listW->dwSelection = 3;
+    expect_listW->dwPageStart = 4;
+    expect_listW->dwPageSize = 5;
+    expect_listW->dwOffset[0] = offsetof(CANDIDATELIST, dwOffset[2]) + 2 * sizeof(WCHAR);
+    expect_listW->dwOffset[1] = offsetof(CANDIDATELIST, dwOffset[2]) + 16 * sizeof(WCHAR);
+    wcscpy( (WCHAR *)(expect_bufW + expect_listW->dwOffset[0]), L"Candidate 1" );
+    wcscpy( (WCHAR *)(expect_bufW + expect_listW->dwOffset[1]), L"Candidate 2" );
+
+    expect_listA = (CANDIDATELIST *)expect_bufA;
+    expect_listA->dwSize = offsetof(CANDIDATELIST, dwOffset[2]) + 32;
+    expect_listA->dwStyle = 0xdeadbeef;
+    expect_listA->dwCount = 2;
+    expect_listA->dwSelection = 3;
+    expect_listA->dwPageStart = 4;
+    expect_listA->dwPageSize = 5;
+    expect_listA->dwOffset[0] = offsetof(CANDIDATELIST, dwOffset[2]) + 2;
+    expect_listA->dwOffset[1] = offsetof(CANDIDATELIST, dwOffset[2]) + 16;
+    strcpy( (char *)(expect_bufA + expect_listA->dwOffset[0]), "Candidate 1" );
+    strcpy( (char *)(expect_bufA + expect_listA->dwOffset[1]), "Candidate 2" );
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 0, ImmGetCandidateListW( default_himc, 0, NULL, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, ImmGetCandidateListW( default_himc, 1, NULL, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, ImmGetCandidateListW( default_himc, 0, cand_list, sizeof(buffer) ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 0, ImmGetCandidateListW( himc, 0, cand_list, sizeof(buffer) ) );
+    ok_seq( empty_sequence );
+
+    todo_wine ok_seq( empty_sequence );
+    ctx->hCandInfo = ImmReSizeIMCC( ctx->hCandInfo, sizeof(*cand_info) + sizeof(buffer) );
+    ok( !!ctx->hCandInfo, "ImmReSizeIMCC failed, error %lu\n", GetLastError() );
+
+    cand_info = ImmLockIMCC( ctx->hCandInfo );
+    ok( !!cand_info, "ImmLockIMCC failed, error %lu\n", GetLastError() );
+    cand_info->dwCount = 1;
+    cand_info->dwOffset[0] = sizeof(*cand_info);
+    if (unicode) memcpy( cand_info + 1, expect_bufW, sizeof(expect_bufW) );
+    else memcpy( cand_info + 1, expect_bufA, sizeof(expect_bufA) );
+    ok_ret( 0, ImmUnlockIMCC( ctx->hCandInfo ) );
+
+    ok_ret( (unicode ? 96 : 80), ImmGetCandidateListW( himc, 0, NULL, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, ImmGetCandidateListW( himc, 1, NULL, 0 ) );
+    ok_seq( empty_sequence );
+    memset( buffer, 0xcd, sizeof(buffer) );
+    ok_ret( (unicode ? 96 : 80), ImmGetCandidateListW( himc, 0, cand_list, sizeof(buffer) ) );
+    ok_seq( empty_sequence );
+
+    if (!unicode)
+    {
+        expect_listW->dwSize = offsetof(CANDIDATELIST, dwOffset[2]) + 24 * sizeof(WCHAR);
+        expect_listW->dwOffset[0] = offsetof(CANDIDATELIST, dwOffset[2]);
+        expect_listW->dwOffset[1] = offsetof(CANDIDATELIST, dwOffset[2]) + 12 * sizeof(WCHAR);
+        wcscpy( (WCHAR *)(expect_bufW + expect_listW->dwOffset[0]), L"Candidate 1" );
+        wcscpy( (WCHAR *)(expect_bufW + expect_listW->dwOffset[1]), L"Candidate 2" );
+    }
+    check_candidate_list_( __LINE__, cand_list, expect_listW, TRUE );
+
+    ok_ret( (unicode ? 56 : 64), ImmGetCandidateListA( himc, 0, NULL, 0 ) );
+    ok_seq( empty_sequence );
+    ok_ret( 0, ImmGetCandidateListA( himc, 1, NULL, 0 ) );
+    ok_seq( empty_sequence );
+    memset( buffer, 0xcd, sizeof(buffer) );
+    ok_ret( (unicode ? 56 : 64), ImmGetCandidateListA( himc, 0, cand_list, sizeof(buffer) ) );
+    ok_seq( empty_sequence );
+
+    if (unicode)
+    {
+        expect_listA->dwSize = offsetof(CANDIDATELIST, dwOffset[2]) + 24;
+        expect_listA->dwOffset[0] = offsetof(CANDIDATELIST, dwOffset[2]);
+        expect_listA->dwOffset[1] = offsetof(CANDIDATELIST, dwOffset[2]) + 12;
+        strcpy( (char *)(expect_bufA + expect_listA->dwOffset[0]), "Candidate 1" );
+        strcpy( (char *)(expect_bufA + expect_listA->dwOffset[1]), "Candidate 2" );
+    }
+    check_candidate_list_( __LINE__, cand_list, expect_listA, FALSE );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+cleanup:
+    winetest_pop_context();
+}
+
+static void test_ImmGetCandidateListCount( BOOL unicode )
+{
+    HKL hkl;
+    CANDIDATEINFO *cand_info;
+    INPUTCONTEXT *ctx;
+    DWORD count;
+    HIMC himc;
+    HWND hwnd;
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 144, ImmGetCandidateListCountW( default_himc, &count ) );
+    ok_eq( 0, count, UINT, "%u" );
+    ok_seq( empty_sequence );
+    ok_ret( 144, ImmGetCandidateListCountA( default_himc, &count ) );
+    ok_eq( 0, count, UINT, "%u" );
+    ok_seq( empty_sequence );
+
+    ok_ret( 144, ImmGetCandidateListCountW( himc, &count ) );
+    ok_eq( 0, count, UINT, "%u" );
+    ok_seq( empty_sequence );
+    ok_ret( 144, ImmGetCandidateListCountA( himc, &count ) );
+    ok_eq( 0, count, UINT, "%u" );
+    ok_seq( empty_sequence );
+
+    cand_info = ImmLockIMCC( ctx->hCandInfo );
+    ok( !!cand_info, "ImmLockIMCC failed, error %lu\n", GetLastError() );
+    cand_info->dwCount = 1;
+    ok_ret( 0, ImmUnlockIMCC( ctx->hCandInfo ) );
+
+    todo_wine_if(!unicode)
+    ok_ret( (unicode ? 144 : 172), ImmGetCandidateListCountW( himc, &count ) );
+    ok_eq( 1, count, UINT, "%u" );
+    ok_seq( empty_sequence );
+    todo_wine_if(unicode)
+    ok_ret( (unicode ? 172 : 144), ImmGetCandidateListCountA( himc, &count ) );
+    ok_eq( 1, count, UINT, "%u" );
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+cleanup:
+    winetest_pop_context();
+}
+
+static void test_ImmGetCandidateWindow(void)
+{
+    HKL hkl;
+    const CANDIDATEFORM expect_form =
+    {
+        .dwIndex = 0xdeadbeef,
+        .dwStyle = 0xfeedcafe,
+        .ptCurrentPos = {.x = 123, .y = 456},
+        .rcArea = {.left = 1, .top = 2, .right = 3, .bottom = 4},
+    };
+    CANDIDATEFORM cand_form;
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    memset( &cand_form, 0xcd, sizeof(cand_form) );
+    ok_ret( 0, ImmGetCandidateWindow( default_himc, 0, &cand_form ) );
+    ok_eq( 0xcdcdcdcd, cand_form.dwIndex, UINT, "%u" );
+    ok_ret( 0, ImmGetCandidateWindow( default_himc, 1, &cand_form ) );
+    ok_eq( 0xcdcdcdcd, cand_form.dwIndex, UINT, "%u" );
+    ok_ret( 0, ImmGetCandidateWindow( default_himc, 2, &cand_form ) );
+    ok_eq( 0xcdcdcdcd, cand_form.dwIndex, UINT, "%u" );
+    ok_ret( 0, ImmGetCandidateWindow( default_himc, 3, &cand_form ) );
+    ok_eq( 0xcdcdcdcd, cand_form.dwIndex, UINT, "%u" );
+    ok_ret( 1, ImmGetCandidateWindow( default_himc, 4, &cand_form ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 0, ImmGetCandidateWindow( himc, 0, &cand_form ) );
+    ok_seq( empty_sequence );
+
+    ok_seq( empty_sequence );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    ctx->cfCandForm[0] = expect_form;
+
+    ok_ret( 1, ImmGetCandidateWindow( himc, 0, &cand_form ) );
+    check_candidate_form( &cand_form, &expect_form );
+    ok_seq( empty_sequence );
+
+    ok_seq( empty_sequence );
+    ok( !!ctx, "ImmLockIMC failed, error %lu\n", GetLastError() );
+    ctx->cfCandForm[0].dwIndex = -1;
+
+    ok_ret( 0, ImmGetCandidateWindow( himc, 0, &cand_form ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmGetCompositionString( BOOL unicode )
+{
+    static COMPOSITIONSTRING expect_string_empty = {.dwSize = sizeof(COMPOSITIONSTRING)};
+    static COMPOSITIONSTRING expect_stringA =
+    {
+        .dwSize = 176,
+        .dwCompReadAttrLen = 8,
+        .dwCompReadAttrOffset = 116,
+        .dwCompReadClauseLen = 8,
+        .dwCompReadClauseOffset = 108,
+        .dwCompReadStrLen = 8,
+        .dwCompReadStrOffset = 100,
+        .dwCompAttrLen = 4,
+        .dwCompAttrOffset = 136,
+        .dwCompClauseLen = 8,
+        .dwCompClauseOffset = 128,
+        .dwCompStrLen = 4,
+        .dwCompStrOffset = 124,
+        .dwCursorPos = 3,
+        .dwDeltaStart = 1,
+        .dwResultReadClauseLen = 8,
+        .dwResultReadClauseOffset = 150,
+        .dwResultReadStrLen = 10,
+        .dwResultReadStrOffset = 140,
+        .dwResultClauseLen = 8,
+        .dwResultClauseOffset = 164,
+        .dwResultStrLen = 6,
+        .dwResultStrOffset = 158,
+        .dwPrivateSize = 4,
+        .dwPrivateOffset = 172,
+    };
+    static const COMPOSITIONSTRING expect_stringW =
+    {
+        .dwSize = 204,
+        .dwCompReadAttrLen = 8,
+        .dwCompReadAttrOffset = 124,
+        .dwCompReadClauseLen = 8,
+        .dwCompReadClauseOffset = 116,
+        .dwCompReadStrLen = 8,
+        .dwCompReadStrOffset = 100,
+        .dwCompAttrLen = 4,
+        .dwCompAttrOffset = 148,
+        .dwCompClauseLen = 8,
+        .dwCompClauseOffset = 140,
+        .dwCompStrLen = 4,
+        .dwCompStrOffset = 132,
+        .dwCursorPos = 3,
+        .dwDeltaStart = 1,
+        .dwResultReadClauseLen = 8,
+        .dwResultReadClauseOffset = 172,
+        .dwResultReadStrLen = 10,
+        .dwResultReadStrOffset = 152,
+        .dwResultClauseLen = 8,
+        .dwResultClauseOffset = 192,
+        .dwResultStrLen = 6,
+        .dwResultStrOffset = 180,
+        .dwPrivateSize = 4,
+        .dwPrivateOffset = 200,
+    };
+    static const UINT gcs_indexes[] =
+    {
+        GCS_COMPREADSTR,
+        GCS_COMPREADATTR,
+        GCS_COMPREADCLAUSE,
+        GCS_COMPSTR,
+        GCS_COMPATTR,
+        GCS_COMPCLAUSE,
+        GCS_CURSORPOS,
+        GCS_DELTASTART,
+        GCS_RESULTREADSTR,
+        GCS_RESULTREADCLAUSE,
+        GCS_RESULTSTR,
+        GCS_RESULTCLAUSE,
+    };
+    static const UINT scs_indexes[] =
+    {
+        SCS_SETSTR,
+        SCS_CHANGEATTR,
+        SCS_CHANGECLAUSE,
+    };
+    static const UINT expect_retW[ARRAY_SIZE(gcs_indexes)] = {16, 8, 8, 8, 4, 8, 3, 1, 20, 8, 12, 8};
+    static const UINT expect_retA[ARRAY_SIZE(gcs_indexes)] = {8, 8, 8, 4, 4, 8, 3, 1, 10, 8, 6, 8};
+    HKL hkl;
+    COMPOSITIONSTRING *string;
+    char buffer[1024];
+    INPUTCONTEXT *old_ctx, *ctx;
+    const void *str;
+    HIMCC old_himcc;
+    UINT i, len;
+    BYTE *dst;
+    HIMC himc;
+    HWND hwnd;
+
+    SET_ENABLE( ImeSetCompositionString, TRUE );
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    memset( buffer, 0xcd, sizeof(buffer) );
+    todo_wine ok_ret( -2, ImmGetCompositionStringW( default_himc, GCS_COMPSTR | GCS_COMPATTR, buffer, sizeof(buffer) ) );
+    memset( buffer, 0xcd, sizeof(buffer) );
+    todo_wine ok_ret( -2, ImmGetCompositionStringA( default_himc, GCS_COMPSTR | GCS_COMPATTR, buffer, sizeof(buffer) ) );
+
+    for (i = 0; i < ARRAY_SIZE(gcs_indexes); ++i)
+    {
+        memset( buffer, 0xcd, sizeof(buffer) );
+        ok_ret( 0, ImmGetCompositionStringW( default_himc, gcs_indexes[i], buffer, sizeof(buffer) ) );
+        memset( buffer, 0xcd, sizeof(buffer) );
+        ok_ret( 0, ImmGetCompositionStringA( default_himc, gcs_indexes[i], buffer, sizeof(buffer) ) );
+
+        memset( buffer, 0xcd, sizeof(buffer) );
+        ok_ret( 0, ImmGetCompositionStringW( himc, gcs_indexes[i], buffer, sizeof(buffer) ) );
+        memset( buffer, 0xcd, sizeof(buffer) );
+        ok_ret( 0, ImmGetCompositionStringA( himc, gcs_indexes[i], buffer, sizeof(buffer) ) );
+    }
+
+    ctx->hCompStr = ImmReSizeIMCC( ctx->hCompStr, unicode ? expect_stringW.dwSize : expect_stringA.dwSize );
+    string = ImmLockIMCC( ctx->hCompStr );
+    ok( !!string, "ImmLockIMCC failed, error %lu\n", GetLastError() );
+    check_composition_string( string, &expect_string_empty );
+
+    string->dwCursorPos = 3;
+    string->dwDeltaStart = 1;
+
+    if (unicode) str = L"ReadComp";
+    else str = "ReadComp";
+    len = unicode ? wcslen( str ) : strlen( str );
+
+    string->dwCompReadStrLen = len;
+    string->dwCompReadStrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompReadStrOffset;
+    memcpy( dst, str, len * (unicode ? sizeof(WCHAR) : 1) );
+    string->dwSize += len * (unicode ? sizeof(WCHAR) : 1);
+
+    string->dwCompReadClauseLen = 2 * sizeof(DWORD);
+    string->dwCompReadClauseOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompReadClauseOffset;
+    *(DWORD *)(dst + 0 * sizeof(DWORD)) = 0;
+    *(DWORD *)(dst + 1 * sizeof(DWORD)) = len;
+    string->dwSize += 2 * sizeof(DWORD);
+
+    string->dwCompReadAttrLen = len;
+    string->dwCompReadAttrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompReadAttrOffset;
+    memset( dst, ATTR_INPUT, len );
+    string->dwSize += len;
+
+    if (unicode) str = L"Comp";
+    else str = "Comp";
+    len = unicode ? wcslen( str ) : strlen( str );
+
+    string->dwCompStrLen = len;
+    string->dwCompStrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompStrOffset;
+    memcpy( dst, str, len * (unicode ? sizeof(WCHAR) : 1) );
+    string->dwSize += len * (unicode ? sizeof(WCHAR) : 1);
+
+    string->dwCompClauseLen = 2 * sizeof(DWORD);
+    string->dwCompClauseOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompClauseOffset;
+    *(DWORD *)(dst + 0 * sizeof(DWORD)) = 0;
+    *(DWORD *)(dst + 1 * sizeof(DWORD)) = len;
+    string->dwSize += 2 * sizeof(DWORD);
+
+    string->dwCompAttrLen = len;
+    string->dwCompAttrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwCompAttrOffset;
+    memset( dst, ATTR_INPUT, len );
+    string->dwSize += len;
+
+    if (unicode) str = L"ReadResult";
+    else str = "ReadResult";
+    len = unicode ? wcslen( str ) : strlen( str );
+
+    string->dwResultReadStrLen = len;
+    string->dwResultReadStrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwResultReadStrOffset;
+    memcpy( dst, str, len * (unicode ? sizeof(WCHAR) : 1) );
+    string->dwSize += len * (unicode ? sizeof(WCHAR) : 1);
+
+    string->dwResultReadClauseLen = 2 * sizeof(DWORD);
+    string->dwResultReadClauseOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwResultReadClauseOffset;
+    *(DWORD *)(dst + 0 * sizeof(DWORD)) = 0;
+    *(DWORD *)(dst + 1 * sizeof(DWORD)) = len;
+    string->dwSize += 2 * sizeof(DWORD);
+
+    if (unicode) str = L"Result";
+    else str = "Result";
+    len = unicode ? wcslen( str ) : strlen( str );
+
+    string->dwResultStrLen = len;
+    string->dwResultStrOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwResultStrOffset;
+    memcpy( dst, str, len * (unicode ? sizeof(WCHAR) : 1) );
+    string->dwSize += len * (unicode ? sizeof(WCHAR) : 1);
+
+    string->dwResultClauseLen = 2 * sizeof(DWORD);
+    string->dwResultClauseOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwResultClauseOffset;
+    *(DWORD *)(dst + 0 * sizeof(DWORD)) = 0;
+    *(DWORD *)(dst + 1 * sizeof(DWORD)) = len;
+    string->dwSize += 2 * sizeof(DWORD);
+
+    string->dwPrivateSize = 4;
+    string->dwPrivateOffset = string->dwSize;
+    dst = (BYTE *)string + string->dwPrivateOffset;
+    memset( dst, 0xa5, string->dwPrivateSize );
+    string->dwSize += 4;
+
+    check_composition_string( string, unicode ? &expect_stringW : &expect_stringA );
+    ok_ret( 0, ImmUnlockIMCC( ctx->hCompStr ) );
+    old_himcc = ctx->hCompStr;
+
+    for (i = 0; i < ARRAY_SIZE(gcs_indexes); ++i)
+    {
+        UINT_PTR expect;
+
+        winetest_push_context( "%u", i );
+
+        memset( buffer, 0xcd, sizeof(buffer) );
+        expect = expect_retW[i];
+        ok_ret( expect, ImmGetCompositionStringW( himc, gcs_indexes[i], buffer, sizeof(buffer) ) );
+        memset( buffer + expect, 0, 4 );
+
+        if (i == 0) ok_wcs( L"ReadComp", (WCHAR *)buffer );
+        else if (i == 3) ok_wcs( L"Comp", (WCHAR *)buffer );
+        else if (i == 8) ok_wcs( L"ReadResult", (WCHAR *)buffer );
+        else if (i == 10) ok_wcs( L"Result", (WCHAR *)buffer );
+        else if (i != 6 && i != 7) ok_wcs( L"", (WCHAR *)buffer );
+
+        memset( buffer, 0xcd, sizeof(buffer) );
+        expect = expect_retA[i];
+        ok_ret( expect, ImmGetCompositionStringA( himc, gcs_indexes[i], buffer, sizeof(buffer) ) );
+        memset( buffer + expect, 0, 4 );
+
+        if (i == 0) ok_str( "ReadComp", (char *)buffer );
+        else if (i == 3) ok_str( "Comp", (char *)buffer );
+        else if (i == 8) ok_str( "ReadResult", (char *)buffer );
+        else if (i == 10) ok_str( "Result", (char *)buffer );
+        else if (i != 6 && i != 7) ok_str( "", (char *)buffer );
+
+        winetest_pop_context();
+    }
+
+    for (i = 0; i < ARRAY_SIZE(gcs_indexes); ++i)
+    {
+        winetest_push_context( "%u", i );
+        ok_ret( 0, ImmSetCompositionStringW( himc, gcs_indexes[i], buffer, sizeof(buffer), NULL, 0 ) );
+        ok_ret( 0, ImmSetCompositionStringA( himc, gcs_indexes[i], buffer, sizeof(buffer), NULL, 0 ) );
+        winetest_pop_context();
+    }
+    ok_ret( 0, ImmSetCompositionStringW( himc, SCS_SETSTR | SCS_CHANGEATTR, buffer, sizeof(buffer), NULL, 0 ) );
+    ok_ret( 0, ImmSetCompositionStringA( himc, SCS_SETSTR | SCS_CHANGEATTR, buffer, sizeof(buffer), NULL, 0 ) );
+    ok_ret( 0, ImmSetCompositionStringW( himc, SCS_CHANGECLAUSE | SCS_CHANGEATTR, buffer, sizeof(buffer), NULL, 0 ) );
+    ok_ret( 0, ImmSetCompositionStringA( himc, SCS_CHANGECLAUSE | SCS_CHANGEATTR, buffer, sizeof(buffer), NULL, 0 ) );
+
+    for (i = 0; i < ARRAY_SIZE(scs_indexes); ++i)
+    {
+        winetest_push_context( "%u", i );
+
+        if (scs_indexes[i] == SCS_CHANGECLAUSE)
+        {
+            memset( buffer, 0, sizeof(buffer) );
+            *((DWORD *)buffer + 1) = 1;
+            len = 2 * sizeof(DWORD);
+        }
+        else if (scs_indexes[i] == SCS_CHANGEATTR)
+        {
+            memset( buffer, 0xcd, sizeof(buffer) );
+            len = expect_stringW.dwCompAttrLen;
+        }
+        else if (scs_indexes[i] == SCS_SETSTR)
+        {
+            wcscpy( (WCHAR *)buffer, L"CompString" );
+            len = 11 * sizeof(WCHAR);
+        }
+
+        todo_ImeSetCompositionString = !unicode;
+        SET_EXPECT( ImeSetCompositionString );
+        ok_ret( 1, ImmSetCompositionStringW( himc, scs_indexes[i], buffer, len, NULL, 0 ) );
+        CHECK_CALLED( ImeSetCompositionString );
+        todo_ImeSetCompositionString = FALSE;
+        ok_seq( empty_sequence );
+
+        string = ImmLockIMCC( ctx->hCompStr );
+        ok_ne( NULL, string, COMPOSITIONSTRING *, "%p" );
+        check_composition_string( string, unicode ? &expect_stringW : &expect_stringA );
+        ok_ret( 0, ImmUnlockIMCC( ctx->hCompStr ) );
+
+        if (scs_indexes[i] == SCS_CHANGECLAUSE)
+        {
+            memset( buffer, 0, sizeof(buffer) );
+            *((DWORD *)buffer + 1) = 1;
+            len = 2 * sizeof(DWORD);
+        }
+        else if (scs_indexes[i] == SCS_CHANGEATTR)
+        {
+            memset( buffer, 0xcd, sizeof(buffer) );
+            len = expect_stringA.dwCompAttrLen;
+        }
+        else if (scs_indexes[i] == SCS_SETSTR)
+        {
+            strcpy( buffer, "CompString" );
+            len = 11;
+        }
+
+        todo_ImeSetCompositionString = unicode;
+        SET_EXPECT( ImeSetCompositionString );
+        ok_ret( 1, ImmSetCompositionStringA( himc, scs_indexes[i], buffer, len, NULL, 0 ) );
+        CHECK_CALLED( ImeSetCompositionString );
+        todo_ImeSetCompositionString = FALSE;
+        ok_seq( empty_sequence );
+
+        string = ImmLockIMCC( ctx->hCompStr );
+        ok_ne( NULL, string, COMPOSITIONSTRING *, "%p" );
+        check_composition_string( string, unicode ? &expect_stringW : &expect_stringA );
+        ok_ret( 0, ImmUnlockIMCC( ctx->hCompStr ) );
+
+        winetest_pop_context();
+    }
+    ok_seq( empty_sequence );
+
+    old_ctx = ctx;
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+
+    /* composition strings are kept between IME selections */
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ctx = ImmLockIMC( himc );
+    ok_eq( old_ctx, ctx, INPUTCONTEXT *, "%p" );
+    ok_eq( old_himcc, ctx->hCompStr, HIMCC, "%p" );
+    string = ImmLockIMCC( ctx->hCompStr );
+    ok_ne( NULL, string, COMPOSITIONSTRING *, "%p" );
+    *string = expect_string_empty;
+    ok_ret( 0, ImmUnlockIMCC( ctx->hCompStr ) );
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_eq( old_himcc, ctx->hCompStr, HIMCC, "%p" );
+    check_composition_string( string, &expect_string_empty );
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_eq( old_himcc, ctx->hCompStr, HIMCC, "%p" );
+    check_composition_string( string, &expect_string_empty );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+cleanup:
+    winetest_pop_context();
+    SET_ENABLE( ImeSetCompositionString, FALSE );
+}
+
+static void test_ImmSetCompositionWindow(void)
+{
+    struct ime_call set_composition_window_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCOMPOSITIONWINDOW},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCOMPOSITIONWINDOW},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCOMPOSITIONWINDOW},
+        },
+        {0},
+    };
+    struct ime_call set_composition_window_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCOMPOSITIONWINDOW},
+        },
+        {0},
+    };
+    COMPOSITIONFORM comp_form, expect_form =
+    {
+        .dwStyle = 0xfeedcafe,
+        .ptCurrentPos = {.x = 123, .y = 456},
+        .rcArea = {.left = 1, .top = 2, .right = 3, .bottom = 4},
+    };
+    struct ime_windows ime_windows = {0};
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+    HKL hkl;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    set_composition_window_0_seq[0].himc = himc;
+    set_composition_window_1_seq[0].himc = himc;
+
+    ok_ret( 1, EnumThreadWindows( GetCurrentThreadId(), enum_thread_ime_windows, (LPARAM)&ime_windows ) );
+    ok_ne( NULL, ime_windows.ime_hwnd, HWND, "%p" );
+    ok_ne( NULL, ime_windows.ime_ui_hwnd, HWND, "%p" );
+
+    ctx->cfCompForm = expect_form;
+    ctx->fdwInit = ~INIT_COMPFORM;
+    memset( &comp_form, 0xcd, sizeof(comp_form) );
+    ok_ret( 0, ImmGetCompositionWindow( himc, &comp_form ) );
+    ok_eq( 0xcdcdcdcd, comp_form.dwStyle, UINT, "%#x" );
+    ctx->fdwInit = INIT_COMPFORM;
+    ok_ret( 1, ImmGetCompositionWindow( himc, &comp_form ) );
+    check_composition_form( &comp_form, &expect_form );
+    ok_seq( empty_sequence );
+    ok_ret( 0, IsWindowVisible( ime_windows.ime_ui_hwnd ) );
+
+    ok_ret( 0, ShowWindow( ime_windows.ime_ui_hwnd, SW_SHOWNOACTIVATE ) );
+    process_messages();
+    ok_seq( empty_sequence );
+    check_WM_SHOWWINDOW = TRUE;
+
+    ctx->hWnd = hwnd;
+    ctx->fdwInit = 0;
+    memset( &comp_form, 0xcd, sizeof(comp_form) );
+    ok_ret( 1, ImmSetCompositionWindow( himc, &comp_form ) );
+    process_messages();
+    ok_seq( set_composition_window_0_seq );
+    ok_eq( INIT_COMPFORM, ctx->fdwInit, UINT, "%u" );
+    check_composition_form( &ctx->cfCompForm, &comp_form );
+    ok_ret( 1, IsWindowVisible( ime_windows.ime_ui_hwnd ) );
+    check_WM_SHOWWINDOW = FALSE;
+
+    ShowWindow( ime_windows.ime_ui_hwnd, SW_HIDE );
+    process_messages();
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmSetCompositionWindow( himc, &expect_form ) );
+    ok_seq( set_composition_window_0_seq );
+    check_composition_form( &ctx->cfCompForm, &expect_form );
+
+    ctx->cfCompForm = expect_form;
+    ok_ret( 1, ImmGetCompositionWindow( himc, &comp_form ) );
+    check_composition_form( &comp_form, &expect_form );
+    ok_seq( empty_sequence );
+
+    ctx->hWnd = 0;
+    memset( &comp_form, 0xcd, sizeof(comp_form) );
+    ok_ret( 1, ImmSetCompositionWindow( himc, &comp_form ) );
+    ok_seq( set_composition_window_1_seq );
+    check_composition_form( &ctx->cfCompForm, &comp_form );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmSetStatusWindowPos(void)
+{
+    struct ime_call set_status_window_pos_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETSTATUSWINDOWPOS},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETSTATUSWINDOWPOS},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETSTATUSWINDOWPOS},
+        },
+        {0},
+    };
+    struct ime_call set_status_window_pos_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETSTATUSWINDOWPOS},
+        },
+        {0},
+    };
+    INPUTCONTEXT *ctx;
+    POINT pos;
+    HIMC himc;
+    HWND hwnd;
+    HKL hkl;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    set_status_window_pos_0_seq[0].himc = himc;
+    set_status_window_pos_1_seq[0].himc = himc;
+
+    memset( &pos, 0xcd, sizeof(pos) );
+    ctx->ptStatusWndPos.x = 0xdeadbeef;
+    ctx->ptStatusWndPos.y = 0xfeedcafe;
+    ctx->fdwInit = ~INIT_STATUSWNDPOS;
+    ok_ret( 0, ImmGetStatusWindowPos( himc, &pos ) );
+    ok_eq( 0xcdcdcdcd, pos.x, UINT, "%u" );
+    ok_eq( 0xcdcdcdcd, pos.y, UINT, "%u" );
+    ctx->fdwInit = INIT_STATUSWNDPOS;
+    ok_ret( 1, ImmGetStatusWindowPos( himc, &pos ) );
+    ok_eq( 0xdeadbeef, pos.x, UINT, "%u" );
+    ok_eq( 0xfeedcafe, pos.y, UINT, "%u" );
+    ok_seq( empty_sequence );
+
+    pos.x = 123;
+    pos.y = 456;
+    ctx->hWnd = hwnd;
+    ctx->fdwInit = 0;
+    ok_ret( 1, ImmSetStatusWindowPos( himc, &pos ) );
+    ok_seq( set_status_window_pos_0_seq );
+    ok_eq( INIT_STATUSWNDPOS, ctx->fdwInit, UINT, "%u" );
+
+    ok_ret( 1, ImmSetStatusWindowPos( himc, &pos ) );
+    ok_seq( set_status_window_pos_0_seq );
+    ok_ret( 1, ImmGetStatusWindowPos( himc, &pos ) );
+    ok_eq( 123, pos.x, UINT, "%u" );
+    ok_eq( 123, ctx->ptStatusWndPos.x, UINT, "%u" );
+    ok_eq( 456, pos.y, UINT, "%u" );
+    ok_eq( 456, ctx->ptStatusWndPos.y, UINT, "%u" );
+    ok_seq( empty_sequence );
+
+    ctx->hWnd = 0;
+    ok_ret( 1, ImmSetStatusWindowPos( himc, &pos ) );
+    ok_seq( set_status_window_pos_1_seq );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmSetCompositionFont( BOOL unicode )
+{
+    struct ime_call set_composition_font_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCOMPOSITIONFONT},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCOMPOSITIONFONT},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCOMPOSITIONFONT},
+        },
+        {0},
+    };
+    struct ime_call set_composition_font_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCOMPOSITIONFONT},
+        },
+        {0},
+    };
+    LOGFONTW fontW, expect_fontW =
+    {
+        .lfHeight = 1,
+        .lfWidth = 2,
+        .lfEscapement = 3,
+        .lfOrientation = 4,
+        .lfWeight = 5,
+        .lfItalic = 6,
+        .lfUnderline = 7,
+        .lfStrikeOut = 8,
+        .lfCharSet = 8,
+        .lfOutPrecision = 10,
+        .lfClipPrecision = 11,
+        .lfQuality = 12,
+        .lfPitchAndFamily = 13,
+        .lfFaceName = L"FontFace",
+    };
+    LOGFONTA fontA, expect_fontA =
+    {
+        .lfHeight = 1,
+        .lfWidth = 2,
+        .lfEscapement = 3,
+        .lfOrientation = 4,
+        .lfWeight = 5,
+        .lfItalic = 6,
+        .lfUnderline = 7,
+        .lfStrikeOut = 8,
+        .lfCharSet = 8,
+        .lfOutPrecision = 10,
+        .lfClipPrecision = 11,
+        .lfQuality = 12,
+        .lfPitchAndFamily = 13,
+        .lfFaceName = "FontFace",
+    };
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+    HKL hkl;
+
+    winetest_push_context( unicode ? "unicode" : "ansi" );
+
+    /* IME_PROP_END_UNLOAD for the IME to unload / reload. */
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD;
+    if (unicode) ime_info.fdwProperty |= IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    set_composition_font_0_seq[0].himc = himc;
+    set_composition_font_1_seq[0].himc = himc;
+
+    memset( &fontW, 0xcd, sizeof(fontW) );
+    memset( &fontA, 0xcd, sizeof(fontA) );
+
+    if (unicode) ctx->lfFont.W = expect_fontW;
+    else ctx->lfFont.A = expect_fontA;
+    ctx->fdwInit = ~INIT_LOGFONT;
+    ok_ret( 0, ImmGetCompositionFontW( himc, &fontW ) );
+    ok_ret( 0, ImmGetCompositionFontA( himc, &fontA ) );
+    ctx->fdwInit = INIT_LOGFONT;
+    ok_ret( 1, ImmGetCompositionFontW( himc, &fontW ) );
+    check_logfont_w( &fontW, &expect_fontW );
+    ok_ret( 1, ImmGetCompositionFontA( himc, &fontA ) );
+    check_logfont_a( &fontA, &expect_fontA );
+
+    ctx->hWnd = hwnd;
+    ctx->fdwInit = 0;
+    memset( &ctx->lfFont, 0xcd, sizeof(ctx->lfFont) );
+    ok_ret( 1, ImmSetCompositionFontW( himc, &expect_fontW ) );
+    ok_eq( INIT_LOGFONT, ctx->fdwInit, UINT, "%u" );
+    ok_seq( set_composition_font_0_seq );
+    ok_ret( 1, ImmSetCompositionFontW( himc, &expect_fontW ) );
+    ok_seq( set_composition_font_0_seq );
+    if (unicode) check_logfont_w( &ctx->lfFont.W, &expect_fontW );
+    else check_logfont_a( &ctx->lfFont.A, &expect_fontA );
+
+    ok_ret( 1, ImmGetCompositionFontW( himc, &fontW ) );
+    check_logfont_w( &fontW, &expect_fontW );
+    ok_ret( 1, ImmGetCompositionFontA( himc, &fontA ) );
+    check_logfont_a( &fontA, &expect_fontA );
+
+    ctx->hWnd = hwnd;
+    ctx->fdwInit = 0;
+    memset( &ctx->lfFont, 0xcd, sizeof(ctx->lfFont) );
+    ok_ret( 1, ImmSetCompositionFontA( himc, &expect_fontA ) );
+    ok_eq( INIT_LOGFONT, ctx->fdwInit, UINT, "%u" );
+    ok_seq( set_composition_font_0_seq );
+    ok_ret( 1, ImmSetCompositionFontA( himc, &expect_fontA ) );
+    ok_seq( set_composition_font_0_seq );
+    if (unicode) check_logfont_w( &ctx->lfFont.W, &expect_fontW );
+    else check_logfont_a( &ctx->lfFont.A, &expect_fontA );
+
+    ok_ret( 1, ImmGetCompositionFontW( himc, &fontW ) );
+    check_logfont_w( &fontW, &expect_fontW );
+    ok_ret( 1, ImmGetCompositionFontA( himc, &fontA ) );
+    check_logfont_a( &fontA, &expect_fontA );
+
+    ctx->hWnd = 0;
+    ok_ret( 1, ImmSetCompositionFontW( himc, &expect_fontW ) );
+    ok_seq( set_composition_font_1_seq );
+    ok_ret( 1, ImmSetCompositionFontA( himc, &expect_fontA ) );
+    ok_seq( set_composition_font_1_seq );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+cleanup:
+    winetest_pop_context();
+}
+
+static void test_ImmSetCandidateWindow(void)
+{
+    struct ime_call set_candidate_window_0_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCANDIDATEPOS},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCANDIDATEPOS, .lparam = 4},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_NOTIFY, .wparam = IMN_SETCANDIDATEPOS, .lparam = 4},
+        },
+        {0},
+    };
+    struct ime_call set_candidate_window_1_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/,
+            .func = IME_NOTIFY, .notify = {.action = NI_CONTEXTUPDATED, .index = 0, .value = IMC_SETCANDIDATEPOS},
+        },
+        {0},
+    };
+    CANDIDATEFORM cand_form, expect_form =
+    {
+        .dwIndex = 2, .dwStyle = 0xfeedcafe,
+        .ptCurrentPos = {.x = 123, .y = 456},
+        .rcArea = {.left = 1, .top = 2, .right = 3, .bottom = 4},
+    };
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+    HKL hkl;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    set_candidate_window_0_seq[0].himc = himc;
+    set_candidate_window_1_seq[0].himc = himc;
+
+    ctx->cfCandForm[1] = expect_form;
+    ctx->cfCandForm[2] = expect_form;
+    ctx->fdwInit = 0;
+    memset( &cand_form, 0xcd, sizeof(cand_form) );
+    ok_ret( 0, ImmGetCandidateWindow( himc, 0, &cand_form ) );
+    ok_eq( 0xcdcdcdcd, cand_form.dwStyle, UINT, "%#x" );
+    ok_ret( 1, ImmGetCandidateWindow( himc, 1, &cand_form ) );
+    check_candidate_form( &cand_form, &expect_form );
+    ok_ret( 1, ImmGetCandidateWindow( himc, 2, &cand_form ) );
+    check_candidate_form( &cand_form, &expect_form );
+    ok_seq( empty_sequence );
+
+    ctx->hWnd = hwnd;
+    memset( &cand_form, 0xcd, sizeof(cand_form) );
+    cand_form.dwIndex = 2;
+    ok_ret( 1, ImmSetCandidateWindow( himc, &cand_form ) );
+    ok_seq( set_candidate_window_0_seq );
+    check_candidate_form( &ctx->cfCandForm[2], &cand_form );
+    ok_eq( 0, ctx->fdwInit, UINT, "%u" );
+
+    ok_ret( 1, ImmSetCandidateWindow( himc, &expect_form ) );
+    ok_seq( set_candidate_window_0_seq );
+    check_candidate_form( &ctx->cfCandForm[2], &expect_form );
+
+    ctx->hWnd = 0;
+    memset( &cand_form, 0xcd, sizeof(cand_form) );
+    cand_form.dwIndex = 2;
+    ok_ret( 1, ImmSetCandidateWindow( himc, &cand_form ) );
+    ok_seq( set_candidate_window_1_seq );
+    check_candidate_form( &ctx->cfCandForm[2], &cand_form );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmGenerateMessage(void)
+{
+    const struct ime_call generate_sequence[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_TEST_WIN, .message = {.msg = WM_IME_COMPOSITION, .wparam = 0, .lparam = GCS_COMPSTR},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc,
+            .func = MSG_IME_UI, .message = {.msg = WM_IME_COMPOSITION, .wparam = 0, .lparam = GCS_COMPSTR},
+        },
+        {0},
+    };
+    TRANSMSG *msgs, *tmp_msgs;
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HWND hwnd;
+    HKL hkl;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+
+    if (!(hkl = wineime_hkl)) return;
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    todo_wine ok_ret( 4, ImmGetIMCCSize( ctx->hMsgBuf ) );
+    ctx->hMsgBuf = ImmReSizeIMCC( ctx->hMsgBuf, sizeof(*msgs) );
+    ok_ne( NULL, ctx->hMsgBuf, HIMCC, "%p" );
+
+    msgs = ImmLockIMCC( ctx->hMsgBuf );
+    ok_ne( NULL, msgs, TRANSMSG *, "%p" );
+    msgs[0].message = WM_IME_COMPOSITION;
+    msgs[0].wParam = 0;
+    msgs[0].lParam = GCS_COMPSTR;
+    ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
+
+    ctx->hWnd = 0;
+    ctx->dwNumMsgBuf = 0;
+    ok_ret( 1, ImmGenerateMessage( himc ) );
+    ok_seq( empty_sequence );
+    ok_ret( sizeof(*msgs), ImmGetIMCCSize( ctx->hMsgBuf ) );
+    tmp_msgs = ImmLockIMCC( ctx->hMsgBuf );
+    ok_eq( msgs, tmp_msgs, TRANSMSG *, "%p" );
+    ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
+
+    ctx->dwNumMsgBuf = 1;
+    ok_ret( 1, ImmGenerateMessage( himc ) );
+    ok_seq( empty_sequence );
+    ok_eq( 0, ctx->dwNumMsgBuf, UINT, "%u" );
+    ok_ret( sizeof(*msgs), ImmGetIMCCSize( ctx->hMsgBuf ) );
+    tmp_msgs = ImmLockIMCC( ctx->hMsgBuf );
+    ok_eq( msgs, tmp_msgs, TRANSMSG *, "%p" );
+    ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
+
+    ctx->hWnd = hwnd;
+    ctx->dwNumMsgBuf = 0;
+    ok_ret( 1, ImmGenerateMessage( himc ) );
+    ok_seq( empty_sequence );
+    ok_ret( sizeof(*msgs), ImmGetIMCCSize( ctx->hMsgBuf ) );
+    tmp_msgs = ImmLockIMCC( ctx->hMsgBuf );
+    ok_eq( msgs, tmp_msgs, TRANSMSG *, "%p" );
+    ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
+
+    ctx->dwNumMsgBuf = 1;
+    ok_ret( 1, ImmGenerateMessage( himc ) );
+    ok_seq( generate_sequence );
+    ok_eq( 0, ctx->dwNumMsgBuf, UINT, "%u" );
+    ok_ret( sizeof(*msgs), ImmGetIMCCSize( ctx->hMsgBuf ) );
+    tmp_msgs = ImmLockIMCC( ctx->hMsgBuf );
+    ok_eq( msgs, tmp_msgs, TRANSMSG *, "%p" );
+    ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
+
+    tmp_msgs = ImmLockIMCC( ctx->hMsgBuf );
+    ok_eq( msgs, tmp_msgs, TRANSMSG *, "%p" );
+    ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_ImmTranslateMessage( BOOL kbd_char_first )
+{
+    const struct ime_call process_key_seq[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc, .func = IME_PROCESS_KEY,
+            .process_key = {.vkey = 'Q', .lparam = MAKELONG(2, 0x10)},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc, .func = IME_PROCESS_KEY,
+            .process_key = {.vkey = 'Q', .lparam = MAKELONG(2, 0xc010)},
+        },
+        {0},
+    };
+    const struct ime_call to_ascii_ex_0[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc, .func = IME_TO_ASCII_EX,
+            .to_ascii_ex = {.vkey = kbd_char_first ? MAKELONG('Q', 'q') : 'Q', .vsc = 0x10},
+        },
+        {0},
+    };
+    const struct ime_call to_ascii_ex_1[] =
+    {
+        {
+            .hkl = expect_ime, .himc = default_himc, .func = IME_PROCESS_KEY,
+            .process_key = {.vkey = 'Q', .lparam = MAKELONG(2, 0xc010)},
+        },
+        {
+            .hkl = expect_ime, .himc = default_himc, .func = IME_TO_ASCII_EX,
+            /* FIXME what happened to kbd_char_first here!? */
+            .to_ascii_ex = {.vkey = 'Q', .vsc = 0xc010},
+            .todo_value = TRUE,
+        },
+        {0},
+    };
+    struct ime_call to_ascii_ex_2[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_PROCESS_KEY,
+            .process_key = {.vkey = 'Q', .lparam = MAKELONG(2, 0x210)},
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_TO_ASCII_EX,
+            .to_ascii_ex = {.vkey = kbd_char_first ? MAKELONG('Q', 'q') : 'Q', .vsc = 0x210},
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_PROCESS_KEY,
+            .process_key = {.vkey = 'Q', .lparam = MAKELONG(2, 0x410)},
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_TO_ASCII_EX,
+            .to_ascii_ex = {.vkey = kbd_char_first ? MAKELONG('Q', 'q') : 'Q', .vsc = 0x410},
+        },
+        {0},
+    };
+    struct ime_call to_ascii_ex_3[] =
+    {
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_PROCESS_KEY,
+            .process_key = {.vkey = 'Q', .lparam = MAKELONG(2, 0xa10)},
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_TO_ASCII_EX,
+            .to_ascii_ex = {.vkey = kbd_char_first ? MAKELONG('Q', 'q') : 'Q', .vsc = 0xa10},
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_PROCESS_KEY,
+            .process_key = {.vkey = 'Q', .lparam = MAKELONG(2, 0xc10)},
+        },
+        {
+            .hkl = expect_ime, .himc = 0/*himc*/, .func = IME_TO_ASCII_EX,
+            .to_ascii_ex = {.vkey = kbd_char_first ? MAKELONG('Q', 'q') : 'Q', .vsc = 0xc10},
+        },
+        {0},
+    };
+    struct ime_call post_messages[] =
+    {
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 1}},
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_IME_UI, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 1}},
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 1}},
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_IME_UI, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 1}},
+        {0},
+    };
+    struct ime_call sent_messages[] =
+    {
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 2}},
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_IME_UI, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 2}},
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 2}},
+        {.hkl = expect_ime, .himc = 0/*himc*/, .func = MSG_IME_UI, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 2}},
+        {0},
+    };
+    HWND hwnd, other_hwnd;
+    INPUTCONTEXT *ctx;
+    HIMC himc;
+    HKL hkl;
+    UINT i;
+
+    ime_info.fdwProperty = IME_PROP_END_UNLOAD | IME_PROP_UNICODE;
+    if (kbd_char_first) ime_info.fdwProperty |= IME_PROP_KBD_CHAR_FIRST;
+
+    winetest_push_context( kbd_char_first ? "kbd_char_first" : "default" );
+
+    if (!(hkl = wineime_hkl)) goto cleanup;
+
+    other_hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!other_hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    flush_events();
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    flush_events();
+
+    ok_ret( 1, ImmActivateLayout( hkl ) );
+    ok_ret( 1, ImmLoadIME( hkl ) );
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    process_messages();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ok_ret( 2, ImmProcessKey( hwnd, expect_ime, 'Q', MAKELONG(2, 0x10), 0 ) );
+    ok_ret( 2, ImmProcessKey( hwnd, expect_ime, 'Q', MAKELONG(2, 0xc010), 0 ) );
+
+    ok_ret( 0, ImmTranslateMessage( hwnd, 0, 0, 0 ) );
+    ok_ret( 'Q', ImmGetVirtualKey( hwnd ) );
+    ok_seq( process_key_seq );
+
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'Q', MAKELONG(2, 0x10) ) );
+    ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( hwnd ) );
+    ok_seq( to_ascii_ex_0 );
+
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0xc010) ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 2, ImmProcessKey( hwnd, expect_ime, 'Q', MAKELONG(2, 0xc010), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0xc010) ) );
+    ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( hwnd ) );
+    ok_seq( to_ascii_ex_1 );
+
+    ok_eq( default_himc, ImmAssociateContext( hwnd, himc ), HIMC, "%p" );
+    ok_eq( default_himc, ImmAssociateContext( other_hwnd, himc ), HIMC, "%p" );
+    for (i = 0; i < ARRAY_SIZE(to_ascii_ex_2); i++) to_ascii_ex_2[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(to_ascii_ex_3); i++) to_ascii_ex_3[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(post_messages); i++) post_messages[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(sent_messages); i++) sent_messages[i].himc = himc;
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    ctx->hWnd = hwnd;
+    ok_ret( 2, ImmProcessKey( hwnd, expect_ime, 'Q', MAKELONG(2, 0x210), 0 ) );
+    ok_ret( 1, ImmTranslateMessage( hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0x210) ) );
+    ok_ret( 2, ImmProcessKey( hwnd, expect_ime, 'Q', MAKELONG(2, 0x410), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0x410) ) );
+    ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( hwnd ) );
+    ok_seq( to_ascii_ex_2 );
+    process_messages();
+    ok_seq( post_messages );
+    ok_ret( 1, ImmGenerateMessage( himc ) );
+    ok_seq( sent_messages );
+
+    ok_ret( 2, ImmProcessKey( hwnd, expect_ime, 'Q', MAKELONG(2, 0xa10), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0xa10) ) );
+    ok_ret( 2, ImmProcessKey( hwnd, expect_ime, 'Q', MAKELONG(2, 0xc10), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0xc10) ) );
+    ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( hwnd ) );
+    ok_seq( to_ascii_ex_3 );
+    process_messages();
+    ok_seq( empty_sequence );
+    ok_ret( 1, ImmGenerateMessage( himc ) );
+    ok_seq( sent_messages );
+
+    ctx->hWnd = 0;
+    ok_ret( 2, ImmProcessKey( other_hwnd, expect_ime, 'Q', MAKELONG(2, 0x210), 0 ) );
+    ok_ret( 1, ImmTranslateMessage( other_hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0x210) ) );
+    ok_ret( 2, ImmProcessKey( other_hwnd, expect_ime, 'Q', MAKELONG(2, 0x410), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( other_hwnd, WM_KEYUP, 'Q', MAKELONG(2, 0x410) ) );
+    ok_ret( VK_PROCESSKEY, ImmGetVirtualKey( other_hwnd ) );
+    ok_seq( to_ascii_ex_2 );
+    process_messages_( hwnd );
+    ok_seq( empty_sequence );
+    process_messages_( other_hwnd );
+    ok_seq( post_messages );
+    ok_ret( 1, ImmGenerateMessage( himc ) );
+    ok_seq( empty_sequence );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, ImmActivateLayout( default_hkl ) );
+    ok_ret( 1, DestroyWindow( other_hwnd ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    ok_ret( 1, ImmFreeLayout( hkl ) );
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+cleanup:
+    winetest_pop_context();
+}
+
+static void test_ga_na_da(void)
+{
+    /* These sequences have some additional WM_IME_NOTIFY messages with unknown wparam > IMN_PRIVATE */
+    struct ime_call complete_seq[] =
+    {
+        /* G */
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u3131", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x3131, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x1b, .lparam = GCS_CURSORPOS|GCS_DELTASTART|GCS_COMPSTR|GCS_COMPATTR|GCS_COMPCLAUSE|
+                                                                             GCS_COMPREADSTR|GCS_COMPREADATTR|GCS_COMPREADCLAUSE},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 0, .lparam = 0}},
+
+        /* G */
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u3131", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x3131, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        /* A */
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\uac00", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xac00, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        /* N */
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\uac04", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xac04, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        /* A */
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub098", .result = L"\uac00",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xac00, .lparam = GCS_RESULTSTR},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0xac00, .lparam = 0x1}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub098", .result = L"\uac00",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb098, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        /* D */
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub09f", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb09f, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        /* A */
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub2e4", .result = L"\ub098",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb098, .lparam = GCS_RESULTSTR},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0xb098, .lparam = 0x1}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub2e4", .result = L"\ub098",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb2e4, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        /* RETURN */
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"", .result = L"\ub2e4",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb2e4, .lparam = GCS_RESULTSTR},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0xb2e4, .lparam = 0x1}},
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_KEYDOWN, .wparam = 0xd, .lparam = 0x1c0001}},
+        {0},
+    };
+    struct ime_call partial_g_seq[] =
+    {
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u3131", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x3131, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        {0},
+    };
+    struct ime_call partial_ga_seq[] =
+    {
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\uac00", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xac00, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        {0},
+    };
+    struct ime_call partial_n_seq[] =
+    {
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\uac04", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xac04, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        {0},
+    };
+    struct ime_call partial_na_seq[] =
+    {
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub098", .result = L"\uac00",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xac00, .lparam = GCS_RESULTSTR},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0xac00, .lparam = 0x1}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub098", .result = L"\uac00",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb098, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        {0},
+    };
+    struct ime_call partial_d_seq[] =
+    {
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub09f", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb09f, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        {0},
+    };
+    struct ime_call partial_da_seq[] =
+    {
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub2e4", .result = L"\ub098",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb098, .lparam = GCS_RESULTSTR},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0xb098, .lparam = 0x1}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\ub2e4", .result = L"\ub098",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb2e4, .lparam = GCS_COMPSTR|GCS_COMPATTR|CS_INSERTCHAR|CS_NOMOVECARET},
+        },
+        {0},
+    };
+    struct ime_call partial_return_seq[] =
+    {
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"", .result = L"\ub2e4",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xb2e4, .lparam = GCS_RESULTSTR},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0xb2e4, .lparam = 0x1}},
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_KEYDOWN, .wparam = 0xd, .lparam = 0x1c0001}},
+        {0},
+    };
+
+    INPUTCONTEXT *ctx;
+    HWND hwnd;
+    HIMC himc;
+    UINT i;
+
+    /* this test doesn't work on Win32 / WoW64 */
+    if (sizeof(void *) == 4 || default_hkl != (HKL)0x04120412 /* MS Korean IME */)
+    {
+        skip( "Got hkl %p, skipping Korean IME-specific test\n", default_hkl );
+        process_messages();
+        return;
+    }
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    flush_events();
+
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    ok_eq( default_himc, ImmAssociateContext( hwnd, himc ), HIMC, "%p" );
+    ok_ret( 1, ImmSetOpenStatus( himc, TRUE ) );
+    ok_ret( 1, ImmSetConversionStatus( himc, IME_CMODE_FULLSHAPE | IME_CMODE_NATIVE, IME_SMODE_PHRASEPREDICT ) );
+    flush_events();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    for (i = 0; i < ARRAY_SIZE(complete_seq); i++) complete_seq[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(partial_g_seq); i++) partial_g_seq[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(partial_ga_seq); i++) partial_ga_seq[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(partial_n_seq); i++) partial_n_seq[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(partial_na_seq); i++) partial_na_seq[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(partial_d_seq); i++) partial_d_seq[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(partial_da_seq); i++) partial_da_seq[i].himc = himc;
+    for (i = 0; i < ARRAY_SIZE(partial_return_seq); i++) partial_return_seq[i].himc = himc;
+
+    keybd_event( 'R', 0x13, 0, 0 );
+    flush_events();
+    keybd_event( 'R', 0x13, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( VK_BACK, 0x0e, 0, 0 );
+    flush_events();
+    keybd_event( VK_BACK, 0x0e, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'R', 0x13, 0, 0 );
+    flush_events();
+    keybd_event( 'R', 0x13, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'K', 0x25, 0, 0 );
+    flush_events();
+    keybd_event( 'K', 0x25, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'S', 0x1f, 0, 0 );
+    flush_events();
+    keybd_event( 'S', 0x1f, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'K', 0x25, 0, 0 );
+    flush_events();
+    keybd_event( 'K', 0x25, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'E', 0x12, 0, 0 );
+    flush_events();
+    keybd_event( 'E', 0x12, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'K', 0x25, 0, 0 );
+    flush_events();
+    keybd_event( 'K', 0x25, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( VK_RETURN, 0x1c, 0, 0 );
+    flush_events();
+    keybd_event( VK_RETURN, 0x1c, KEYEVENTF_KEYUP, 0 );
+
+    flush_events();
+    todo_wine ok_seq( complete_seq );
+
+
+    /* Korean IME uses ImeProcessKey and posts messages */
+
+    todo_wine ok_ret( 2, ImmProcessKey( hwnd, default_hkl, 'R', MAKELONG(1, 0x13), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'R', MAKELONG(1, 0x13) ) );
+    ok_seq( empty_sequence );
+    process_messages();
+    todo_wine ok_seq( partial_g_seq );
+
+    /* Korean IME doesn't eat WM_KEYUP */
+
+    ok_ret( 0, ImmProcessKey( hwnd, default_hkl, 'R', MAKELONG(1, 0xc013), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'R', MAKELONG(1, 0xc013) ) );
+    process_messages();
+    ok_seq( empty_sequence );
+
+    todo_wine ok_ret( 2, ImmProcessKey( hwnd, default_hkl, 'K', MAKELONG(1, 0x25), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'K', MAKELONG(1, 0x25) ) );
+    process_messages();
+    todo_wine ok_seq( partial_ga_seq );
+
+    todo_wine ok_ret( 2, ImmProcessKey( hwnd, default_hkl, 'S', MAKELONG(1, 0x1f), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'S', MAKELONG(1, 0x1f) ) );
+    process_messages();
+    todo_wine ok_seq( partial_n_seq );
+
+    todo_wine ok_ret( 2, ImmProcessKey( hwnd, default_hkl, 'K', MAKELONG(1, 0x25), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'K', MAKELONG(1, 0x25) ) );
+    process_messages();
+    todo_wine ok_seq( partial_na_seq );
+
+    todo_wine ok_ret( 2, ImmProcessKey( hwnd, default_hkl, 'E', MAKELONG(1, 0x12), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'E', MAKELONG(1, 0x12) ) );
+    process_messages();
+    todo_wine ok_seq( partial_d_seq );
+
+    todo_wine ok_ret( 2, ImmProcessKey( hwnd, default_hkl, 'K', MAKELONG(1, 0x25), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'K', MAKELONG(1, 0x25) ) );
+    process_messages();
+    todo_wine ok_seq( partial_da_seq );
+
+    todo_wine ok_ret( 2, ImmProcessKey( hwnd, default_hkl, VK_RETURN, MAKELONG(1, 0x1c), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, VK_RETURN, MAKELONG(1, 0x1c) ) );
+    process_messages();
+    todo_wine ok_seq( partial_return_seq );
+
+
+    ok_ret( 1, ImmSetConversionStatus( himc, 0, IME_SMODE_PHRASEPREDICT ) );
+    ok_ret( 1, ImmSetOpenStatus( himc, FALSE ) );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+static void test_nihongo_no(void)
+{
+    /* These sequences have some additional WM_IME_NOTIFY messages with wparam > IMN_PRIVATE */
+    /* Some out-of-order WM_IME_REQUEST and WM_IME_NOTIFY messages are also ignored */
+    struct ime_call complete_seq[] =
+    {
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\uff4e", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xff4e, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u306b", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306b, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u306b\uff48", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306b, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u306b\u307b", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306b, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u306b\u307b\uff4e", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306b, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u306b\u307b\u3093\uff47", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306b, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u306b\u307b\u3093\u3054", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306b, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u65e5\u672c\u8a9e", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x65e5, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"", .result = L"\u65e5\u672c\u8a9e",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x65e5, .lparam = GCS_RESULTSTR|GCS_RESULTCLAUSE|GCS_RESULTREADSTR|GCS_RESULTREADCLAUSE},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0x65e5, .lparam = 0x1}},
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0x672c, .lparam = 0x1}},
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0x8a9e, .lparam = 0x1}},
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_STARTCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\uff4e", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0xff4e, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"\u306e", .result = L"",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306e, .lparam = GCS_COMPSTR|GCS_COMPCLAUSE|GCS_COMPATTR|GCS_COMPREADSTR|GCS_DELTASTART|GCS_CURSORPOS},
+        },
+        {
+            .hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .comp = L"", .result = L"\u306e",
+            .message = {.msg = WM_IME_COMPOSITION, .wparam = 0x306e, .lparam = GCS_RESULTSTR|GCS_RESULTCLAUSE|GCS_RESULTREADSTR|GCS_RESULTREADCLAUSE},
+        },
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_CHAR, .wparam = 0x306e, .lparam = 0x1}},
+        {.hkl = default_hkl, .himc = 0/*himc*/, .func = MSG_TEST_WIN, .message = {.msg = WM_IME_ENDCOMPOSITION, .wparam = 0, .lparam = 0}},
+        {0},
+    };
+
+    INPUTCONTEXT *ctx;
+    HWND hwnd;
+    HIMC himc;
+    UINT i;
+
+    /* this test doesn't work on Win32 / WoW64 */
+    if (sizeof(void *) == 4 || default_hkl != (HKL)0x04110411 /* MS Japanese IME */)
+    {
+        skip( "Got hkl %p, skipping Japanese IME-specific test\n", default_hkl );
+        return;
+    }
+
+    hwnd = CreateWindowW( test_class.lpszClassName, NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                          100, 100, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    flush_events();
+
+    himc = ImmCreateContext();
+    ok_ne( NULL, himc, HIMC, "%p" );
+    ctx = ImmLockIMC( himc );
+    ok_ne( NULL, ctx, INPUTCONTEXT *, "%p" );
+    ok_eq( default_himc, ImmAssociateContext( hwnd, himc ), HIMC, "%p" );
+    ok_ret( 1, ImmSetOpenStatus( himc, TRUE ) );
+    ok_ret( 1, ImmSetConversionStatus( himc, IME_CMODE_FULLSHAPE | IME_CMODE_NATIVE, IME_SMODE_PHRASEPREDICT ) );
+    flush_events();
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+
+    for (i = 0; i < ARRAY_SIZE(complete_seq); i++) complete_seq[i].himc = himc;
+    ignore_WM_IME_REQUEST = TRUE;
+    ignore_WM_IME_NOTIFY = TRUE;
+
+
+    keybd_event( 'N', 0x31, 0, 0 );
+    flush_events();
+    keybd_event( 'N', 0x31, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'I', 0x17, 0, 0 );
+    flush_events();
+    keybd_event( 'I', 0x17, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'H', 0x23, 0, 0 );
+    flush_events();
+    keybd_event( 'H', 0x23, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'O', 0x18, 0, 0 );
+    flush_events();
+    keybd_event( 'O', 0x18, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'N', 0x31, 0, 0 );
+    flush_events();
+    keybd_event( 'N', 0x31, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'G', 0x22, 0, 0 );
+    flush_events();
+    keybd_event( 'G', 0x22, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'O', 0x18, 0, 0 );
+    flush_events();
+    keybd_event( 'O', 0x18, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( VK_SPACE, 0x39, 0, 0 );
+    flush_events();
+    keybd_event( VK_SPACE, 0x39, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'N', 0x31, 0, 0 );
+    flush_events();
+    keybd_event( 'N', 0x31, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( 'O', 0x18, 0, 0 );
+    flush_events();
+    keybd_event( 'O', 0x18, KEYEVENTF_KEYUP, 0 );
+
+    keybd_event( VK_RETURN, 0x1c, 0, 0 );
+    flush_events();
+    keybd_event( VK_RETURN, 0x1c, KEYEVENTF_KEYUP, 0 );
+
+    flush_events();
+    todo_wine ok_seq( complete_seq );
+
+    ignore_WM_IME_REQUEST = FALSE;
+    ignore_WM_IME_NOTIFY = FALSE;
+
+    /* Japanese IME doesn't take input from ImmProcessKey */
+
+    ok_ret( 0, ImmProcessKey( hwnd, default_hkl, 'N', MAKELONG(1, 0x31), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYDOWN, 'N', MAKELONG(1, 0x31) ) );
+    flush_events();
+    ok_ret( 0, ImmProcessKey( hwnd, default_hkl, 'N', MAKELONG(1, 0xc031), 0 ) );
+    ok_ret( 0, ImmTranslateMessage( hwnd, WM_KEYUP, 'N', MAKELONG(1, 0xc031) ) );
+    flush_events();
+    ok_seq( empty_sequence );
+
+
+    ok_ret( 1, ImmSetConversionStatus( himc, 0, IME_SMODE_PHRASEPREDICT ) );
+    ok_ret( 1, ImmSetOpenStatus( himc, FALSE ) );
+
+    ok_ret( 1, ImmUnlockIMC( himc ) );
+    ok_ret( 1, ImmDestroyContext( himc ) );
+
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    process_messages();
+
+    memset( ime_calls, 0, sizeof(ime_calls) );
+    ime_call_count = 0;
+}
+
+START_TEST(imm32)
+{
+    default_hkl = GetKeyboardLayout( 0 );
+
+    test_class.hInstance = GetModuleHandleW( NULL );
+    RegisterClassExW( &test_class );
+
     if (!is_ime_enabled())
     {
         win_skip("IME support not implemented\n");
@@ -2454,18 +7673,72 @@ START_TEST(imm32) {
 
     test_com_initialization();
 
+    test_ImmEnumInputContext();
+
+    test_ImmInstallIME();
+    wineime_hkl = ime_install();
+
+    test_ImmGetDescription();
+    test_ImmGetIMEFileName();
+    test_ImmIsIME();
+    test_ImmGetProperty();
+
+    test_ImmEscape( FALSE );
+    test_ImmEscape( TRUE );
+    test_ImmEnumRegisterWord( FALSE );
+    test_ImmEnumRegisterWord( TRUE );
+    test_ImmRegisterWord( FALSE );
+    test_ImmRegisterWord( TRUE );
+    test_ImmGetRegisterWordStyle( FALSE );
+    test_ImmGetRegisterWordStyle( TRUE );
+    test_ImmUnregisterWord( FALSE );
+    test_ImmUnregisterWord( TRUE );
+
+    /* test these first to sanitize conversion / open statuses */
+    test_ImmSetConversionStatus();
+    test_ImmSetOpenStatus();
+    ImeSelect_init_status = TRUE;
+
+    test_ImmActivateLayout();
+    test_ImmCreateInputContext();
+    test_ImmProcessKey();
+    test_DefWindowProc();
+    test_ImmSetActiveContext();
+    test_ImmRequestMessage();
+
+    test_ImmGetCandidateList( TRUE );
+    test_ImmGetCandidateList( FALSE );
+    test_ImmGetCandidateListCount( TRUE );
+    test_ImmGetCandidateListCount( FALSE );
+    test_ImmGetCandidateWindow();
+
+    test_ImmGetCompositionString( TRUE );
+    test_ImmGetCompositionString( FALSE );
+    test_ImmSetCompositionWindow();
+    test_ImmSetStatusWindowPos();
+    test_ImmSetCompositionFont( TRUE );
+    test_ImmSetCompositionFont( FALSE );
+    test_ImmSetCandidateWindow();
+
+    test_ImmGenerateMessage();
+    test_ImmTranslateMessage( FALSE );
+    test_ImmTranslateMessage( TRUE );
+
+    if (wineime_hkl) ime_cleanup( wineime_hkl, TRUE );
+
+    test_ga_na_da();
+    test_nihongo_no();
+
     if (init())
     {
         test_ImmNotifyIME();
-        test_ImmGetCompositionString();
-        test_ImmSetCompositionString();
+        test_SCS_SETSTR();
         test_ImmIME();
         test_ImmAssociateContextEx();
         test_NtUserAssociateInputContext();
-        test_ImmThreads();
+        test_cross_thread_himc();
         test_ImmIsUIMessage();
         test_ImmGetContext();
-        test_ImmGetDescription();
         test_ImmDefaultHwnd();
         test_default_ime_window_creation();
         test_ImmGetIMCLockCount();
@@ -2486,4 +7759,6 @@ START_TEST(imm32) {
         test_ImmDisableIME();
     }
     cleanup();
+
+    UnregisterClassW( test_class.lpszClassName, test_class.hInstance );
 }

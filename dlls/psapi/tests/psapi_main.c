@@ -43,6 +43,7 @@ static BOOL  (WINAPI *pWow64RevertWow64FsRedirection)(void *);
 static BOOL  (WINAPI *pQueryWorkingSetEx)(HANDLE, PVOID, DWORD);
 
 static BOOL wow64;
+static char** main_argv;
 
 static BOOL init_func_ptrs(void)
 {
@@ -75,7 +76,7 @@ static void test_EnumProcesses(void)
 
 static void test_EnumProcessModules(void)
 {
-    char buffer[200] = "C:\\windows\\system32\\notepad.exe";
+    char buffer[MAX_PATH] = "C:\\windows\\system32\\msinfo32.exe";
     PROCESS_INFORMATION pi = {0};
     STARTUPINFOA si = {0};
     void *cookie;
@@ -139,37 +140,58 @@ static void test_EnumProcessModules(void)
     if (sizeof(void *) == 8)
     {
         MODULEINFO info;
-        char name[40];
+        char name[MAX_PATH];
+        HMODULE hmods[3];
 
-        strcpy(buffer, "C:\\windows\\syswow64\\notepad.exe");
+        strcpy(buffer, "C:\\windows\\syswow64\\msinfo32.exe");
         ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-        ok(ret, "CreateProcess failed: %lu\n", GetLastError());
+        if (ret)
+        {
+            ret = WaitForInputIdle(pi.hProcess, 5000);
+            ok(!ret, "wait timed out\n");
 
-        ret = WaitForInputIdle(pi.hProcess, 5000);
-        ok(!ret, "wait timed out\n");
+            SetLastError(0xdeadbeef);
+            hmods[0] = NULL;
+            ret = EnumProcessModules(pi.hProcess, hmods, sizeof(hmods), &cbNeeded);
+            ok(ret == 1, "got %ld, error %lu\n", ret, GetLastError());
+            ok(cbNeeded >= sizeof(HMODULE), "expected at least one module\n");
+            ok(!!hmods[0], "expected non-NULL module\n");
+            ok(cbNeeded % sizeof(hmods[0]) == 0, "got %lu\n", cbNeeded);
 
-        SetLastError(0xdeadbeef);
-        hMod = NULL;
-        ret = EnumProcessModules(pi.hProcess, &hMod, sizeof(HMODULE), &cbNeeded);
-        ok(ret == 1, "got %ld, error %lu\n", ret, GetLastError());
-        ok(!!hMod, "expected non-NULL module\n");
-        ok(cbNeeded % sizeof(hMod) == 0, "got %lu\n", cbNeeded);
+            ret = GetModuleBaseNameA(pi.hProcess, hmods[0], name, sizeof(name));
+            ok(ret, "got error %lu\n", GetLastError());
+            ok(!strcmp(name, "msinfo32.exe"), "got %s\n", name);
 
-        ret = GetModuleBaseNameA(pi.hProcess, hMod, name, sizeof(name));
-        ok(ret, "got error %lu\n", GetLastError());
-        ok(!strcmp(name, "notepad.exe"), "got %s\n", name);
+            ret = GetModuleFileNameExA(pi.hProcess, hmods[0], name, sizeof(name));
+            ok(ret, "got error %lu\n", GetLastError());
+            ok(!strcmp(name, buffer), "got %s\n", name);
 
-        ret = GetModuleFileNameExA(pi.hProcess, hMod, name, sizeof(name));
-        ok(ret, "got error %lu\n", GetLastError());
-        ok(!strcmp(name, buffer), "got %s\n", name);
+            ret = GetModuleInformation(pi.hProcess, hmods[0], &info, sizeof(info));
+            ok(ret, "got error %lu\n", GetLastError());
+            ok(info.lpBaseOfDll == hmods[0], "expected %p, got %p\n", hmods[0], info.lpBaseOfDll);
+            ok(info.SizeOfImage, "image size was 0\n");
+            ok(info.EntryPoint >= info.lpBaseOfDll, "got entry point %p\n", info.EntryPoint);
 
-        ret = GetModuleInformation(pi.hProcess, hMod, &info, sizeof(info));
-        ok(ret, "got error %lu\n", GetLastError());
-        ok(info.lpBaseOfDll == hMod, "expected %p, got %p\n", hMod, info.lpBaseOfDll);
-        ok(info.SizeOfImage, "image size was 0\n");
-        ok(info.EntryPoint >= info.lpBaseOfDll, "got entry point %p\n", info.EntryPoint);
-
-        TerminateProcess(pi.hProcess, 0);
+            /* "old" Wine wow64 will only return main DLL; while windows & multi-arch Wine Wow64 setup
+             * will return main module, ntdll.dll and one of the wow64*.dll.
+             */
+            todo_wine_if(cbNeeded == sizeof(HMODULE))
+            ok(cbNeeded >= 3 * sizeof(HMODULE), "Wrong count of DLLs\n");
+            if (cbNeeded >= 3 * sizeof(HMODULE))
+            {
+                ret = GetModuleBaseNameA(pi.hProcess, hmods[2], name, sizeof(name));
+                ok(ret, "got error %lu\n", GetLastError());
+                ok(strstr(CharLowerA(name), "wow64") != NULL, "third DLL in wow64 should be one of wow*.dll (%s)\n", name);
+            }
+            TerminateProcess(pi.hProcess, 0);
+        }
+        else
+        {
+            if (GetLastError() == ERROR_FILE_NOT_FOUND)
+                skip("Skip wow64 test on non compatible platform\n");
+            else
+                ok(ret, "CreateProcess failed: %lu\n", GetLastError());
+        }
     }
     else if (wow64)
     {
@@ -184,8 +206,373 @@ static void test_EnumProcessModules(void)
         SetLastError(0xdeadbeef);
         ret = EnumProcessModules(pi.hProcess, &hMod, sizeof(HMODULE), &cbNeeded);
         ok(!ret, "got %ld\n", ret);
-        todo_wine
         ok(GetLastError() == ERROR_PARTIAL_COPY, "got error %lu\n", GetLastError());
+
+        TerminateProcess(pi.hProcess, 0);
+    }
+}
+
+struct moduleex_snapshot
+{
+    unsigned list;
+    DWORD num_modules;
+    HMODULE modules[128];
+};
+
+static BOOL test_EnumProcessModulesEx_snapshot(HANDLE proc, struct moduleex_snapshot* mxsnap,
+                                               unsigned numsnap)
+{
+    void* cookie;
+    DWORD needed;
+    char buffer[MAX_PATH];
+    char buffer2[MAX_PATH];
+    MODULEINFO info;
+    int i, j;
+    BOOL ret;
+
+    for (i = 0; i < numsnap; i++)
+    {
+        winetest_push_context("%d", mxsnap[i].list);
+        SetLastError(0xdeadbeef);
+        mxsnap[i].modules[0] = (void *)0xdeadbeef;
+        ret = EnumProcessModulesEx(proc, mxsnap[i].modules, sizeof(mxsnap[i].modules), &needed, mxsnap[i].list);
+        ok(ret, "didn't succeed %lu\n", GetLastError());
+        ok(needed % sizeof(HMODULE) == 0, "not a multiple of sizeof(HMODULE) cbNeeded=%ld\n", needed);
+        mxsnap[i].num_modules = min(needed, sizeof(mxsnap[i].modules)) / sizeof(HMODULE);
+        for (j = 0; j < mxsnap[i].num_modules; j++)
+        {
+            ret = GetModuleBaseNameA(proc, mxsnap[i].modules[j], buffer, sizeof(buffer));
+            ok(ret, "GetModuleBaseName failed: %lu (%u/%lu=%p)\n", GetLastError(), j, mxsnap[i].num_modules, mxsnap[i].modules[j]);
+            ret = GetModuleFileNameExA(proc, mxsnap[i].modules[j], buffer, sizeof(buffer));
+            ok(ret, "GetModuleFileNameEx failed: %lu (%u/%lu=%p)\n", GetLastError(), j, mxsnap[i].num_modules, mxsnap[i].modules[j]);
+            if (wow64)
+            {
+                pWow64DisableWow64FsRedirection(&cookie);
+                ret = GetModuleFileNameExA(proc, mxsnap[i].modules[j], buffer2, sizeof(buffer2));
+                ok(ret, "GetModuleFileNameEx failed: %lu (%u/%lu=%p)\n", GetLastError(), j, mxsnap[i].num_modules, mxsnap[i].modules[j]);
+                pWow64RevertWow64FsRedirection(cookie);
+                ok(!strcmp(buffer, buffer2), "Didn't FS redirection to come into play %s <> %s\n", buffer, buffer2);
+            }
+            memset(&info, 0, sizeof(info));
+            ret = GetModuleInformation(proc, mxsnap[i].modules[j], &info, sizeof(info));
+            ok(ret, "GetModuleInformation failed: %lu\n", GetLastError());
+            ok(info.lpBaseOfDll == mxsnap[i].modules[j], "expected %p, got %p\n", mxsnap[i].modules[j], info.lpBaseOfDll);
+            ok(info.SizeOfImage, "image size was 0\n");
+            /* info.EntryPoint to be checked */
+        }
+        winetest_pop_context();
+    }
+
+    if (wow64)
+    {
+        HMODULE modules[128];
+        DWORD num;
+
+        pWow64DisableWow64FsRedirection(&cookie);
+        for (i = 0; i < numsnap; i++)
+        {
+            modules[0] = (void *)0xdeadbeef;
+            ret = EnumProcessModulesEx(proc, modules, sizeof(modules), &needed, mxsnap[i].list);
+            ok(ret, "didn't succeed %lu\n", GetLastError());
+            ok(needed % sizeof(HMODULE) == 0, "not a multiple of sizeof(HMODULE) cbNeeded=%ld\n", needed);
+            num = min(needed, sizeof(modules)) / sizeof(HMODULE);
+            /* It happens that modules are still loading... so check that msxsnap[i].modules is a subset of modules[].
+             * Crossing fingers that no module is unloaded
+             */
+            ok(num >= mxsnap[i].num_modules, "Mismatch in module count %lu %lu\n", num, mxsnap[i].num_modules);
+            num = min(num, mxsnap[i].num_modules);
+            for (j = 0; j < num; j++)
+                ok(modules[j] == mxsnap[i].modules[j], "Mismatch in modules handle\n");
+        }
+        pWow64RevertWow64FsRedirection(cookie);
+    }
+    return ret;
+}
+
+static BOOL snapshot_is_empty(const struct moduleex_snapshot* snap)
+{
+    return snap->num_modules == 0;
+}
+
+static BOOL snapshot_contains(const struct moduleex_snapshot* snap, HMODULE mod)
+{
+    int i;
+
+    for (i = 0; i < snap->num_modules; i++)
+        if (snap->modules[i] == mod) return TRUE;
+    return FALSE;
+}
+
+/* It happens (experienced on Windows) that the considered process still loads modules,
+ * meaning that the number of loaded modules can increase between consecutive calls to EnumProcessModulesEx.
+ * In order to cope with this, we're testing for modules list being included into the next one (instead of
+ * equality)
+ */
+static BOOL snapshot_is_subset(const struct moduleex_snapshot* subset, const struct moduleex_snapshot* superset)
+{
+    int i;
+
+    for (i = 0; i < subset->num_modules; i++)
+        if (!snapshot_contains(superset, subset->modules[i])) return FALSE;
+    return TRUE;
+}
+
+static BOOL snapshot_is_equal(const struct moduleex_snapshot* seta, const struct moduleex_snapshot* setb)
+{
+    return snapshot_is_subset(seta, setb) && seta->num_modules == setb->num_modules;
+}
+
+static BOOL snapshot_are_disjoint(const struct moduleex_snapshot* seta, const struct moduleex_snapshot* setb, unsigned start)
+{
+    int i, j;
+    for (i = start; i < seta->num_modules; i++)
+        for (j = start; j < setb->num_modules; j++)
+            if (seta->modules[i] == setb->modules[j]) return FALSE;
+    return TRUE;
+}
+
+static void snapshot_check_first_main_module(const struct moduleex_snapshot* snap, HANDLE proc,
+                                             const char* filename)
+{
+    char buffer[MAX_PATH];
+    MODULEINFO info;
+    const char* modname;
+    BOOL ret;
+
+    if (!(modname = strrchr(filename, '\\'))) modname = filename; else modname++;
+    winetest_push_context("%d", snap->list);
+    ret = GetModuleBaseNameA(proc, snap->modules[0], buffer, sizeof(buffer));
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(!strcasecmp(buffer, modname), "expecting %s but got %s\n", modname, buffer);
+    ret = GetModuleFileNameExA(proc, snap->modules[0], buffer, sizeof(buffer));
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(!strcasecmp(filename, buffer), "expecting %s but got %s\n", filename, buffer);
+
+    ret = GetModuleInformation(proc, snap->modules[0], &info, sizeof(info));
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(info.lpBaseOfDll == snap->modules[0], "expected %p, got %p\n", snap->modules[0], info.lpBaseOfDll);
+    ok(info.SizeOfImage, "image size was 0\n");
+    ok(info.EntryPoint >= info.lpBaseOfDll, "got entry point %p\n", info.EntryPoint);
+    winetest_pop_context();
+}
+
+static unsigned int snapshot_count_in_dir(const struct moduleex_snapshot* snap, HANDLE proc, const char* dirname)
+{
+    unsigned int count = 0;
+    char buffer[MAX_PATH];
+    size_t dirname_len = strlen(dirname);
+    BOOL ret;
+    int i;
+
+    for (i = 0; i < snap->num_modules; i++)
+    {
+        ret = GetModuleFileNameExA(proc, snap->modules[i], buffer, sizeof(buffer));
+        ok(ret, "got error %lu\n", GetLastError());
+        if (!strncasecmp(buffer, dirname, dirname_len)) count++;
+    }
+    return count;
+}
+
+static void test_EnumProcessModulesEx(void)
+{
+    char buffer[MAX_PATH] = "C:\\windows\\system32\\msinfo32.exe";
+    PROCESS_INFORMATION pi = {0};
+    STARTUPINFOA si = {0};
+    void *cookie;
+    HMODULE hMod;
+    DWORD ret, cbNeeded = 0xdeadbeef;
+    struct moduleex_snapshot snap[4] = {{LIST_MODULES_32BIT}, {LIST_MODULES_64BIT}, {LIST_MODULES_DEFAULT}, {LIST_MODULES_ALL}};
+    int i;
+
+    SetLastError(0xdeadbeef);
+    EnumProcessModulesEx(NULL, NULL, 0, &cbNeeded, LIST_MODULES_ALL);
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected error=ERROR_INVALID_HANDLE but got %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    EnumProcessModulesEx(hpQI, NULL, 0, &cbNeeded, LIST_MODULES_ALL);
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected error=ERROR_ACCESS_DENIED but got %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hMod = (void *)0xdeadbeef;
+    ret = EnumProcessModulesEx(hpQI, &hMod, sizeof(HMODULE), NULL, LIST_MODULES_ALL);
+    ok(!ret, "succeeded\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected error=ERROR_ACCESS_DENIED but got %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hMod = (void *)0xdeadbeef;
+    ret = EnumProcessModulesEx(hpQV, &hMod, sizeof(HMODULE), NULL, LIST_MODULES_ALL);
+    ok(!ret, "succeeded\n");
+    ok(GetLastError() == ERROR_NOACCESS, "expected error=ERROR_NOACCESS but got %ld\n", GetLastError());
+    ok(hMod == GetModuleHandleA(NULL),
+       "hMod=%p GetModuleHandleA(NULL)=%p\n", hMod, GetModuleHandleA(NULL));
+
+    SetLastError(0xdeadbeef);
+    ret = EnumProcessModulesEx(hpQV, NULL, 0, &cbNeeded, LIST_MODULES_ALL);
+    ok(ret == 1, "failed with %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EnumProcessModulesEx(hpQV, NULL, sizeof(HMODULE), &cbNeeded, LIST_MODULES_ALL);
+    ok(!ret, "succeeded\n");
+    ok(GetLastError() == ERROR_NOACCESS, "expected error=ERROR_NOACCESS but got %ld\n", GetLastError());
+
+    winetest_push_context("self");
+    if (sizeof(void *) == 8)
+    {
+        test_EnumProcessModulesEx_snapshot(hpQV, snap, ARRAY_SIZE(snap));
+        ok(snapshot_is_empty(&snap[0]), "didn't expect 32bit module\n");
+        ok(snapshot_is_equal(&snap[1], &snap[2]), "mismatch in modules count\n");
+        ok(snapshot_is_equal(&snap[2], &snap[3]), "mismatch in modules count\n");
+        snapshot_check_first_main_module(&snap[1], hpQV, main_argv[0]);
+        snapshot_check_first_main_module(&snap[2], hpQV, main_argv[0]);
+        snapshot_check_first_main_module(&snap[3], hpQV, main_argv[0]);
+
+        /* in fact, this error is only returned when (list & 3 == 0), otherwise the corresponding
+         * list is returned without errors
+         */
+        SetLastError(0xdeadbeef);
+        ret = EnumProcessModulesEx(hpQV, &hMod, sizeof(HMODULE), &cbNeeded, 0x400);
+        ok(!ret, "succeeded\n");
+        ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected error=ERROR_INVALID_PARAMETER but got %ld\n", GetLastError());
+    }
+    else if (wow64)
+    {
+        test_EnumProcessModulesEx_snapshot(hpQV, snap, ARRAY_SIZE(snap));
+        ok(snapshot_is_equal(&snap[0], &snap[1]), "mismatch in modules count\n");
+        ok(snapshot_is_equal(&snap[1], &snap[2]), "mismatch in modules count\n");
+        ok(snapshot_is_equal(&snap[2], &snap[3]), "mismatch in modules count\n");
+        snapshot_check_first_main_module(&snap[0], hpQV, main_argv[0]);
+        snapshot_check_first_main_module(&snap[1], hpQV, main_argv[0]);
+        snapshot_check_first_main_module(&snap[2], hpQV, main_argv[0]);
+        snapshot_check_first_main_module(&snap[3], hpQV, main_argv[0]);
+    }
+    winetest_pop_context();
+
+    ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "CreateProcess failed: %lu\n", GetLastError());
+
+    ret = WaitForInputIdle(pi.hProcess, 5000);
+    ok(!ret, "wait timed out\n");
+
+    if (sizeof(void *) == 8)
+    {
+        winetest_push_context("pcs-6464");
+        test_EnumProcessModulesEx_snapshot(pi.hProcess, snap, ARRAY_SIZE(snap));
+        ok(snapshot_is_empty(&snap[0]), "didn't expect 32bit module\n");
+        ok(snapshot_is_subset(&snap[1], &snap[2]), "64bit and default module lists should match\n");
+        ok(snapshot_is_subset(&snap[2], &snap[3]), "default and all module lists should match\n");
+        snapshot_check_first_main_module(&snap[1], pi.hProcess, buffer);
+        snapshot_check_first_main_module(&snap[2], pi.hProcess, buffer);
+        snapshot_check_first_main_module(&snap[3], pi.hProcess, buffer);
+        winetest_pop_context();
+
+        /* in fact, this error is only returned when (list & 3 == 0), otherwise the corresponding
+         * list is returned without errors
+         */
+        SetLastError(0xdeadbeef);
+        ret = EnumProcessModulesEx(hpQV, &hMod, sizeof(HMODULE), &cbNeeded, 0x400);
+        ok(!ret, "succeeded\n");
+        ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected error=ERROR_INVALID_PARAMETER but got %ld\n", GetLastError());
+    }
+    else if (wow64)
+    {
+        winetest_push_context("pcs-3232");
+        test_EnumProcessModulesEx_snapshot(pi.hProcess, snap, ARRAY_SIZE(snap));
+        /* some windows version return 64bit modules, others don't... */
+        /* ok(snapshot_is_empty(&snap[1]), "didn't expect 64bit module\n"); */
+        ok(snapshot_is_subset(&snap[1], &snap[3]), "64 and all module lists should match\n");
+
+        ok(snapshot_is_subset(&snap[0], &snap[2]), "32bit and default module lists should match\n");
+        ok(snapshot_is_subset(&snap[2], &snap[3]), "default and all module lists should match\n");
+        snapshot_check_first_main_module(&snap[0], pi.hProcess, "c:\\windows\\syswow64\\msinfo32.exe");
+        snapshot_check_first_main_module(&snap[2], pi.hProcess, "c:\\windows\\syswow64\\msinfo32.exe");
+        snapshot_check_first_main_module(&snap[3], pi.hProcess, "c:\\windows\\syswow64\\msinfo32.exe");
+        winetest_pop_context();
+    }
+
+    TerminateProcess(pi.hProcess, 0);
+
+    if (sizeof(void *) == 8)
+    {
+        unsigned int count;
+
+        strcpy(buffer, "C:\\windows\\syswow64\\msinfo32.exe");
+        ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+        if (ret)
+        {
+            ret = WaitForInputIdle(pi.hProcess, 5000);
+            ok(!ret, "wait timed out\n");
+
+            winetest_push_context("pcs-6432");
+            test_EnumProcessModulesEx_snapshot(pi.hProcess, snap, ARRAY_SIZE(snap));
+            ok(!snapshot_is_empty(&snap[0]), "expecting 32bit modules\n");
+            /* FIXME: this tests fails on Wine "old" wow configuration, but succceeds in "multi-arch" and Windows */
+            todo_wine_if(snapshot_is_empty(&snap[1]))
+            ok(!snapshot_is_empty(&snap[1]), "expecting 64bit modules\n");
+            ok(snapshot_is_subset(&snap[1], &snap[2]), "64bit and default module lists should match\n");
+            ok(snapshot_are_disjoint(&snap[0], &snap[1], 0), "32bit and 64bit list should be disjoint\n");
+            /* Main module (even 32bit) is present in both 32bit (makes sense) but also default
+             * (even if all the other modules are 64bit)
+             */
+            ok(snapshot_are_disjoint(&snap[0], &snap[2], 1), "32bit and default list should be disjoint\n");
+            ok(snapshot_is_subset(&snap[0], &snap[3]), "32bit and all module lists should match\n");
+            ok(snapshot_is_subset(&snap[1], &snap[3]), "64bit and all module lists should match\n");
+            ok(snapshot_is_subset(&snap[2], &snap[3]), "default and all module list should match\n");
+            snapshot_check_first_main_module(&snap[0], pi.hProcess, buffer);
+            ok(!snapshot_contains(&snap[1], snap[0].modules[0]), "main module shouldn't be present in 64bit list\n");
+            snapshot_check_first_main_module(&snap[2], pi.hProcess, buffer);
+            snapshot_check_first_main_module(&snap[3], pi.hProcess, buffer);
+
+            ret = GetSystemWow64DirectoryA(buffer, sizeof(buffer));
+            ok(ret, "GetSystemWow64DirectoryA failed: %lu\n", GetLastError());
+            count = snapshot_count_in_dir(snap, pi.hProcess, buffer);
+            todo_wine
+            ok(count <= 1, "Wrong count %u in %s\n", count, buffer); /* msinfo32 can be from system wow64 */
+            ret = GetSystemDirectoryA(buffer, sizeof(buffer));
+            ok(ret, "GetSystemDirectoryA failed: %lu\n", GetLastError());
+            count = snapshot_count_in_dir(snap, pi.hProcess, buffer);
+            todo_wine
+            ok(count > 2, "Wrong count %u in %s\n", count, buffer);
+
+            /* in fact, this error is only returned when (list & 3 == 0), otherwise the corresponding
+             * list is returned without errors.
+             */
+            SetLastError(0xdeadbeef);
+            ret = EnumProcessModulesEx(hpQV, &hMod, sizeof(HMODULE), &cbNeeded, 0x400);
+            ok(!ret, "succeeded\n");
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected error=ERROR_INVALID_PARAMETER but got %ld\n", GetLastError());
+
+            winetest_pop_context();
+
+            TerminateProcess(pi.hProcess, 0);
+        }
+        else
+        {
+            if (GetLastError() == ERROR_FILE_NOT_FOUND)
+                skip("Skip wow64 test on non compatible platform\n");
+            else
+                ok(ret, "CreateProcess failed: %lu\n", GetLastError());
+        }
+
+    }
+    else if (wow64)
+    {
+        pWow64DisableWow64FsRedirection(&cookie);
+        ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+        pWow64RevertWow64FsRedirection(cookie);
+        ok(ret, "CreateProcess failed: %lu\n", GetLastError());
+
+        ret = WaitForInputIdle(pi.hProcess, 5000);
+        ok(!ret, "wait timed out\n");
+
+        winetest_push_context("pcs-3264");
+        for (i = 0; i < ARRAY_SIZE(snap); i++)
+        {
+            SetLastError(0xdeadbeef);
+            ret = EnumProcessModulesEx(pi.hProcess, &hMod, sizeof(HMODULE), &cbNeeded, snap[i].list);
+            ok(!ret, "succeeded\n");
+            ok(GetLastError() == ERROR_PARTIAL_COPY, "expected error=ERROR_PARTIAL_COPY but got %ld\n", GetLastError());
+        }
+        winetest_pop_context();
 
         TerminateProcess(pi.hProcess, 0);
     }
@@ -854,6 +1241,7 @@ START_TEST(psapi_main)
 {
     DWORD pid = GetCurrentProcessId();
 
+    winetest_get_mainargs(&main_argv);
     init_func_ptrs();
 
     if (pIsWow64Process)
@@ -870,6 +1258,7 @@ START_TEST(psapi_main)
 
     test_EnumProcesses();
     test_EnumProcessModules();
+    test_EnumProcessModulesEx();
     test_GetModuleInformation();
     test_GetPerformanceInfo();
     test_GetProcessMemoryInfo();

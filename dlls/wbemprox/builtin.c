@@ -17,8 +17,6 @@
  */
 
 #define COBJMACROS
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 
 #include <stdarg.h>
 #include <intrin.h>
@@ -79,7 +77,7 @@ static const struct column col_bios[] =
     { L"Manufacturer",                   CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Name",                           CIM_STRING },
     { L"ReleaseDate",                    CIM_DATETIME|COL_FLAG_DYNAMIC },
-    { L"SerialNumber",                   CIM_STRING|COL_FLAG_DYNAMIC },
+    { L"SerialNumber",                   CIM_STRING },
     { L"SMBIOSBIOSVersion",              CIM_STRING|COL_FLAG_DYNAMIC },
     { L"SMBIOSMajorVersion",             CIM_UINT16 },
     { L"SMBIOSMinorVersion",             CIM_UINT16 },
@@ -206,7 +204,9 @@ static const struct column col_networkadapter[] =
     { L"MACAddress",          CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Manufacturer",        CIM_STRING },
     { L"Name",                CIM_STRING|COL_FLAG_DYNAMIC },
+    { L"NetConnectionID",     CIM_STRING },
     { L"NetConnectionStatus", CIM_UINT16 },
+    { L"NetEnabled",          CIM_BOOLEAN },
     { L"PhysicalAdapter",     CIM_BOOLEAN },
     { L"PNPDeviceID",         CIM_STRING },
     { L"ServiceName",         CIM_STRING|COL_FLAG_DYNAMIC },
@@ -232,7 +232,7 @@ static const struct column col_operatingsystem[] =
 {
     { L"BootDevice",              CIM_STRING },
     { L"BuildNumber",             CIM_STRING|COL_FLAG_DYNAMIC },
-    { L"BuildType",               CIM_STRING },
+    { L"BuildType",               CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Caption",                 CIM_STRING|COL_FLAG_DYNAMIC },
     { L"CodeSet",                 CIM_STRING|COL_FLAG_DYNAMIC },
     { L"CountryCode",             CIM_STRING|COL_FLAG_DYNAMIC },
@@ -241,7 +241,7 @@ static const struct column col_operatingsystem[] =
     { L"CurrentTimeZone",         CIM_SINT16 },
     { L"FreePhysicalMemory",      CIM_UINT64 },
     { L"FreeVirtualMemory",       CIM_UINT64 },
-    { L"InstallDate",             CIM_DATETIME },
+    { L"InstallDate",             CIM_DATETIME|COL_FLAG_DYNAMIC },
     { L"LastBootUpTime",          CIM_DATETIME|COL_FLAG_DYNAMIC },
     { L"LocalDateTime",           CIM_DATETIME|COL_FLAG_DYNAMIC },
     { L"Locale",                  CIM_STRING|COL_FLAG_DYNAMIC },
@@ -409,6 +409,7 @@ static const struct column col_softwarelicensingproduct[] =
 };
 static const struct column col_sounddevice[] =
 {
+    { L"Caption",      CIM_STRING },
     { L"DeviceID",     CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Manufacturer", CIM_STRING },
     { L"Name",         CIM_STRING },
@@ -662,7 +663,9 @@ struct record_networkadapter
     const WCHAR *mac_address;
     const WCHAR *manufacturer;
     const WCHAR *name;
+    const WCHAR *netconnection_id;
     UINT16       netconnection_status;
+    int          netenabled;
     int          physicaladapter;
     const WCHAR *pnpdevice_id;
     const WCHAR *servicename;
@@ -865,6 +868,7 @@ struct record_softwarelicensingproduct
 };
 struct record_sounddevice
 {
+    const WCHAR *caption;
     const WCHAR *deviceid;
     const WCHAR *manufacturer;
     const WCHAR *name;
@@ -1257,7 +1261,7 @@ static const struct smbios_header *find_smbios_entry( enum smbios_type type, con
     return hdr;
 }
 
-static WCHAR *get_smbios_string( BYTE id, const char *buf, UINT offset, UINT buflen )
+static WCHAR *get_smbios_string_by_id( BYTE id, const char *buf, UINT offset, UINT buflen )
 {
     const char *ptr = buf + offset;
     UINT i = 0;
@@ -1271,43 +1275,43 @@ static WCHAR *get_smbios_string( BYTE id, const char *buf, UINT offset, UINT buf
     return NULL;
 }
 
-static WCHAR *get_baseboard_string( BYTE id, const char *buf, UINT len )
+static WCHAR *get_smbios_string( enum smbios_type type, size_t field_offset, const char *buf, UINT len )
 {
     const struct smbios_header *hdr;
-    const struct smbios_baseboard *baseboard;
     UINT offset;
 
-    if (!(hdr = find_smbios_entry( SMBIOS_TYPE_BASEBOARD, buf, len ))) return NULL;
+    if (!(hdr = find_smbios_entry( type, buf, len ))) return NULL;
 
-    baseboard = (const struct smbios_baseboard *)hdr;
-    offset = (const char *)baseboard - buf + baseboard->hdr.length;
-    return get_smbios_string( id, buf, offset, len );
+    if (field_offset + sizeof(BYTE) > hdr->length) return NULL;
+
+    offset = (const char *)hdr - buf + hdr->length;
+    return get_smbios_string_by_id( ((const BYTE *)hdr)[field_offset], buf, offset, len );
 }
 
 static WCHAR *get_baseboard_manufacturer( const char *buf, UINT len )
 {
-    WCHAR *ret = get_baseboard_string( 1, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_BASEBOARD, offsetof(struct smbios_baseboard, vendor), buf, len );
     if (!ret) return wcsdup( L"Intel Corporation" );
     return ret;
 }
 
 static WCHAR *get_baseboard_product( const char *buf, UINT len )
 {
-    WCHAR *ret = get_baseboard_string( 2, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_BASEBOARD, offsetof(struct smbios_baseboard, product), buf, len );
     if (!ret) return wcsdup( L"Base Board" );
     return ret;
 }
 
 static WCHAR *get_baseboard_serialnumber( const char *buf, UINT len )
 {
-    WCHAR *ret = get_baseboard_string( 4, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_BASEBOARD, offsetof(struct smbios_baseboard, serial), buf, len );
     if (!ret) return wcsdup( L"None" );
     return ret;
 }
 
 static WCHAR *get_baseboard_version( const char *buf, UINT len )
 {
-    WCHAR *ret = get_baseboard_string( 3, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_BASEBOARD, offsetof(struct smbios_baseboard, version), buf, len );
     if (!ret) return wcsdup( L"1.0" );
     return ret;
 }
@@ -1356,23 +1360,9 @@ static UINT16 get_bios_smbiosminorversion( const char *buf, UINT len )
     if (len < sizeof(*prologue)) return 0;
     return prologue->minor_version;
 }
-
-static WCHAR *get_bios_string( BYTE id, const char *buf, UINT len )
-{
-    const struct smbios_header *hdr;
-    const struct smbios_bios *bios;
-    UINT offset;
-
-    if (!(hdr = find_smbios_entry( SMBIOS_TYPE_BIOS, buf, len ))) return NULL;
-
-    bios = (const struct smbios_bios *)hdr;
-    offset = (const char *)bios - buf + bios->hdr.length;
-    return get_smbios_string( id, buf, offset, len );
-}
-
 static WCHAR *get_bios_manufacturer( const char *buf, UINT len )
 {
-    WCHAR *ret = get_bios_string( 1, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_BIOS, offsetof(struct smbios_bios, vendor), buf, len );
     if (!ret) return wcsdup( L"The Wine Project" );
     return ret;
 }
@@ -1410,22 +1400,15 @@ static WCHAR *convert_bios_date( const WCHAR *str )
 
 static WCHAR *get_bios_releasedate( const char *buf, UINT len )
 {
-    WCHAR *ret, *date = get_bios_string( 3, buf, len );
+    WCHAR *ret, *date = get_smbios_string( SMBIOS_TYPE_BIOS, offsetof(struct smbios_bios, date), buf, len );
     if (!date || !(ret = convert_bios_date( date ))) ret = wcsdup( L"20120608000000.000000+000" );
     free( date );
     return ret;
 }
 
-static WCHAR *get_bios_serialnumber( const char *buf, UINT len )
-{
-    WCHAR *ret = get_bios_string( 4, buf, len );
-    if (!ret) return wcsdup( L"0" );
-    return ret;
-}
-
 static WCHAR *get_bios_smbiosbiosversion( const char *buf, UINT len )
 {
-    WCHAR *ret = get_bios_string( 2, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_BIOS, offsetof(struct smbios_bios, version), buf, len );
     if (!ret) return wcsdup( L"Wine" );
     return ret;
 }
@@ -1500,7 +1483,7 @@ static enum fill_status fill_bios( struct table *table, const struct expr *cond 
     rec->manufacturer           = get_bios_manufacturer( buf, len );
     rec->name                   = L"Default System BIOS";
     rec->releasedate            = get_bios_releasedate( buf, len );
-    rec->serialnumber           = get_bios_serialnumber( buf, len );
+    rec->serialnumber           = L"Serial number";
     rec->smbiosbiosversion      = get_bios_smbiosbiosversion( buf, len );
     rec->smbiosmajorversion     = get_bios_smbiosmajorversion( buf, len );
     rec->smbiosminorversion     = get_bios_smbiosminorversion( buf, len );
@@ -1594,7 +1577,7 @@ static UINT get_logical_processor_count( UINT *num_physical, UINT *num_packages 
         if (entry->Relationship == RelationProcessorCore)
         {
             core_relation_count++;
-            if (entry->u.Processor.Flags & LTP_PC_SMT) smt_enabled = TRUE;
+            if (entry->Processor.Flags & LTP_PC_SMT) smt_enabled = TRUE;
         }
         else if (entry->Relationship == RelationProcessorPackage)
         {
@@ -1627,6 +1610,15 @@ static UINT64 get_available_physical_memory(void)
     return status.ullAvailPhys;
 }
 
+static UINT64 get_total_virtual_memory(void)
+{
+    MEMORYSTATUSEX status;
+
+    status.dwLength = sizeof(status);
+    if (!GlobalMemoryStatusEx( &status )) return 1024 * 1024 * 1024;
+    return status.ullTotalVirtual;
+}
+
 static UINT64 get_available_virtual_memory(void)
 {
     MEMORYSTATUSEX status;
@@ -1650,7 +1642,7 @@ static const WCHAR *get_systemtype(void)
 {
     SYSTEM_INFO info;
     GetNativeSystemInfo( &info );
-    if (info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) return L"x64 based PC";
+    if (info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) return L"x64 based PC";
     return L"x86 based PC";
 }
 
@@ -1672,29 +1664,16 @@ static WCHAR *get_username(void)
     return ret;
 }
 
-static WCHAR *get_compsysproduct_string( BYTE id, const char *buf, UINT len )
-{
-    const struct smbios_header *hdr;
-    const struct smbios_system *system;
-    UINT offset;
-
-    if (!(hdr = find_smbios_entry( SMBIOS_TYPE_SYSTEM, buf, len ))) return NULL;
-
-    system = (const struct smbios_system *)hdr;
-    offset = (const char *)system - buf + system->hdr.length;
-    return get_smbios_string( id, buf, offset, len );
-}
-
 static WCHAR *get_compsysproduct_name( const char *buf, UINT len )
 {
-    WCHAR *ret = get_compsysproduct_string( 2, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_SYSTEM, offsetof(struct smbios_system, product), buf, len );
     if (!ret) return wcsdup( L"Wine" );
     return ret;
 }
 
 static WCHAR *get_compsysproduct_vendor( const char *buf, UINT len )
 {
-    WCHAR *ret = get_compsysproduct_string( 1, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_SYSTEM, offsetof(struct smbios_system, vendor), buf, len );
     if (!ret) return wcsdup( L"The Wine Project" );
     return ret;
 }
@@ -1736,7 +1715,7 @@ static enum fill_status fill_compsys( struct table *table, const struct expr *co
 
 static WCHAR *get_compsysproduct_identifyingnumber( const char *buf, UINT len )
 {
-    WCHAR *ret = get_compsysproduct_string( 4, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_SYSTEM, offsetof(struct smbios_system, serial), buf, len );
     if (!ret) return wcsdup( L"0" );
     return ret;
 }
@@ -1764,7 +1743,7 @@ done:
 
 static WCHAR *get_compsysproduct_version( const char *buf, UINT len )
 {
-    WCHAR *ret = get_compsysproduct_string( 3, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_SYSTEM, offsetof(struct smbios_system, version), buf, len );
     if (!ret) return wcsdup( L"1.0" );
     return ret;
 }
@@ -2861,25 +2840,36 @@ static WCHAR *get_networkadapter_guid( const IF_LUID *luid )
     return guid_to_str( &guid );
 }
 
+static IP_ADAPTER_ADDRESSES *get_network_adapters(void)
+{
+    ULONG err, size = 4096;
+    IP_ADAPTER_ADDRESSES *tmp, *ret;
+
+    if (!(ret = malloc( size ))) return NULL;
+    err = GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_INCLUDE_GATEWAYS, NULL, ret, &size );
+    while (err == ERROR_BUFFER_OVERFLOW)
+    {
+        if (!(tmp = realloc( ret, size ))) break;
+        ret = tmp;
+        err = GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_INCLUDE_GATEWAYS, NULL, ret, &size );
+    }
+    if (err == ERROR_SUCCESS) return ret;
+    free( ret );
+    return NULL;
+}
+
 static enum fill_status fill_networkadapter( struct table *table, const struct expr *cond )
 {
     WCHAR device_id[11];
     struct record_networkadapter *rec;
     IP_ADAPTER_ADDRESSES *aa, *buffer;
     UINT row = 0, offset = 0, count = 0;
-    DWORD size = 0, ret;
     int adaptertypeid, physical;
+    UINT16 connection_status;
     enum fill_status status = FILL_STATUS_UNFILTERED;
 
-    ret = GetAdaptersAddresses( AF_UNSPEC, 0, NULL, NULL, &size );
-    if (ret != ERROR_BUFFER_OVERFLOW) return FILL_STATUS_FAILED;
+    if (!(buffer = get_network_adapters())) return FILL_STATUS_FAILED;
 
-    if (!(buffer = malloc( size ))) return FILL_STATUS_FAILED;
-    if (GetAdaptersAddresses( AF_UNSPEC, 0, NULL, buffer, &size ))
-    {
-        free( buffer );
-        return FILL_STATUS_FAILED;
-    }
     for (aa = buffer; aa; aa = aa->Next)
     {
         if (aa->IfType != IF_TYPE_SOFTWARE_LOOPBACK) count++;
@@ -2893,19 +2883,23 @@ static enum fill_status fill_networkadapter( struct table *table, const struct e
     {
         if (aa->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
 
+        connection_status = get_connection_status( aa->OperStatus );
+
         rec = (struct record_networkadapter *)(table->data + offset);
-        swprintf( device_id, ARRAY_SIZE( device_id ), L"%u", aa->u.s.IfIndex );
+        swprintf( device_id, ARRAY_SIZE( device_id ), L"%u", aa->IfIndex );
         rec->adaptertype          = get_adaptertype( aa->IfType, &adaptertypeid, &physical );
         rec->adaptertypeid        = adaptertypeid;
         rec->description          = wcsdup( aa->Description );
         rec->device_id            = wcsdup( device_id );
         rec->guid                 = get_networkadapter_guid( &aa->Luid );
-        rec->index                = aa->u.s.IfIndex;
-        rec->interface_index      = aa->u.s.IfIndex;
+        rec->index                = aa->IfIndex;
+        rec->interface_index      = aa->IfIndex;
         rec->mac_address          = get_mac_address( aa->PhysicalAddress, aa->PhysicalAddressLength );
         rec->manufacturer         = L"The Wine Project";
+        rec->netconnection_id     = NULL; /* FIXME Windows seems to fill this when it's connected and in use */
         rec->name                 = wcsdup( aa->FriendlyName );
-        rec->netconnection_status = get_connection_status( aa->OperStatus );
+        rec->netenabled           = connection_status ? -1 : 0;
+        rec->netconnection_status = connection_status;
         rec->physicaladapter      = physical;
         rec->pnpdevice_id         = L"PCI\\VEN_8086&DEV_100E&SUBSYS_001E8086&REV_02\\3&267A616A&1&18";
         rec->servicename          = wcsdup( aa->FriendlyName );
@@ -3099,18 +3093,10 @@ static enum fill_status fill_networkadapterconfig( struct table *table, const st
     struct record_networkadapterconfig *rec;
     IP_ADAPTER_ADDRESSES *aa, *buffer;
     UINT row = 0, offset = 0, count = 0;
-    DWORD size = 0, ret;
     enum fill_status status = FILL_STATUS_UNFILTERED;
 
-    ret = GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS, NULL, NULL, &size );
-    if (ret != ERROR_BUFFER_OVERFLOW) return FILL_STATUS_FAILED;
+    if (!(buffer = get_network_adapters())) return FILL_STATUS_FAILED;
 
-    if (!(buffer = malloc( size ))) return FILL_STATUS_FAILED;
-    if (GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS, NULL, buffer, &size ))
-    {
-        free( buffer );
-        return FILL_STATUS_FAILED;
-    }
     for (aa = buffer; aa; aa = aa->Next)
     {
         if (aa->IfType != IF_TYPE_SOFTWARE_LOOPBACK) count++;
@@ -3131,7 +3117,7 @@ static enum fill_status fill_networkadapterconfig( struct table *table, const st
         rec->dnsdomain            = L"";
         rec->dnshostname          = get_dnshostname( aa->FirstUnicastAddress );
         rec->dnsserversearchorder = get_dnsserversearchorder( aa->FirstDnsServerAddress );
-        rec->index                = aa->u.s.IfIndex;
+        rec->index                = aa->IfIndex;
         rec->ipaddress            = get_ipaddress( aa->FirstUnicastAddress );
         rec->ipconnectionmetric   = 20;
         rec->ipenabled            = -1;
@@ -3259,7 +3245,7 @@ static enum fill_status fill_printer( struct table *table, const struct expr *co
         swprintf( id, ARRAY_SIZE( id ), L"Printer%u", i );
         rec->device_id            = wcsdup( id );
         rec->drivername           = wcsdup( info[i].pDriverName );
-        rec->horizontalresolution = info[i].pDevMode->u1.s1.dmPrintQuality;
+        rec->horizontalresolution = info[i].pDevMode->dmPrintQuality;
         rec->local                = -1;
         rec->location             = wcsdup( info[i].pLocation );
         rec->name                 = wcsdup( info[i].pPrinterName );
@@ -3387,7 +3373,7 @@ static const WCHAR *get_osarchitecture(void)
 {
     SYSTEM_INFO info;
     GetNativeSystemInfo( &info );
-    if (info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) return L"64-bit";
+    if (info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) return L"64-bit";
     return L"32-bit";
 }
 static void get_processor_caption( WCHAR *caption, UINT len )
@@ -3648,6 +3634,11 @@ static WCHAR *get_osbuildnumber( OSVERSIONINFOEXW *ver )
     return ret;
 }
 
+static WCHAR *get_osbuildtype(void)
+{
+    return get_reg_str( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion", L"CurrentType" );
+}
+
 static WCHAR *get_oscaption( OSVERSIONINFOEXW *ver )
 {
     static const WCHAR windowsW[] = L"Microsoft Windows ";
@@ -3740,6 +3731,29 @@ static WCHAR *get_windowsdirectory(void)
     return wcsdup( dir );
 }
 
+static WCHAR *get_osinstalldate(void)
+{
+    HANDLE handle = CreateFileW( L"c:\\", GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                                 FILE_FLAG_BACKUP_SEMANTICS, NULL );
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        FILETIME ft = { 0 };
+        WCHAR *ret;
+
+        GetFileTime( handle, &ft, NULL, NULL );
+        CloseHandle( handle );
+        if ((ret = malloc( 26 * sizeof(WCHAR) )))
+        {
+            SYSTEMTIME st = { 0 };
+            FileTimeToSystemTime( &ft, &st );
+            swprintf( ret, 26, L"%04u%02u%02u%02u%02u%02u.%06u+000", st.wYear, st.wMonth, st.wDay, st.wHour,
+                      st.wMinute, st.wSecond, st.wMilliseconds * 1000 );
+            return ret;
+        }
+    }
+    return wcsdup( L"20230101000000.000000+000" );
+}
+
 static enum fill_status fill_operatingsystem( struct table *table, const struct expr *cond )
 {
     struct record_operatingsystem *rec;
@@ -3755,7 +3769,7 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
     rec = (struct record_operatingsystem *)table->data;
     rec->bootdevice             = L"\\Device\\HarddiskVolume1";
     rec->buildnumber            = get_osbuildnumber( &ver );
-    rec->buildtype              = L"Wine build";
+    rec->buildtype              = get_osbuildtype();
     rec->caption                = get_oscaption( &ver );
     rec->codeset                = get_codeset();
     rec->countrycode            = get_countrycode();
@@ -3764,7 +3778,7 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
     rec->currenttimezone        = get_currenttimezone();
     rec->freephysicalmemory     = get_available_physical_memory() / 1024;
     rec->freevirtualmemory      = get_available_virtual_memory() / 1024;
-    rec->installdate            = L"20140101000000.000000+000";
+    rec->installdate            = get_osinstalldate();
     rec->lastbootuptime         = get_lastbootuptime();
     rec->localdatetime          = get_localdatetime();
     rec->locale                 = get_locale();
@@ -3786,8 +3800,8 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
     rec->suitemask              = 272;     /* Single User + Terminal */
     rec->systemdirectory        = get_systemdirectory();
     rec->systemdrive            = get_systemdrive();
-    rec->totalvirtualmemorysize = get_total_physical_memory() / 1024;
-    rec->totalvisiblememorysize = rec->totalvirtualmemorysize;
+    rec->totalvirtualmemorysize = get_total_virtual_memory() / 1024;
+    rec->totalvisiblememorysize = get_total_physical_memory() / 1024;
     rec->version                = get_osversion( &ver );
     rec->windowsdirectory       = get_windowsdirectory();
     if (!match_row( table, row, cond, &status )) free_row_values( table, row );
@@ -3984,6 +3998,7 @@ static enum fill_status fill_sid( struct table *table, const struct expr *cond )
     const WCHAR *str;
     struct record_sid *rec;
     UINT len;
+    NTSTATUS status;
 
     if (!(str = find_sid_str( cond ))) return FILL_STATUS_FAILED;
     if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
@@ -3998,10 +4013,12 @@ static enum fill_status fill_sid( struct table *table, const struct expr *cond )
         LocalFree( sid );
         return FILL_STATUS_FAILED;
     }
-    if (LsaLookupSids( handle, 1, &sid, &domain, &name ))
+    if ((status = LsaLookupSids( handle, 1, &sid, &domain, &name )))
     {
         LocalFree( sid );
         LsaClose( handle );
+        if (status == STATUS_NONE_MAPPED || status == STATUS_SOME_NOT_MAPPED)
+            LsaFreeMemory( domain );
         return FILL_STATUS_FAILED;
     }
 
@@ -4022,22 +4039,9 @@ static enum fill_status fill_sid( struct table *table, const struct expr *cond )
     return FILL_STATUS_FILTERED;
 }
 
-static WCHAR *get_systemenclosure_string( BYTE id, const char *buf, UINT len )
-{
-    const struct smbios_header *hdr;
-    const struct smbios_chassis *chassis;
-    UINT offset;
-
-    if (!(hdr = find_smbios_entry( SMBIOS_TYPE_CHASSIS, buf, len ))) return NULL;
-
-    chassis = (const struct smbios_chassis *)hdr;
-    offset = (const char *)chassis - buf + chassis->hdr.length;
-    return get_smbios_string( id, buf, offset, len );
-}
-
 static WCHAR *get_systemenclosure_manufacturer( const char *buf, UINT len )
 {
-    WCHAR *ret = get_systemenclosure_string( 1, buf, len );
+    WCHAR *ret = get_smbios_string( SMBIOS_TYPE_CHASSIS, offsetof(struct smbios_chassis, vendor), buf, len );
     if (!ret) return wcsdup( L"Wine" );
     return ret;
 }
@@ -4207,8 +4211,8 @@ static enum fill_status fill_videocontroller( struct table *table, const struct 
     rec->current_verticalres   = vres;
     rec->description           = wcsdup( name );
     rec->device_id             = L"VideoController1";
-    rec->driverdate            = L"20220118000000.000000-000";
-    rec->driverversion         = L"30.0.14023.3004";
+    rec->driverdate            = L"20230420000000.000000-000";
+    rec->driverversion         = L"31.0.14051.5006";
     rec->installeddriver       = get_videocontroller_installeddriver( desc.VendorId );
     rec->name                  = wcsdup( name );
     rec->pnpdevice_id          = get_videocontroller_pnpdeviceid( &desc );
@@ -4303,6 +4307,7 @@ static enum fill_status fill_sounddevice( struct table *table, const struct expr
     get_dxgi_adapter_desc( &desc );
 
     rec = (struct record_sounddevice *)table->data;
+    rec->caption = L"Wine Audio Device";
     rec->deviceid = get_sounddevice_pnpdeviceid( &desc );
     rec->manufacturer = L"The Wine Project";
     rec->name = L"Wine Audio Device";
@@ -4400,6 +4405,7 @@ builtin_namespaces[WBEMPROX_NAMESPACE_LAST] =
 {
     {L"cimv2", cimv2_builtin_classes, ARRAY_SIZE(cimv2_builtin_classes)},
     {L"Microsoft\\Windows\\Storage", NULL, 0},
+    {L"StandardCimv2", NULL, 0},
     {L"wmi", wmi_builtin_classes, ARRAY_SIZE(wmi_builtin_classes)},
 };
 

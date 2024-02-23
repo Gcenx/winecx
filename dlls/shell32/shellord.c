@@ -306,12 +306,12 @@ VOID WINAPI SHGetSettings(LPSHELLFLAGSTATE lpsfs, DWORD dwMask)
 	    if (SSF_SHOWSYSFILES & dwMask)	lpsfs->fShowSysFiles  = 0;
 	  }
 	  else if (dwData == 1)
-	  { if (SSF_SHOWALLOBJECTS & dwMask)	lpsfs->fShowAllObjects  = 1;
+	  { if (SSF_SHOWALLOBJECTS & dwMask)	lpsfs->fShowAllObjects  = -1;
 	    if (SSF_SHOWSYSFILES & dwMask)	lpsfs->fShowSysFiles  = 0;
 	  }
 	  else if (dwData == 2)
 	  { if (SSF_SHOWALLOBJECTS & dwMask)	lpsfs->fShowAllObjects  = 0;
-	    if (SSF_SHOWSYSFILES & dwMask)	lpsfs->fShowSysFiles  = 1;
+	    if (SSF_SHOWSYSFILES & dwMask)	lpsfs->fShowSysFiles  = -1;
 	  }
 	}
 	RegCloseKey (hKey);
@@ -1182,15 +1182,15 @@ BOOL WINAPI ReadCabinetState(CABINETSTATE *cs, int length)
 		memset(cs, 0, sizeof(*cs));
 		cs->cLength          = sizeof(*cs);
 		cs->nVersion         = 2;
-		cs->fFullPathTitle   = FALSE;
-		cs->fSaveLocalView   = TRUE;
-		cs->fNotShell        = FALSE;
-		cs->fSimpleDefault   = TRUE;
-		cs->fDontShowDescBar = FALSE;
-		cs->fNewWindowMode   = FALSE;
-		cs->fShowCompColor   = FALSE;
-		cs->fDontPrettyNames = FALSE;
-		cs->fAdminsCreateCommonGroups = TRUE;
+		cs->fFullPathTitle   = 0;
+		cs->fSaveLocalView   = -1;
+		cs->fNotShell        = 0;
+		cs->fSimpleDefault   = -1;
+		cs->fDontShowDescBar = 0;
+		cs->fNewWindowMode   = 0;
+		cs->fShowCompColor   = 0;
+		cs->fDontPrettyNames = 0;
+		cs->fAdminsCreateCommonGroups = -1;
 		cs->fMenuEnumFilter  = 96;
 	}
 	
@@ -1268,7 +1268,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
         }
     }
 
-    lpGroups = heap_alloc(dwSize);
+    lpGroups = malloc(dwSize);
     if (lpGroups == NULL)
     {
         CloseHandle(hToken);
@@ -1277,7 +1277,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
 
     if (!GetTokenInformation(hToken, TokenGroups, lpGroups, dwSize, &dwSize))
     {
-        heap_free(lpGroups);
+        free(lpGroups);
         CloseHandle(hToken);
         return FALSE;
     }
@@ -1287,7 +1287,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
                                   DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
                                   &lpSid))
     {
-        heap_free(lpGroups);
+        free(lpGroups);
         return FALSE;
     }
 
@@ -1301,7 +1301,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
     }
 
     FreeSid(lpSid);
-    heap_free(lpGroups);
+    free(lpGroups);
     return bResult;
 }
 
@@ -1427,7 +1427,7 @@ DWORD WINAPI DoEnvironmentSubstA(LPSTR pszString, UINT cchString)
 
     TRACE("(%s, %d)\n", debugstr_a(pszString), cchString);
 
-    if ((dst = heap_alloc(cchString * sizeof(CHAR))))
+    if ((dst = malloc(cchString * sizeof(CHAR))))
     {
         len = ExpandEnvironmentStringsA(pszString, dst, cchString);
         /* len includes the terminating 0 */
@@ -1439,7 +1439,7 @@ DWORD WINAPI DoEnvironmentSubstA(LPSTR pszString, UINT cchString)
         else
             len = cchString;
 
-        heap_free(dst);
+        free(dst);
     }
     return MAKELONG(len, res);
 }
@@ -1471,7 +1471,7 @@ DWORD WINAPI DoEnvironmentSubstW(LPWSTR pszString, UINT cchString)
 
     TRACE("(%s, %d)\n", debugstr_w(pszString), cchString);
 
-    if ((cchString < MAXLONG) && (dst = heap_alloc(cchString * sizeof(WCHAR))))
+    if ((cchString < MAXLONG) && (dst = malloc(cchString * sizeof(WCHAR))))
     {
         len = ExpandEnvironmentStringsW(pszString, dst, cchString);
         /* len includes the terminating 0 */
@@ -1483,7 +1483,7 @@ DWORD WINAPI DoEnvironmentSubstW(LPWSTR pszString, UINT cchString)
         else
             len = cchString;
 
-        heap_free(dst);
+        free(dst);
     }
     return MAKELONG(len, res);
 }

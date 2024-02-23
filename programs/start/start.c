@@ -51,11 +51,11 @@ static void output(const WCHAR *message)
 		char  *mesA;
 		/* Convert to OEM, then output */
 		len = WideCharToMultiByte( GetOEMCP(), 0, message, wlen, NULL, 0, NULL, NULL );
-		mesA = HeapAlloc(GetProcessHeap(), 0, len*sizeof(char));
+		mesA = malloc(len);
 		if (!mesA) return;
 		WideCharToMultiByte( GetOEMCP(), 0, message, wlen, mesA, len, NULL, NULL );
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), mesA, len, &count, FALSE);
-		HeapFree(GetProcessHeap(), 0, mesA);
+		free(mesA);
 	}
 }
 
@@ -77,7 +77,7 @@ static void fatal_error(const WCHAR *msg, DWORD error_code, const WCHAR *filenam
     output(L": ");
     args[0] = (DWORD_PTR)filename;
     status = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ARGUMENT_ARRAY,
-                            NULL, error_code, 0, (LPWSTR)&lpMsgBuf, 0, (__ms_va_list *)args );
+                            NULL, error_code, 0, (LPWSTR)&lpMsgBuf, 0, (va_list *)args );
     if (!status)
     {
         WINE_ERR("FormatMessage failed\n");
@@ -99,7 +99,7 @@ static void fatal_string_error(int which, DWORD error_code, const WCHAR *filenam
 
 	fatal_error(msg, error_code, filename);
 }
-	
+
 static void fatal_string(int which)
 {
 	WCHAR msg[2048];
@@ -207,7 +207,7 @@ static WCHAR *get_parent_dir(WCHAR* path)
 	else
 		len = last_slash - path + 1;
 
-	result = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+	result = malloc( len * sizeof(WCHAR) );
 	CopyMemory(result, path, (len-1)*sizeof(WCHAR));
 	result[len-1] = '\0';
 
@@ -220,7 +220,19 @@ static BOOL is_option(const WCHAR* arg, const WCHAR* opt)
                           arg, -1, opt, -1) == CSTR_EQUAL;
 }
 
-static void parse_title(const WCHAR *arg, WCHAR *title, int size)
+static BOOL is_option_with_arg(WCHAR **argv, int *pos, const WCHAR* opt)
+{
+    if (!is_option( argv[*pos], opt )) return FALSE;
+    (*pos)++;
+    if (!argv[*pos])
+    {
+        WINE_ERR("missing argument for %s\n", debugstr_w(opt));
+        usage();
+    }
+    return TRUE;
+}
+
+static WCHAR *parse_title(const WCHAR *arg)
 {
     /* See:
      *     WCMD_start() in programs/cmd/builtins.c
@@ -228,15 +240,13 @@ static void parse_title(const WCHAR *arg, WCHAR *title, int size)
      * The shell has already tokenized the command line for us.
      * All we need to do is filter out all the quotes.
      */
-
     int next;
     const WCHAR *p = arg;
+    WCHAR *title = malloc( wcslen(arg) * sizeof(WCHAR) );
 
-    for (next = 0; next < (size-1) && *p; p++) {
-        if (*p != '"')
-            title[next++] = *p;
-    }
-    title[next] = '\0';
+    for (next = 0; *p; p++) if (*p != '"') title[next++] = *p;
+    title[next] = 0;
+    return title;
 }
 
 static BOOL search_path(const WCHAR *firstParam, WCHAR **full_path)
@@ -377,247 +387,216 @@ static BOOL search_path(const WCHAR *firstParam, WCHAR **full_path)
         }
 
         if (found) {
-            int needed_size = lstrlenW(thisDir) + 1;
-            *full_path = HeapAlloc(GetProcessHeap(), 0, needed_size * sizeof(WCHAR));
-            if (*full_path)
-                lstrcpyW(*full_path, thisDir);
+            *full_path = wcsdup(thisDir);
+            if (!*full_path) fatal_string_error(STRING_EXECFAIL, ERROR_OUTOFMEMORY, firstParam);
             return TRUE;
         }
     }
     return FALSE;
 }
 
+static struct
+{
+    SHELLEXECUTEINFOW sei;
+    WCHAR            *title;
+    DWORD             creation_flags;
+    USHORT            machine;
+    BOOL              cp_inherit;
+} opts;
+
+static void parse_command_line( int argc, WCHAR *argv[] )
+{
+    int i;
+    const WCHAR *file = NULL;
+    BOOL unix_mode = FALSE;
+    BOOL progid_open = FALSE;
+
+    opts.sei.cbSize = sizeof(opts.sei);
+    opts.sei.lpVerb = L"open";
+    opts.sei.nShow = SW_SHOWNORMAL;
+    /* Dunno what these mean, but it looks like winMe's start uses them */
+    opts.sei.fMask = SEE_MASK_FLAG_DDEWAIT | SEE_MASK_FLAG_NO_UI;
+    opts.creation_flags = CREATE_NEW_CONSOLE;
+    opts.cp_inherit = FALSE;
+
+    /* Canonical Microsoft commandline flag processing:
+     * flags start with / and are case insensitive.
+     */
+    for (i = 1; i < argc; i++)
+    {
+        /* parse first quoted argument as console title */
+        if (!opts.title && argv[i][0] == '"') {
+            opts.title = parse_title(argv[i]);
+            continue;
+        }
+        if (argv[i][0] != '/')
+            break;
+
+        if (argv[i][1] == 'd' || argv[i][1] == 'D') {
+            if (argv[i][2])
+                /* The start directory was concatenated to the option */
+                opts.sei.lpDirectory = argv[i]+2;
+            else if (i+1 == argc) {
+                WINE_ERR("you must specify a directory path for the /d option\n");
+                usage();
+            } else
+                opts.sei.lpDirectory = argv[++i];
+        }
+        else if (is_option(argv[i], L"/b"))
+            opts.creation_flags &= ~CREATE_NEW_CONSOLE;
+        else if (argv[i][0] == '/' && (argv[i][1] == 'i' || argv[i][1] == 'I'))
+            TRACE("/i is ignored\n"); /* FIXME */
+        else if (is_option(argv[i], L"/min"))
+            opts.sei.nShow = SW_SHOWMINIMIZED;
+        else if (is_option(argv[i], L"/max"))
+            opts.sei.nShow = SW_SHOWMAXIMIZED;
+        else if (is_option(argv[i], L"/low"))
+            opts.creation_flags |= IDLE_PRIORITY_CLASS;
+        else if (is_option(argv[i], L"/normal"))
+            opts.creation_flags |= NORMAL_PRIORITY_CLASS;
+        else if (is_option(argv[i], L"/high"))
+            opts.creation_flags |= HIGH_PRIORITY_CLASS;
+        else if (is_option(argv[i], L"/realtime"))
+            opts.creation_flags |= REALTIME_PRIORITY_CLASS;
+        else if (is_option(argv[i], L"/abovenormal"))
+            opts.creation_flags |= ABOVE_NORMAL_PRIORITY_CLASS;
+        else if (is_option(argv[i], L"/belownormal"))
+            opts.creation_flags |= BELOW_NORMAL_PRIORITY_CLASS;
+        else if (is_option(argv[i], L"/separate"))
+            opts.creation_flags |= CREATE_SEPARATE_WOW_VDM;
+        else if (is_option(argv[i], L"/shared"))
+            opts.creation_flags |= CREATE_SHARED_WOW_VDM;
+        else if (is_option(argv[i], L"/w") || is_option(argv[i], L"/wait"))
+            opts.sei.fMask |= SEE_MASK_NOCLOSEPROCESS;
+        else if (is_option(argv[i], L"/?"))
+            usage();
+        else if (is_option_with_arg(argv, &i, L"/node"))
+            TRACE("/node is ignored\n"); /* FIXME */
+        else if (is_option_with_arg(argv, &i, L"/affinity"))
+            TRACE("/affinity is ignored\n"); /* FIXME */
+        else if (is_option_with_arg(argv, &i, L"/machine"))
+        {
+            if (is_option( argv[i], L"x86" )) opts.machine = IMAGE_FILE_MACHINE_I386;
+            else if (is_option( argv[i], L"amd64" )) opts.machine = IMAGE_FILE_MACHINE_AMD64;
+            else if (is_option( argv[i], L"arm" )) opts.machine = IMAGE_FILE_MACHINE_ARMNT;
+            else if (is_option( argv[i], L"arm64" )) opts.machine = IMAGE_FILE_MACHINE_ARM64;
+            else usage();
+        }
+
+        /* Wine extensions */
+
+        else if (is_option_with_arg(argv, &i, L"/unix")) {
+            unix_mode = TRUE;
+            break;
+        }
+        else if (is_option(argv[i], L"/exec")) {
+            opts.creation_flags = 0;
+            opts.sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI;
+            opts.cp_inherit = TRUE;
+            i++;
+            break;
+        }
+        else if (is_option_with_arg(argv, &i, L"/progIDOpen")) {
+            progid_open = TRUE;
+            opts.sei.lpClass = argv[i++];
+            opts.sei.fMask |= SEE_MASK_CLASSNAME;
+            break;
+        }
+        else
+        {
+            WINE_ERR("Unknown option '%s'\n", wine_dbgstr_w(argv[i]));
+            usage();
+        }
+    }
+
+    if (i == argc)
+    {
+        if (progid_open) usage();
+        file = L"cmd.exe";
+    }
+    else file = argv[i++];
+
+    opts.sei.lpParameters = build_command_line( &argv[i] );
+
+    if (unix_mode || progid_open)
+    {
+        LPWSTR (*CDECL wine_get_dos_file_name_ptr)(LPCSTR);
+	WCHAR *dos_filename;
+        char *unixpath;
+        int unixpath_len;
+
+        wine_get_dos_file_name_ptr = (void*)GetProcAddress(GetModuleHandleA("KERNEL32"), "wine_get_dos_file_name");
+        if (!wine_get_dos_file_name_ptr) fatal_string(STRING_UNIXFAIL);
+
+        unixpath_len = WideCharToMultiByte(CP_UNIXCP, 0, file, -1, NULL, 0, NULL, NULL);
+        unixpath = malloc( unixpath_len );
+        WideCharToMultiByte(CP_UNIXCP, 0, file, -1, unixpath, unixpath_len, NULL, NULL);
+        dos_filename = wine_get_dos_file_name_ptr(unixpath);
+        free( unixpath );
+
+        if (!dos_filename)
+            fatal_string(STRING_UNIXFAIL);
+
+        opts.sei.lpFile = dos_filename;
+        if (!opts.sei.lpDirectory) opts.sei.lpDirectory = get_parent_dir(dos_filename);
+        opts.sei.fMask &= ~SEE_MASK_FLAG_NO_UI;
+    }
+    else
+    {
+	WCHAR *fullpath;
+
+        if (search_path(file, &fullpath)) opts.sei.lpFile = fullpath;
+        else opts.sei.lpFile = file;
+    }
+}
+
+
 int __cdecl wmain (int argc, WCHAR *argv[])
 {
-	SHELLEXECUTEINFOW sei;
-	DWORD creation_flags;
-	int i;
-        BOOL unix_mode = FALSE;
-        BOOL progid_open = FALSE;
-	WCHAR *title = NULL;
-	const WCHAR *file;
-	WCHAR *dos_filename = NULL;
-	WCHAR *fullpath = NULL;
-	WCHAR *parent_directory = NULL;
 	DWORD binary_type;
 
-	memset(&sei, 0, sizeof(sei));
-	sei.cbSize = sizeof(sei);
-        sei.lpVerb = L"open";
-	sei.nShow = SW_SHOWNORMAL;
-	/* Dunno what these mean, but it looks like winMe's start uses them */
-	sei.fMask = SEE_MASK_FLAG_DDEWAIT|
-	            SEE_MASK_FLAG_NO_UI;
-        sei.lpDirectory = NULL;
-        creation_flags = CREATE_NEW_CONSOLE;
+        parse_command_line( argc, argv );
 
-	/* Canonical Microsoft commandline flag processing:
-	 * flags start with / and are case insensitive.
-	 */
-	for (i=1; i<argc; i++) {
-                /* parse first quoted argument as console title */
-                if (!title && argv[i][0] == '"') {
-			/* it will remove at least 1 quote */
-			int maxChars = lstrlenW(argv[1]);
-			title = HeapAlloc(GetProcessHeap(), 0, maxChars*sizeof(WCHAR));
-			if (title)
-				parse_title(argv[i], title, maxChars);
-			else {
-				WINE_ERR("out of memory\n");
-				ExitProcess(1);
-			}
-			continue;
-		}
-		if (argv[i][0] != '/')
-			break;
-
-		if (argv[i][1] == 'd' || argv[i][1] == 'D') {
-			if (argv[i][2])
-				/* The start directory was concatenated to the option */
-				sei.lpDirectory = argv[i]+2;
-			else if (i+1 == argc) {
-				WINE_ERR("you must specify a directory path for the /d option\n");
-				usage();
-			} else
-				sei.lpDirectory = argv[++i];
-		}
-                else if (is_option(argv[i], L"/b")) {
-			creation_flags &= ~CREATE_NEW_CONSOLE;
-		}
-		else if (argv[i][0] == '/' && (argv[i][1] == 'i' || argv[i][1] == 'I')) {
-                    TRACE("/i is ignored\n"); /* FIXME */
-		}
-                else if (is_option(argv[i], L"/min")) {
-			sei.nShow = SW_SHOWMINIMIZED;
-		}
-                else if (is_option(argv[i], L"/max")) {
-			sei.nShow = SW_SHOWMAXIMIZED;
-		}
-                else if (is_option(argv[i], L"/low")) {
-			creation_flags |= IDLE_PRIORITY_CLASS;
-		}
-                else if (is_option(argv[i], L"/normal")) {
-			creation_flags |= NORMAL_PRIORITY_CLASS;
-		}
-                else if (is_option(argv[i], L"/high")) {
-			creation_flags |= HIGH_PRIORITY_CLASS;
-		}
-                else if (is_option(argv[i], L"/realtime")) {
-			creation_flags |= REALTIME_PRIORITY_CLASS;
-		}
-                else if (is_option(argv[i], L"/abovenormal")) {
-			creation_flags |= ABOVE_NORMAL_PRIORITY_CLASS;
-		}
-                else if (is_option(argv[i], L"/belownormal")) {
-			creation_flags |= BELOW_NORMAL_PRIORITY_CLASS;
-		}
-                else if (is_option(argv[i], L"/separate")) {
-			TRACE("/separate is ignored\n"); /* FIXME */
-		}
-                else if (is_option(argv[i], L"/shared")) {
-			TRACE("/shared is ignored\n"); /* FIXME */
-		}
-                else if (is_option(argv[i], L"/node")) {
-			if (i+1 == argc) {
-				WINE_ERR("you must specify a numa node for the /node option\n");
-				usage();
-			} else
-			{
-				TRACE("/node is ignored\n"); /* FIXME */
-				i++;
-			}
-		}
-                else if (is_option(argv[i], L"/affinity"))
-		{
-			if (i+1 == argc) {
-				WINE_ERR("you must specify a numa node for the /node option\n");
-				usage();
-			} else
-			{
-				TRACE("/affinity is ignored\n"); /* FIXME */
-				i++;
-			}
-		}
-                else if (is_option(argv[i], L"/w") || is_option(argv[i], L"/wait")) {
-			sei.fMask |= SEE_MASK_NOCLOSEPROCESS;
-		}
-                else if (is_option(argv[i], L"/?")) {
-			usage();
-		}
-
-		/* Wine extensions */
-
-                else if (is_option(argv[i], L"/unix")) {
-                        unix_mode = TRUE;
-                        i++;
-                        break;
-		}
-                else if (is_option(argv[i], L"/exec")) {
-                        creation_flags = 0;
-                        sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI;
-                        i++;
-                        break;
-		}
-                else if (is_option(argv[i], L"/progIDOpen")) {
-                        progid_open = TRUE;
-                        if (++i == argc) usage();
-                        sei.lpClass = argv[i++];
-                        sei.fMask |= SEE_MASK_CLASSNAME;
-                        break;
-		} else
-
-		{
-			WINE_ERR("Unknown option '%s'\n", wine_dbgstr_w(argv[i]));
-			usage();
-		}
-	}
-
-	if (i == argc) {
-		if (progid_open || unix_mode)
-			usage();
-                file = L"cmd.exe";
-	}
-	else
-		file = argv[i++];
-
-	sei.lpParameters = build_command_line( &argv[i] );
-
-	if (unix_mode || progid_open) {
-		LPWSTR (*CDECL wine_get_dos_file_name_ptr)(LPCSTR);
-		char* multibyte_unixpath;
-		int multibyte_unixpath_len;
-
-		wine_get_dos_file_name_ptr = (void*)GetProcAddress(GetModuleHandleA("KERNEL32"), "wine_get_dos_file_name");
-
-		if (!wine_get_dos_file_name_ptr)
-			fatal_string(STRING_UNIXFAIL);
-
-		multibyte_unixpath_len = WideCharToMultiByte(CP_UNIXCP, 0, file, -1, NULL, 0, NULL, NULL);
-		multibyte_unixpath = HeapAlloc(GetProcessHeap(), 0, multibyte_unixpath_len);
-
-		WideCharToMultiByte(CP_UNIXCP, 0, file, -1, multibyte_unixpath, multibyte_unixpath_len, NULL, NULL);
-
-		dos_filename = wine_get_dos_file_name_ptr(multibyte_unixpath);
-
-		HeapFree(GetProcessHeap(), 0, multibyte_unixpath);
-
-		if (!dos_filename)
-			fatal_string(STRING_UNIXFAIL);
-
-		sei.lpFile = dos_filename;
-		if (!sei.lpDirectory)
-			sei.lpDirectory = parent_directory = get_parent_dir(dos_filename);
-		sei.fMask &= ~SEE_MASK_FLAG_NO_UI;
-	} else {
-		if (search_path(file, &fullpath)) {
-			if (fullpath != NULL) {
-				sei.lpFile = fullpath;
-			} else {
-				fatal_string_error(STRING_EXECFAIL, ERROR_OUTOFMEMORY, file);
-			}
-		} else {
-			sei.lpFile = file;
-		}
-	}
-
-        if (GetBinaryTypeW(sei.lpFile, &binary_type)) {
+        if (GetBinaryTypeW(opts.sei.lpFile, &binary_type)) {
                     WCHAR *commandline;
-                    STARTUPINFOW startup_info;
+                    STARTUPINFOEXW si = {{ sizeof(si.StartupInfo) }};
                     PROCESS_INFORMATION process_information;
+                    int len = lstrlenW(opts.sei.lpFile) + 4 + lstrlenW(opts.sei.lpParameters);
 
                     /* explorer on windows always quotes the filename when running a binary on windows (see bug 5224) so we have to use CreateProcessW in this case */
 
-                    commandline = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(sei.lpFile)+4+lstrlenW(sei.lpParameters))*sizeof(WCHAR));
-                    swprintf(commandline, lstrlenW(sei.lpFile) + 4 + lstrlenW(sei.lpParameters),
-                             L"\"%s\" %s", sei.lpFile, sei.lpParameters);
-
-                    ZeroMemory(&startup_info, sizeof(startup_info));
-                    startup_info.cb = sizeof(startup_info);
-                    startup_info.wShowWindow = sei.nShow;
-                    startup_info.dwFlags |= STARTF_USESHOWWINDOW;
-                    startup_info.lpTitle = title;
-
-                    if (!CreateProcessW(
-                            sei.lpFile, /* lpApplicationName */
-                            commandline, /* lpCommandLine */
-                            NULL, /* lpProcessAttributes */
-                            NULL, /* lpThreadAttributes */
-                            FALSE, /* bInheritHandles */
-                            creation_flags, /* dwCreationFlags */
-                            NULL, /* lpEnvironment */
-                            sei.lpDirectory, /* lpCurrentDirectory */
-                            &startup_info, /* lpStartupInfo */
-                            &process_information /* lpProcessInformation */ ))
+                    if (opts.machine)
                     {
-			fatal_string_error(STRING_EXECFAIL, GetLastError(), sei.lpFile);
+                        SIZE_T size = 1024;
+                        struct _PROC_THREAD_ATTRIBUTE_LIST *list = malloc( size );
+
+                        InitializeProcThreadAttributeList( list, 1, 0, &size );
+                        UpdateProcThreadAttribute( list, 0, PROC_THREAD_ATTRIBUTE_MACHINE_TYPE, &opts.machine, sizeof(opts.machine), NULL, NULL );
+                        si.StartupInfo.cb = sizeof(si);
+                        si.lpAttributeList = list;
+                        opts.creation_flags |= EXTENDED_STARTUPINFO_PRESENT;
                     }
-                    sei.hProcess = process_information.hProcess;
+
+                    commandline = malloc(len * sizeof(WCHAR));
+                    swprintf(commandline, len, L"\"%s\" %s", opts.sei.lpFile, opts.sei.lpParameters);
+
+                    si.StartupInfo.wShowWindow = opts.sei.nShow;
+                    si.StartupInfo.dwFlags |= STARTF_USESHOWWINDOW;
+                    si.StartupInfo.lpTitle = opts.title;
+
+                    if (!CreateProcessW( opts.sei.lpFile, commandline, NULL, NULL, opts.cp_inherit,
+                                         opts.creation_flags, NULL, opts.sei.lpDirectory,
+                                         &si.StartupInfo, &process_information ))
+                    {
+			fatal_string_error(STRING_EXECFAIL, GetLastError(), opts.sei.lpFile);
+                    }
+                    opts.sei.hProcess = process_information.hProcess;
                     goto done;
         }
 
-        if (!ShellExecuteExW(&sei))
+        if (!ShellExecuteExW(&opts.sei))
         {
-            const WCHAR *filename = sei.lpFile;
+            const WCHAR *filename = opts.sei.lpFile;
             DWORD size, filename_len;
             WCHAR *name, *env;
 
@@ -626,17 +605,17 @@ int __cdecl wmain (int argc, WCHAR *argv[])
             {
                 WCHAR *start, *ptr;
 
-                env = HeapAlloc(GetProcessHeap(), 0, size * sizeof(WCHAR));
+                env = malloc(size * sizeof(WCHAR));
                 if (!env)
-                    fatal_string_error(STRING_EXECFAIL, ERROR_OUTOFMEMORY, sei.lpFile);
+                    fatal_string_error(STRING_EXECFAIL, ERROR_OUTOFMEMORY, opts.sei.lpFile);
                 GetEnvironmentVariableW(L"PATHEXT", env, size);
 
                 filename_len = lstrlenW(filename);
-                name = HeapAlloc(GetProcessHeap(), 0, (filename_len + size) * sizeof(WCHAR));
+                name = malloc((filename_len + size) * sizeof(WCHAR));
                 if (!name)
-                    fatal_string_error(STRING_EXECFAIL, ERROR_OUTOFMEMORY, sei.lpFile);
+                    fatal_string_error(STRING_EXECFAIL, ERROR_OUTOFMEMORY, opts.sei.lpFile);
 
-                sei.lpFile = name;
+                opts.sei.lpFile = name;
                 start = env;
                 while ((ptr = wcschr(start, ';')))
                 {
@@ -650,13 +629,7 @@ int __cdecl wmain (int argc, WCHAR *argv[])
                     memcpy(&name[filename_len], start, (ptr - start) * sizeof(WCHAR));
                     name[filename_len + (ptr - start)] = 0;
 
-                    if (ShellExecuteExW(&sei))
-                    {
-                        HeapFree(GetProcessHeap(), 0, name);
-                        HeapFree(GetProcessHeap(), 0, env);
-                        goto done;
-                    }
-
+                    if (ShellExecuteExW(&opts.sei)) goto done;
                     start = ptr + 1;
                 }
 
@@ -666,12 +639,7 @@ int __cdecl wmain (int argc, WCHAR *argv[])
         }
 
 done:
-	HeapFree( GetProcessHeap(), 0, dos_filename );
-	HeapFree( GetProcessHeap(), 0, fullpath );
-	HeapFree( GetProcessHeap(), 0, parent_directory );
-	HeapFree( GetProcessHeap(), 0, title );
-
-	if (sei.fMask & SEE_MASK_NOCLOSEPROCESS) {
+	if (opts.sei.fMask & SEE_MASK_NOCLOSEPROCESS) {
 		DWORD exitcode;
 		HANDLE hJob;
 		JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
@@ -689,10 +657,10 @@ done:
                     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
                     JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
 		SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &info, sizeof(info));
-		AssignProcessToJobObject(hJob, sei.hProcess);
+		AssignProcessToJobObject(hJob, opts.sei.hProcess);
 
-		WaitForSingleObject(sei.hProcess, INFINITE);
-		GetExitCodeProcess(sei.hProcess, &exitcode);
+		WaitForSingleObject(opts.sei.hProcess, INFINITE);
+		GetExitCodeProcess(opts.sei.hProcess, &exitcode);
 		ExitProcess(exitcode);
 	}
 

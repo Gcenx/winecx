@@ -55,14 +55,6 @@ static const char *strmbase_debugstr_guid(const GUID *guid)
     return debugstr_guid(guid);
 }
 
-static const char *debugstr_fourcc(DWORD fourcc)
-{
-    char str[4] = {fourcc, fourcc >> 8, fourcc >> 16, fourcc >> 24};
-    if (isprint(str[0]) && isprint(str[1]) && isprint(str[2]) && isprint(str[3]))
-        return wine_dbgstr_an(str, 4);
-    return wine_dbg_sprintf("%#lx", fourcc);
-}
-
 void strmbase_dump_media_type(const AM_MEDIA_TYPE *mt)
 {
     if (!TRACE_ON(quartz) || !mt) return;
@@ -132,10 +124,10 @@ void strmbase_dump_media_type(const AM_MEDIA_TYPE *mt)
         if (vih->dwInterlaceFlags) TRACE("interlace flags %#lx, ", vih->dwInterlaceFlags);
         if (vih->dwCopyProtectFlags) TRACE("copy-protection flags %#lx, ", vih->dwCopyProtectFlags);
         TRACE("aspect ratio %lu/%lu, ", vih->dwPictAspectRatioX, vih->dwPictAspectRatioY);
-        if (vih->u.dwControlFlags) TRACE("control flags %#lx, ", vih->u.dwControlFlags);
-        if (vih->u.dwControlFlags & AMCONTROL_COLORINFO_PRESENT)
+        if (vih->dwControlFlags) TRACE("control flags %#lx, ", vih->dwControlFlags);
+        if (vih->dwControlFlags & AMCONTROL_COLORINFO_PRESENT)
         {
-            const DXVA_ExtendedFormat *colorimetry = (const DXVA_ExtendedFormat *)&vih->u.dwControlFlags;
+            const DXVA_ExtendedFormat *colorimetry = (const DXVA_ExtendedFormat *)&vih->dwControlFlags;
 
             TRACE("chroma site %#x, range %#x, matrix %#x, lighting %#x, primaries %#x, transfer function %#x, ",
                     colorimetry->VideoChromaSubsampling, colorimetry->NominalRange, colorimetry->VideoTransferMatrix,

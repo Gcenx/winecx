@@ -35,6 +35,7 @@
 
 #include "mshtml_private.h"
 #include "htmlevent.h"
+#include "binding.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -363,7 +364,7 @@ static void update_hostinfo(HTMLDocumentObj *This, DOCHOSTUIINFO *hostinfo)
     nsres = nsIWebBrowser_QueryInterface(This->nscontainer->webbrowser, &IID_nsIScrollable, (void**)&scrollable);
     if(NS_SUCCEEDED(nsres)) {
         nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable, ScrollOrientation_Y,
-                (hostinfo->dwFlags & DOCHOSTUIFLAG_SCROLL_NO) ? Scrollbar_Never : Scrollbar_Always);
+                (hostinfo->dwFlags & DOCHOSTUIFLAG_SCROLL_NO) ? Scrollbar_Never : Scrollbar_Auto);
         if(NS_FAILED(nsres))
             ERR("Could not set default Y scrollbar prefs: %08lx\n", nsres);
 
@@ -448,41 +449,17 @@ static HRESULT WINAPI DocObjOleObject_SetClientSite(IOleObject *iface, IOleClien
     if(pClientSite == This->client)
         return S_OK;
 
-    if(This->client) {
-        IOleClientSite_Release(This->client);
-        This->client = NULL;
+    if(This->client)
         This->nscontainer->usermode = UNKNOWN_USERMODE;
-    }
 
-    if(This->client_cmdtrg) {
-        IOleCommandTarget_Release(This->client_cmdtrg);
-        This->client_cmdtrg = NULL;
-    }
-
-    if(This->hostui && !This->custom_hostui) {
-        IDocHostUIHandler_Release(This->hostui);
-        This->hostui = NULL;
-    }
-
-    if(This->doc_object_service) {
-        IDocObjectService_Release(This->doc_object_service);
-        This->doc_object_service = NULL;
-    }
-
-    if(This->webbrowser) {
-        IUnknown_Release(This->webbrowser);
-        This->webbrowser = NULL;
-    }
-
-    if(This->browser_service) {
-        IUnknown_Release(This->browser_service);
-        This->browser_service = NULL;
-    }
-
-    if(This->travel_log) {
-        ITravelLog_Release(This->travel_log);
-        This->travel_log = NULL;
-    }
+    unlink_ref(&This->client);
+    unlink_ref(&This->client_cmdtrg);
+    if(!This->custom_hostui)
+        unlink_ref(&This->hostui);
+    unlink_ref(&This->doc_object_service);
+    unlink_ref(&This->webbrowser);
+    unlink_ref(&This->browser_service);
+    unlink_ref(&This->travel_log);
 
     memset(&This->hostinfo, 0, sizeof(DOCHOSTUIINFO));
 
@@ -1617,11 +1594,7 @@ static HRESULT WINAPI DocObjOleInPlaceObjectWindowless_InPlaceDeactivate(IOleInP
     if(!This->in_place_active)
         return S_OK;
 
-    if(This->frame) {
-        IOleInPlaceFrame_Release(This->frame);
-        This->frame = NULL;
-    }
-
+    unlink_ref(&This->frame);
     if(This->hwnd) {
         ShowWindow(This->hwnd, SW_HIDE);
         SetWindowPos(This->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
@@ -2107,8 +2080,10 @@ void HTMLDocumentNode_OleObj_Init(HTMLDocumentNode *This)
     This->IObjectWithSite_iface.lpVtbl = &DocNodeObjectWithSiteVtbl;
     This->IOleContainer_iface.lpVtbl = &DocNodeOleContainerVtbl;
     This->IObjectSafety_iface.lpVtbl = &DocNodeObjectSafetyVtbl;
-    This->doc_obj->extent.cx = 1;
-    This->doc_obj->extent.cy = 1;
+    if(This->doc_obj) {
+        This->doc_obj->extent.cx = 1;
+        This->doc_obj->extent.cy = 1;
+    }
 }
 
 static void HTMLDocumentObj_OleObj_Init(HTMLDocumentObj *This)
@@ -3431,6 +3406,60 @@ static ULONG WINAPI HTMLDocumentObj_AddRef(IUnknown *iface)
     return ref;
 }
 
+static void set_window_uninitialized(HTMLOuterWindow *window)
+{
+    nsChannelBSC *channelbsc;
+    nsWineURI *nsuri;
+    IMoniker *mon;
+    HRESULT hres;
+    IUri *uri;
+
+    window->readystate = READYSTATE_UNINITIALIZED;
+    set_current_uri(window, NULL);
+    if(window->mon) {
+        IMoniker_Release(window->mon);
+        window->mon = NULL;
+    }
+
+    if(!window->base.inner_window)
+        return;
+
+    hres = create_uri(L"about:blank", 0, &uri);
+    if(FAILED(hres))
+        return;
+
+    hres = create_doc_uri(uri, &nsuri);
+    IUri_Release(uri);
+    if(FAILED(hres))
+        return;
+
+    hres = CreateURLMoniker(NULL, L"about:blank", &mon);
+    if(SUCCEEDED(hres)) {
+        hres = create_channelbsc(mon, NULL, NULL, 0, TRUE, &channelbsc);
+        IMoniker_Release(mon);
+
+        if(SUCCEEDED(hres)) {
+            channelbsc->bsc.bindf = 0;  /* synchronous binding */
+
+            if(window->base.inner_window->doc)
+                remove_target_tasks(window->base.inner_window->task_magic);
+            abort_window_bindings(window->base.inner_window);
+            window->base.inner_window->doc->unload_sent = TRUE;
+
+            hres = load_nsuri(window, nsuri, NULL, channelbsc, LOAD_FLAGS_BYPASS_CACHE);
+            if(SUCCEEDED(hres))
+                hres = create_pending_window(window, channelbsc);
+            IBindStatusCallback_Release(&channelbsc->bsc.IBindStatusCallback_iface);
+        }
+    }
+    nsISupports_Release((nsISupports*)nsuri);
+    if(FAILED(hres))
+        return;
+
+    window->load_flags |= BINDING_REPLACE;
+    start_binding(window->pending_window, &window->pending_window->bscallback->bsc, NULL);
+}
+
 static ULONG WINAPI HTMLDocumentObj_Release(IUnknown *iface)
 {
     HTMLDocumentObj *This = impl_from_IUnknown(iface);
@@ -3440,8 +3469,15 @@ static ULONG WINAPI HTMLDocumentObj_Release(IUnknown *iface)
 
     if(!ref) {
         if(This->doc_node) {
-            This->doc_node->doc_obj = NULL;
-            IHTMLDOMNode_Release(&This->doc_node->node.IHTMLDOMNode_iface);
+            HTMLDocumentNode *doc_node = This->doc_node;
+
+            if(This->nscontainer)
+                This->nscontainer->doc = NULL;
+            This->doc_node = NULL;
+            doc_node->doc_obj = NULL;
+
+            set_window_uninitialized(This->window);
+            IHTMLDOMNode_Release(&doc_node->node.IHTMLDOMNode_iface);
         }
         if(This->window)
             IHTMLWindow2_Release(&This->window->base.IHTMLWindow2_iface);

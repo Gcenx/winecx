@@ -33,6 +33,7 @@
 #include "mmdeviceapi.h"
 #include "uuids.h"
 #include "wmcodecdsp.h"
+#include "nserror.h"
 
 #include "mf_test.h"
 
@@ -3755,6 +3756,13 @@ static void test_topology_loader_evr(void)
     ok(hr == S_OK, "Failed to create activate object, hr %#lx.\n", hr);
 
     hr = IMFActivate_ActivateObject(activate, &IID_IMFMediaSink, (void **)&sink);
+    if (FAILED(hr))
+    {
+        skip("Failed to create an EVR sink, skipping tests.\n");
+        DestroyWindow(window);
+        IMFActivate_Release(activate);
+        return;
+    }
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFMediaSink_GetStreamSinkById(sink, 0, &stream_sink);
@@ -4648,9 +4656,16 @@ static void test_sample_grabber(void)
     EXPECT_REF(clock, 3);
     hr = IMFMediaSink_Shutdown(sink);
     ok(hr == S_OK, "Failed to shut down, hr %#lx.\n", hr);
+    EXPECT_REF(clock, 1);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, NULL);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, clock);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
 
     ref = IMFPresentationClock_Release(clock);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
 
     hr = IMFMediaEventGenerator_GetEvent(eg, MF_EVENT_FLAG_NO_WAIT, &event);
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
@@ -4696,10 +4711,9 @@ static void test_sample_grabber(void)
     ok(hr == S_OK, "Failed to get type count, hr %#lx.\n", hr);
 
     ref = IMFMediaType_Release(media_type2);
-    todo_wine
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
     ref = IMFMediaType_Release(media_type);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
 
     hr = IMFMediaTypeHandler_GetMediaTypeByIndex(handler, 0, &media_type);
     ok(hr == MF_E_NO_MORE_TYPES, "Unexpected hr %#lx.\n", hr);
@@ -4730,9 +4744,9 @@ static void test_sample_grabber(void)
     IMFStreamSink_Release(stream);
 
     ref = IMFActivate_Release(activate);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
     ref = IMFMediaSink_Release(sink);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
 
     /* Rateless mode with MF_SAMPLEGRABBERSINK_IGNORE_CLOCK. */
     hr = MFCreateMediaType(&media_type);
@@ -6432,6 +6446,134 @@ static void test_MFGetSupportedSchemes(void)
     PropVariantClear(&value);
 }
 
+static void test_scheme_resolvers(void)
+{
+    static const DWORD expect_caps = MFBYTESTREAM_IS_READABLE | MFBYTESTREAM_IS_SEEKABLE;
+    static const WCHAR *urls[] =
+    {
+        L"http://test.winehq.org/tests/test.mp3",
+        L"https://test.winehq.org/tests/test.mp3",
+        L"httpd://test.winehq.org/tests/test.mp3",
+        L"httpsd://test.winehq.org/tests/test.mp3",
+        L"mms://test.winehq.org/tests/test.mp3",
+    };
+    static const WCHAR *expect_domain[] =
+    {
+        L"http://test.winehq.org",
+        L"https://test.winehq.org",
+        L"http://test.winehq.org",
+        L"https://test.winehq.org",
+        L"http://test.winehq.org",
+    };
+
+    IMFSourceResolver *resolver;
+    IMFByteStream *byte_stream;
+    IMFAttributes *attributes;
+    PROPVARIANT propvar;
+    MF_OBJECT_TYPE type;
+    IUnknown *object;
+    UINT64 length;
+    DWORD i, caps;
+    HRESULT hr;
+
+    hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+
+    hr = MFCreateSourceResolver(&resolver);
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(urls); i++)
+    {
+        hr = IMFSourceResolver_CreateObjectFromURL(resolver, urls[i], MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+        todo_wine_if(i >= 2)
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        if (hr != S_OK)
+            continue;
+
+        hr = IUnknown_QueryInterface(object, &IID_IMFAttributes, (void **)&attributes);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_ORIGIN_NAME, NULL);
+        ok(hr == MF_E_ATTRIBUTENOTFOUND, "got hr %#lx\n", hr);
+
+        PropVariantInit(&propvar);
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_EFFECTIVE_URL, &propvar);
+        ok(hr == S_OK || broken(hr == MF_E_ATTRIBUTENOTFOUND) /* Win7 */, "got hr %#lx\n", hr);
+        if (hr == S_OK)
+        {
+            ok(!wcsncmp(expect_domain[i], propvar.pwszVal, wcslen(expect_domain[i])),
+                    "got url %s\n", debugstr_w(propvar.pwszVal));
+        }
+        hr = PropVariantClear(&propvar);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_CONTENT_TYPE, NULL);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_LAST_MODIFIED_TIME, NULL);
+        todo_wine
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        IMFAttributes_Release(attributes);
+
+        hr = IUnknown_QueryInterface(object, &IID_IMFByteStream, (void **)&byte_stream);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        hr = IMFByteStream_GetCapabilities(byte_stream, &caps);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        todo_wine
+        ok(caps == (expect_caps | MFBYTESTREAM_IS_PARTIALLY_DOWNLOADED)
+                || caps == (expect_caps | MFBYTESTREAM_DOES_NOT_USE_NETWORK),
+                "got caps %#lx\n", caps);
+        hr = IMFByteStream_GetLength(byte_stream, &length);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        ok(length == 0x110d, "got length %#I64x\n", length);
+        IMFByteStream_Release(byte_stream);
+
+        IUnknown_Release(object);
+    }
+
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpt://test.winehq.org/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpu://test.winehq.org/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE, "got hr %#lx\n", hr);
+
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"http://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_SERVER_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"https://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpd://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpsd://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"mms://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"http://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"https://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpd://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpsd://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"mms://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE, "got hr %#lx\n", hr);
+
+    IMFSourceResolver_Release(resolver);
+
+    hr = MFShutdown();
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+}
+
 static void test_MFGetTopoNodeCurrentType(void)
 {
     static const struct attribute_desc media_type_desc[] =
@@ -6756,7 +6898,7 @@ static void test_mpeg4_media_sink(void)
 {
     IMFMediaSink *sink = NULL, *sink2 = NULL, *sink_audio = NULL, *sink_video = NULL, *sink_empty = NULL;
     IMFByteStream *bytestream, *bytestream_audio, *bytestream_video, *bytestream_empty;
-    DWORD id, count, flags, width = 16, height = 16, fps = 10;
+    DWORD id, count, flags, width = 96, height = 96;
     IMFMediaType *audio_type, *video_type, *media_type;
     IMFMediaTypeHandler *type_handler = NULL;
     IMFPresentationClock *clock;
@@ -6772,22 +6914,33 @@ static void test_mpeg4_media_sink(void)
 
     hr = IMFMediaType_SetGUID(audio_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IMFMediaType_SetGUID(audio_type, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+    hr = IMFMediaType_SetGUID(audio_type, &MF_MT_SUBTYPE, &MFAudioFormat_AAC);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_NUM_CHANNELS, 2);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_NUM_CHANNELS, 1);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, 48000);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, 8);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 12000);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 41);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AAC_PAYLOAD_TYPE, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetBlob(audio_type, &MF_MT_USER_DATA, test_aac_codec_data, sizeof(test_aac_codec_data));
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFMediaType_SetGUID(video_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IMFMediaType_SetGUID(video_type, &MF_MT_SUBTYPE, &MFVideoFormat_RGB24);
+    hr = IMFMediaType_SetGUID(video_type, &MF_MT_SUBTYPE, &MFVideoFormat_H264);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaType_SetUINT64(video_type, &MF_MT_FRAME_SIZE, ((UINT64)width << 32) | height);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IMFMediaType_SetUINT64(video_type, &MF_MT_FRAME_RATE, ((UINT64)fps << 32) | 1);
+    hr = IMFMediaType_SetUINT64(video_type, &MF_MT_FRAME_RATE, ((UINT64)30000 << 32) | 1001);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetBlob(video_type, &MF_MT_MPEG_SEQUENCE_HEADER,
+            test_h264_sequence_header, sizeof(test_h264_sequence_header));
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = MFCreateTempFile(MF_ACCESSMODE_WRITE, MF_OPENMODE_DELETE_IF_EXIST, 0, &bytestream_audio);
@@ -6800,58 +6953,39 @@ static void test_mpeg4_media_sink(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = MFCreateMPEG4MediaSink(NULL, NULL, NULL, NULL);
-    todo_wine
     ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     sink = (void *)0xdeadbeef;
     hr = MFCreateMPEG4MediaSink(NULL, NULL, NULL, &sink);
-    todo_wine
     ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(sink == (void *)0xdeadbeef, "Unexpected pointer %p.\n", sink);
     sink = NULL;
 
     hr = MFCreateMPEG4MediaSink(bytestream_empty, NULL, NULL, &sink_empty);
-    todo_wine
     ok(hr == S_OK || broken(hr == E_INVALIDARG), "Unexpected hr %#lx.\n", hr);
 
     hr = MFCreateMPEG4MediaSink(bytestream_audio, NULL, audio_type, &sink_audio);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = MFCreateMPEG4MediaSink(bytestream_video, video_type, NULL, &sink_video);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = MFCreateMPEG4MediaSink(bytestream, video_type, audio_type, &sink);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    if (!sink)
-    {
-        if (sink_video)
-            IMFMediaSink_Release(sink_video);
-        if (sink_audio)
-            IMFMediaSink_Release(sink_audio);
-        if (sink_empty)
-            IMFMediaSink_Release(sink_empty);
-        IMFByteStream_Release(bytestream);
-        IMFByteStream_Release(bytestream_empty);
-        IMFByteStream_Release(bytestream_video);
-        IMFByteStream_Release(bytestream_audio);
-        IMFMediaType_Release(video_type);
-        IMFMediaType_Release(audio_type);
-        return;
-    }
 
     /* Test sink. */
+    flags = 0xdeadbeef;
     hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
     ok(flags == MEDIASINK_RATELESS || broken(flags == (MEDIASINK_RATELESS | MEDIASINK_FIXED_STREAMS)),
             "Unexpected flags %#lx.\n", flags);
 
     check_interface(sink, &IID_IMFMediaEventGenerator, TRUE);
     check_interface(sink, &IID_IMFFinalizableMediaSink, TRUE);
     check_interface(sink, &IID_IMFClockStateSink, TRUE);
+    todo_wine
     check_interface(sink, &IID_IMFGetService, TRUE);
 
     /* Test sink stream count. */
@@ -6966,8 +7100,11 @@ static void test_mpeg4_media_sink(void)
     hr = MFCreatePresentationClock(&clock);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaSink_SetPresentationClock(sink, NULL);
+    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
     hr = IMFMediaSink_SetPresentationClock(sink, clock);
+    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     IMFPresentationClock_Release(clock);
 
@@ -6986,13 +7123,18 @@ static void test_mpeg4_media_sink(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFMediaTypeHandler_GetMajorType(type_handler, NULL);
+    todo_wine
     ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaTypeHandler_GetMajorType(type_handler, &guid);
+    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
     ok(IsEqualGUID(&guid, &MFMediaType_Audio), "Unexpected major type.\n");
 
     hr = IMFMediaTypeHandler_GetMediaTypeCount(type_handler, &count);
+    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
     ok(count == 1, "Unexpected count %lu.\n", count);
 
     hr = IMFMediaTypeHandler_GetCurrentMediaType(type_handler, &media_type);
@@ -7002,8 +7144,10 @@ static void test_mpeg4_media_sink(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFMediaTypeHandler_SetCurrentMediaType(type_handler, NULL);
+    todo_wine
     ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaTypeHandler_SetCurrentMediaType(type_handler, media_type);
+    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     IMFMediaType_Release(media_type);
@@ -7022,19 +7166,25 @@ static void test_mpeg4_media_sink(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFMediaTypeHandler_GetMajorType(type_handler, NULL);
+    todo_wine
     ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaTypeHandler_GetMajorType(type_handler, &guid);
+    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     IMFStreamSink_Release(stream_sink);
 
     hr = IMFMediaSink_AddStreamSink(sink, 0, audio_type, &stream_sink);
+    todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaSink_GetStreamSinkByIndex(sink, 0, &stream_sink);
+    todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaSink_GetStreamSinkById(sink, 0, &stream_sink);
+    todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
     hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+    todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
 
     IMFMediaTypeHandler_Release(type_handler);
@@ -7049,6 +7199,22 @@ static void test_mpeg4_media_sink(void)
     IMFByteStream_Release(bytestream_audio);
     IMFMediaType_Release(video_type);
     IMFMediaType_Release(audio_type);
+}
+
+static void test_MFCreateSequencerSegmentOffset(void)
+{
+    PROPVARIANT propvar;
+    HRESULT hr;
+
+    hr = MFCreateSequencerSegmentOffset(0, 0, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+
+    propvar.vt = VT_EMPTY;
+    hr = MFCreateSequencerSegmentOffset(0, 0, &propvar);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(propvar.vt == VT_UNKNOWN, "Unexpected type %d.\n", propvar.vt);
+    ok(!!propvar.punkVal, "Unexpected pointer.\n");
+    PropVariantClear(&propvar);
 }
 
 START_TEST(mf)
@@ -7082,7 +7248,9 @@ START_TEST(mf)
     test_MFCreateSimpleTypeHandler();
     test_MFGetSupportedMimeTypes();
     test_MFGetSupportedSchemes();
+    test_scheme_resolvers();
     test_MFGetTopoNodeCurrentType();
     test_MFRequireProtectedEnvironment();
     test_mpeg4_media_sink();
+    test_MFCreateSequencerSegmentOffset();
 }

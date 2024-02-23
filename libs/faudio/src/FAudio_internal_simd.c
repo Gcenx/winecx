@@ -1,6 +1,6 @@
 /* FAudio - XAudio Reimplementation for FNA
  *
- * Copyright (c) 2011-2022 Ethan Lee, Luigi Auriemma, and the MonoGame Team
+ * Copyright (c) 2011-2023 Ethan Lee, Luigi Auriemma, and the MonoGame Team
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -48,7 +48,7 @@
 
 	/* AArch64 guarantees NEON. */
 	#define NEED_SCALAR_CONVERTER_FALLBACKS 0
-#elif __MACOSX__
+#elif __MACOSX__ && !defined(__POWERPC__)
 	/* Some build systems may need to specify this. */
 	#if !defined(__SSE2__) && !defined(__ARM_NEON__)
 	#error macOS does not have SSE2/NEON? Bad compiler?

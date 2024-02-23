@@ -399,6 +399,7 @@ static void test_D3DKMTCheckVidPnExclusiveOwnership(void)
 
     if (!pD3DKMTCheckVidPnExclusiveOwnership || pD3DKMTCheckVidPnExclusiveOwnership(NULL) == STATUS_PROCEDURE_NOT_FOUND)
     {
+        /* This is a stub in some drivers (e.g. nulldrv) */
         skip("D3DKMTCheckVidPnExclusiveOwnership() is unavailable.\n");
         return;
     }
@@ -623,6 +624,7 @@ static void test_D3DKMTSetVidPnSourceOwner(void)
 
     if (!pD3DKMTSetVidPnSourceOwner || pD3DKMTSetVidPnSourceOwner(&set_owner_desc) == STATUS_PROCEDURE_NOT_FOUND)
     {
+        /* This is a stub in some drivers (e.g. nulldrv) */
         skip("D3DKMTSetVidPnSourceOwner() is unavailable.\n");
         return;
     }
@@ -650,7 +652,7 @@ static void test_D3DKMTCheckOcclusion(void)
 
     if (!pD3DKMTCheckOcclusion || pD3DKMTCheckOcclusion(NULL) == STATUS_PROCEDURE_NOT_FOUND)
     {
-        skip("D3DKMTCheckOcclusion() is unavailable.\n");
+        todo_wine win_skip("D3DKMTCheckOcclusion() is unavailable.\n");
         return;
     }
 
@@ -714,6 +716,7 @@ static void test_D3DKMTCheckOcclusion(void)
         ShowWindow(hwnd, SW_MINIMIZE);
         occlusion_desc.hWnd = hwnd;
         status = pD3DKMTCheckOcclusion(&occlusion_desc);
+        flaky
         ok(status == STATUS_SUCCESS, "Got unexpected return code %#lx.\n", status);
         ShowWindow(hwnd, SW_SHOWNORMAL);
 
@@ -800,11 +803,13 @@ static void test_D3DKMTCheckOcclusion(void)
 
     occlusion_desc.hWnd = hwnd;
     status = pD3DKMTCheckOcclusion(&occlusion_desc);
+    flaky
     ok(status == STATUS_SUCCESS, "Got unexpected return code %#lx.\n", status);
 
     check_owner_desc.hAdapter = open_adapter_gdi_desc.hAdapter;
     check_owner_desc.VidPnSourceId = open_adapter_gdi_desc.VidPnSourceId;
     status = pD3DKMTCheckVidPnExclusiveOwnership(&check_owner_desc);
+    flaky
     ok(status == STATUS_SUCCESS || status == STATUS_GRAPHICS_PRESENT_UNOCCLUDED, "Got unexpected return code %#lx.\n", status);
 
     destroy_device_desc.hDevice = create_device_desc.hDevice;

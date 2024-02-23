@@ -669,7 +669,7 @@ static void sys_command_size_move( HWND hwnd, WPARAM wparam )
     BOOL thickframe, drag_full_windows = TRUE, moved = FALSE;
     RECT sizing_rect, mouse_rect, orig_rect;
     UINT hittest = wparam & 0x0f;
-    UINT syscommand = wparam & 0xfff0, mmstate;
+    UINT syscommand = wparam & 0xfff0;
     UINT style = get_window_long( hwnd, GWL_STYLE );
     POINT capture_point, pt;
     MINMAXINFO minmax;
@@ -936,17 +936,6 @@ static void sys_command_size_move( HWND hwnd, WPARAM wparam )
         /* Single click brings up the system menu when iconized */
         send_message( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, MAKELONG(pt.x, pt.y) );
     }
-
-    /* windows finishes this off with a WM_MOUSEMOVE with the current position
-       and buttons state. This message is relied on by some games. */
-    mmstate = 0;
-    if (NtUserGetAsyncKeyState(VK_LBUTTON)&0x1) mmstate &= MK_LBUTTON;
-    if (NtUserGetAsyncKeyState(VK_RBUTTON)&0x1) mmstate &= MK_RBUTTON;
-    if (NtUserGetAsyncKeyState(VK_MBUTTON)&0x1) mmstate &= MK_MBUTTON;
-    if (NtUserGetAsyncKeyState(VK_CONTROL)&0x1) mmstate &= MK_CONTROL;
-    if (NtUserGetAsyncKeyState(VK_SHIFT)&0x1) mmstate &= MK_SHIFT;
-
-    NtUserPostMessage( hwnd, WM_MOUSEMOVE, mmstate, MAKELONG(pt.x,pt.y) );
 }
 
 /***********************************************************************
@@ -1319,7 +1308,7 @@ static BOOL draw_push_button( HDC dc, RECT *r, UINT flags )
     return TRUE;
 }
 
-BOOL draw_frame_caption( HDC dc, RECT *r, UINT flags )
+static BOOL draw_frame_caption( HDC dc, RECT *r, UINT flags )
 {
     RECT rect;
     int small_diam = make_square_rect( r, &rect ) - 2;
@@ -2950,12 +2939,10 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, 
     case WM_IME_COMPOSITION:
     case WM_IME_STARTCOMPOSITION:
     case WM_IME_ENDCOMPOSITION:
-    case WM_IME_SELECT:
     case WM_IME_NOTIFY:
-    case WM_IME_CONTROL:
         {
             HWND ime_hwnd = get_default_ime_window( hwnd );
-            if (ime_hwnd)
+            if (ime_hwnd && ime_hwnd != NtUserGetParent( hwnd ))
                 result = NtUserMessageCall( ime_hwnd, msg, wparam, lparam,
                                             0, NtUserSendMessage, ansi );
         }

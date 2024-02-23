@@ -18,12 +18,44 @@
 
 #include <stdio.h>
 #include <windows.h>
+#include "winternl.h"
 #include <ole2.h>
 #include <rpcdce.h>
 #include <taskschd.h>
 #include "schrpc.h"
 
 #include "wine/test.h"
+
+static BOOL is_process_elevated(void)
+{
+    HANDLE token;
+    if (OpenProcessToken( GetCurrentProcess(), TOKEN_QUERY, &token ))
+    {
+        TOKEN_ELEVATION_TYPE type;
+        DWORD size;
+        BOOL ret;
+
+        ret = GetTokenInformation( token, TokenElevationType, &type, sizeof(type), &size );
+        CloseHandle( token );
+        return (ret && type == TokenElevationTypeFull);
+    }
+    return FALSE;
+}
+
+static BOOL check_win_version(int min_major, int min_minor)
+{
+    HMODULE hntdll = GetModuleHandleA("ntdll.dll");
+    NTSTATUS (WINAPI *pRtlGetVersion)(RTL_OSVERSIONINFOEXW *);
+    RTL_OSVERSIONINFOEXW rtlver;
+
+    rtlver.dwOSVersionInfoSize = sizeof(RTL_OSVERSIONINFOEXW);
+    pRtlGetVersion = (void *)GetProcAddress(hntdll, "RtlGetVersion");
+    pRtlGetVersion(&rtlver);
+    return rtlver.dwMajorVersion > min_major ||
+           (rtlver.dwMajorVersion == min_major &&
+            rtlver.dwMinorVersion >= min_minor);
+}
+#define is_win8_plus() check_win_version(6, 2)
 
 extern handle_t schrpc_handle;
 
@@ -42,8 +74,8 @@ static LONG CALLBACK rpc_exception_filter(EXCEPTION_POINTERS *ptrs)
 START_TEST(rpcapi)
 {
     static unsigned char ncalrpc[] = "ncalrpc";
-    static const char xml1[] =
-        "<?xml version=\"1.0\"?>\n"
+    static const WCHAR* xml1 =
+        L"<?xml version=\"1.0\"?>\n"
         "<Task xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n"
         "  <RegistrationInfo>\n"
         "    <Description>\"Task1\"</Description>\n"
@@ -65,7 +97,7 @@ START_TEST(rpcapi)
     {
         { 0, S_OK },
         { TASK_CREATE, S_OK },
-        { TASK_UPDATE, 0x80070002 /* HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) */ },
+        { TASK_UPDATE, __HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) },
         { TASK_CREATE | TASK_UPDATE, S_OK }
     };
     static const struct
@@ -73,12 +105,12 @@ START_TEST(rpcapi)
         DWORD flags, hr;
     } open_existing_task[] =
     {
-        { 0, 0x800700b7 /* HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) */ },
-        { TASK_CREATE, 0x800700b7 /* HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) */ },
+        { 0, __HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) },
+        { TASK_CREATE, __HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) },
         { TASK_UPDATE, S_OK },
         { TASK_CREATE | TASK_UPDATE, S_OK }
     };
-    WCHAR xmlW[sizeof(xml1)], *xml;
+    WCHAR *xml;
     HRESULT hr;
     DWORD version, start_index, count, i, enumed, enabled, state;
     WCHAR *path;
@@ -143,23 +175,28 @@ START_TEST(rpcapi)
     hr = SchRpcDelete(L"", 0);
     ok(hr == E_ACCESSDENIED /* win7 */ || hr == E_INVALIDARG /* vista */, "expected E_ACCESSDENIED, got %#lx\n", hr);
 
+    if (!is_process_elevated() && !is_win8_plus())
+    {
+        win_skip("Skipping because deleting anything requires elevated privileges on Windows 7\n");
+        return;
+    }
+
     hr = SchRpcCreateFolder(L"\\Wine", NULL, 0);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
 
-    MultiByteToWideChar(CP_ACP, 0, xml1, -1, xmlW, ARRAY_SIZE(xmlW));
-
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(L"Wine", xmlW, TASK_VALIDATE_ONLY, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(L"Wine", xml1, TASK_VALIDATE_ONLY, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
     ok(!path, "expected NULL, path %p\n", path);
     ok(!info, "expected NULL, info %p\n", info);
 
     for (i = 0; i < ARRAY_SIZE(create_new_task); i++)
     {
+        winetest_push_context("%lu", i);
         path = NULL;
         info = NULL;
-        hr = SchRpcRegisterTask(L"\\Wine\\Task1", xmlW, create_new_task[i].flags, NULL,
+        hr = SchRpcRegisterTask(L"\\Wine\\Task1", xml1, create_new_task[i].flags, NULL,
                                 TASK_LOGON_NONE, 0, NULL, &path, &info);
         ok(hr == create_new_task[i].hr, "%lu: expected %#lx, got %#lx\n", i, create_new_task[i].hr, hr);
 
@@ -170,25 +207,26 @@ START_TEST(rpcapi)
             ok(!info, "expected NULL, info %p\n", info);
             MIDL_user_free(path);
         }
+        winetest_pop_context();
     }
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(L"\\Wine\\Task1", xmlW, TASK_VALIDATE_ONLY, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(L"\\Wine\\Task1", xml1, TASK_VALIDATE_ONLY, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
     ok(!path, "expected NULL, path %p\n", path);
     ok(!info, "expected NULL, info %p\n", info);
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(NULL, xmlW, TASK_VALIDATE_ONLY, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(NULL, xml1, TASK_VALIDATE_ONLY, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
     ok(!path, "expected NULL, path %p\n", path);
     ok(!info, "expected NULL, info %p\n", info);
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(L"Wine\\Folder1\\Task1", xmlW, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(L"Wine\\Folder1\\Task1", xml1, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
     ok(!lstrcmpW(path, L"\\Wine\\Folder1\\Task1") /* win7 */ || !lstrcmpW(path, L"Wine\\Folder1\\Task1") /* vista */,
        "expected \\Wine\\Folder1\\Task1, task actual path %s\n", wine_dbgstr_w(path));
@@ -197,11 +235,12 @@ START_TEST(rpcapi)
 
     for (i = 0; i < ARRAY_SIZE(open_existing_task); i++)
     {
+        winetest_push_context("%lu", i);
         path = NULL;
         info = NULL;
-        hr = SchRpcRegisterTask(L"Wine\\Folder1\\Task1", xmlW, open_existing_task[i].flags, NULL,
+        hr = SchRpcRegisterTask(L"Wine\\Folder1\\Task1", xml1, open_existing_task[i].flags, NULL,
                                 TASK_LOGON_NONE, 0, NULL, &path, &info);
-        ok(hr == open_existing_task[i].hr, "%lu: expected %#lx, got %#lx\n", i, open_existing_task[i].hr, hr);
+        ok(hr == open_existing_task[i].hr, "expected %#lx, got %#lx\n", open_existing_task[i].hr, hr);
         if (hr == S_OK)
         {
             ok(!lstrcmpW(path, L"\\Wine\\Folder1\\Task1") /* win7 */ ||
@@ -210,13 +249,14 @@ START_TEST(rpcapi)
             MIDL_user_free(path);
         }
         else
-            ok(!path, "%lu: expected NULL, path %p\n", i, path);
-        ok(!info, "%lu: expected NULL, info %p\n", i, info);
+            ok(!path, "expected NULL, path %p\n", path);
+        ok(!info, "expected NULL, info %p\n", info);
+        winetest_pop_context();
     }
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(L"Wine\\Folder1\\Task1", xmlW, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(L"Wine\\Folder1\\Task1", xml1, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS), "expected ERROR_ALREADY_EXISTS, got %#lx\n", hr);
     ok(!path, "expected NULL, path %p\n", path);
     ok(!info, "expected NULL, info %p\n", info);
@@ -358,7 +398,7 @@ START_TEST(rpcapi)
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(L"Wine\\Task1", xmlW, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(L"Wine\\Task1", xml1, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
     ok(!lstrcmpW(path, L"\\Wine\\Task1") /* win7 */ || !lstrcmpW(path, L"Wine\\Task1") /* vista */,
        "expected \\Wine\\Task1, task actual path %s\n", wine_dbgstr_w(path));
@@ -367,7 +407,7 @@ START_TEST(rpcapi)
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(L"\\Wine\\Task2", xmlW, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(L"\\Wine\\Task2", xml1, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
     ok(!lstrcmpW(path, L"\\Wine\\Task2"), "expected \\Wine\\Task2, task actual path %s\n", wine_dbgstr_w(path));
     ok(!info, "expected NULL, info %p\n", info);
@@ -449,7 +489,7 @@ START_TEST(rpcapi)
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(L"Wine\\Task3", xmlW, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(L"Wine\\Task3", xml1, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK, "expected S_OK, got %#lx\n", hr);
     ok(!lstrcmpW(path, L"\\Wine\\Task3") /* win7 */ || !lstrcmpW(path, L"Wine\\Task3") /* vista */,
        "expected \\Wine\\Task3, task actual path %s\n", wine_dbgstr_w(path));
@@ -469,7 +509,7 @@ START_TEST(rpcapi)
     MIDL_user_free(names[0]);
     MIDL_user_free(names);
 
-    if (0) /* crashes under win7 */
+    if (0) /* each of these crashes on Windows 7 to 11 */
     {
     hr = SchRpcGetTaskInfo(NULL, 0, NULL, NULL);
     hr = SchRpcGetTaskInfo(L"Task1", 0, NULL, NULL);
@@ -515,7 +555,7 @@ START_TEST(rpcapi)
 
     path = NULL;
     info = NULL;
-    hr = SchRpcRegisterTask(NULL, xmlW, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
+    hr = SchRpcRegisterTask(NULL, xml1, TASK_CREATE, NULL, TASK_LOGON_NONE, 0, NULL, &path, &info);
     ok(hr == S_OK || hr == E_ACCESSDENIED, "expected S_OK, got %#lx\n", hr);
     if (hr != E_ACCESSDENIED)
     {

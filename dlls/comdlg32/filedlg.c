@@ -52,8 +52,6 @@
 #include <string.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -180,7 +178,7 @@ static void    FILEDLG95_FILETYPE_Clean(HWND hwnd);
 
 /* Functions used by the Look In combo box */
 static void    FILEDLG95_LOOKIN_Init(HWND hwndCombo);
-static LRESULT FILEDLG95_LOOKIN_DrawItem(LPDRAWITEMSTRUCT pDIStruct);
+static LRESULT FILEDLG95_LOOKIN_DrawItem(HWND hwnd, LPDRAWITEMSTRUCT pDIStruct);
 static BOOL    FILEDLG95_LOOKIN_OnCommand(HWND hwnd, WORD wNotifyCode);
 static int     FILEDLG95_LOOKIN_AddItem(HWND hwnd,LPITEMIDLIST pidl, int iInsertId);
 static int     FILEDLG95_LOOKIN_SearchItem(HWND hwnd,WPARAM searchArg,int iSearchMethod);
@@ -1392,7 +1390,7 @@ INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
         switch(((LPDRAWITEMSTRUCT)lParam)->CtlID)
         {
         case IDC_LOOKIN:
-          FILEDLG95_LOOKIN_DrawItem((LPDRAWITEMSTRUCT) lParam);
+          FILEDLG95_LOOKIN_DrawItem(hwnd, (LPDRAWITEMSTRUCT)lParam);
           return TRUE;
         }
       }
@@ -3368,13 +3366,12 @@ static void FILEDLG95_LOOKIN_Init(HWND hwndCombo)
  *
  * WM_DRAWITEM message handler
  */
-static LRESULT FILEDLG95_LOOKIN_DrawItem(LPDRAWITEMSTRUCT pDIStruct)
+static LRESULT FILEDLG95_LOOKIN_DrawItem(HWND hwnd, LPDRAWITEMSTRUCT pDIStruct)
 {
   COLORREF crWin = GetSysColor(COLOR_WINDOW);
   COLORREF crHighLight = GetSysColor(COLOR_HIGHLIGHT);
   COLORREF crText = GetSysColor(COLOR_WINDOWTEXT);
-  RECT rectText;
-  RECT rectIcon;
+  RECT rectText, rectIcon, lookin_rect;
   SHFILEINFOW sfi;
   HIMAGELIST ilItemImage;
   int iIndentation;
@@ -3382,6 +3379,8 @@ static LRESULT FILEDLG95_LOOKIN_DrawItem(LPDRAWITEMSTRUCT pDIStruct)
   LPSFOLDER tmpFolder;
   UINT shgfi_flags = SHGFI_PIDL | SHGFI_OPENICON | SHGFI_SYSICONINDEX | SHGFI_DISPLAYNAME;
   UINT icon_width, icon_height;
+  FileOpenDlgInfos *dialog;
+  int height;
 
   TRACE("\n");
 
@@ -3452,6 +3451,12 @@ static LRESULT FILEDLG95_LOOKIN_DrawItem(LPDRAWITEMSTRUCT pDIStruct)
 
   /* Draw the associated text */
   TextOutW(pDIStruct->hDC,rectText.left,rectText.top,sfi.szDisplayName,lstrlenW(sfi.szDisplayName));
+
+  dialog = get_filedlg_infoptr(hwnd);
+  GetWindowRect(dialog->DlgInfos.hwndLookInCB, &lookin_rect);
+  height = lookin_rect.bottom - lookin_rect.top;
+  SendMessageW(dialog->DlgInfos.hwndTB, TB_SETBUTTONSIZE, 0, MAKELPARAM(height, height));
+
   return NOERROR;
 }
 
@@ -3773,7 +3778,7 @@ void FILEDLG95_FILENAME_FillFromSelection (HWND hwnd)
     if (FAILED(IDataObject_GetData(fodInfos->Shell.FOIDataObject, &formatetc, &medium)))
         return;
 
-    cida = GlobalLock(medium.u.hGlobal);
+    cida = GlobalLock(medium.hGlobal);
     nFileSelected = cida->cidl;
 
     /* Allocate a buffer */
@@ -3839,17 +3844,17 @@ static HRESULT COMDLG32_StrRetToStrNW (LPWSTR dest, DWORD len, LPSTRRET src, con
 	switch (src->uType)
 	{
 	  case STRRET_WSTR:
-	    lstrcpynW(dest, src->u.pOleStr, len);
-	    CoTaskMemFree(src->u.pOleStr);
+	    lstrcpynW(dest, src->pOleStr, len);
+	    CoTaskMemFree(src->pOleStr);
 	    break;
 
 	  case STRRET_CSTR:
-            if (!MultiByteToWideChar( CP_ACP, 0, src->u.cStr, -1, dest, len ) && len)
+            if (!MultiByteToWideChar( CP_ACP, 0, src->cStr, -1, dest, len ) && len)
                   dest[len-1] = 0;
 	    break;
 
 	  case STRRET_OFFSET:
-            if (!MultiByteToWideChar( CP_ACP, 0, ((LPCSTR)&pidl->mkid)+src->u.uOffset, -1, dest, len ) && len)
+            if (!MultiByteToWideChar( CP_ACP, 0, ((LPCSTR)&pidl->mkid)+src->uOffset, -1, dest, len ) && len)
                   dest[len-1] = 0;
 	    break;
 
@@ -3904,8 +3909,8 @@ static void COMCTL32_ReleaseStgMedium (STGMEDIUM medium)
       }
       else
       {
-        GlobalUnlock(medium.u.hGlobal);
-        GlobalFree(medium.u.hGlobal);
+        GlobalUnlock(medium.hGlobal);
+        GlobalFree(medium.hGlobal);
       }
 }
 
@@ -3931,7 +3936,7 @@ LPITEMIDLIST GetPidlFromDataObject ( IDataObject *doSelected, UINT nPidlIndex)
     /* Get the pidls from IDataObject */
     if(SUCCEEDED(IDataObject_GetData(doSelected,&formatetc,&medium)))
     {
-      LPIDA cida = GlobalLock(medium.u.hGlobal);
+      LPIDA cida = GlobalLock(medium.hGlobal);
       if(nPidlIndex <= cida->cidl)
       {
         pidl = ILClone((LPITEMIDLIST)(&((LPBYTE)cida)[cida->aoffset[nPidlIndex]]));
@@ -3960,7 +3965,7 @@ static UINT GetNumSelected( IDataObject *doSelected )
     /* Get the pidls from IDataObject */
     if(SUCCEEDED(IDataObject_GetData(doSelected,&formatetc,&medium)))
     {
-      LPIDA cida = GlobalLock(medium.u.hGlobal);
+      LPIDA cida = GlobalLock(medium.hGlobal);
       retVal = cida->cidl;
       COMCTL32_ReleaseStgMedium(medium);
       return retVal;

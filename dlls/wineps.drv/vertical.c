@@ -1,10 +1,10 @@
 /* Unicode Vertical Orientation */
-/* generated from https://www.unicode.org/Public/15.0.0/ucd/UCD.zip:VerticalOrientation.txt */
+/* generated from https://www.unicode.org/Public/15.1.0/ucd/UCD.zip:VerticalOrientation.txt */
 /* DO NOT EDIT!! */
 
 #include "windef.h"
 
-const unsigned short DECLSPEC_HIDDEN vertical_orientation_table[1248] =
+const unsigned short vertical_orientation_table[1248] =
 {
     /* level 1 offsets */
     0x0100, 0x0110, 0x0112, 0x0110, 0x0110, 0x0110, 0x0110, 0x0110,

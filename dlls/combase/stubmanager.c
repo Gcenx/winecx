@@ -499,13 +499,13 @@ static HRESULT ipid_to_ifstub(const IPID *ipid, struct apartment **stub_apt,
     /* FIXME: hack for IRemUnknown */
     if (ipid->Data2 == 0xffff)
         *stub_apt = apartment_findfromoxid(*(const OXID *)ipid->Data4);
-    else if (!ipid->Data2)
+    else if (!ipid->Data2 && (ipid->Data3 == (USHORT)GetCurrentProcessId()))
         *stub_apt = apartment_get_mta();
     else
         *stub_apt = apartment_findfromtid(ipid->Data2);
     if (!*stub_apt)
     {
-        TRACE("Couldn't find apartment corresponding to TID 0x%04x\n", ipid->Data2);
+        TRACE("Couldn't find apartment corresponding to TID 0x%04x, PID 0x%04x\n", ipid->Data2, ipid->Data3);
         return RPC_E_INVALID_OBJECT;
     }
     *stubmgr_ret = get_stub_manager_from_ipid(*stub_apt, ipid, ifstub);
@@ -552,6 +552,31 @@ HRESULT ipid_get_dispatch_params(const IPID *ipid, struct apartment **stub_apt,
     else
         stub_manager_int_release(stubmgr);
     return S_OK;
+}
+
+HRESULT ipid_get_dest_context(const IPID *ipid, MSHCTX *dest_context, void **dest_context_data)
+{
+    struct stub_manager *stubmgr;
+    struct ifstub *ifstub;
+    struct apartment *apt;
+    void *data;
+    HRESULT hr;
+    DWORD ctx;
+
+    hr = ipid_to_ifstub(ipid, &apt, &stubmgr, &ifstub);
+    if (hr != S_OK) return RPC_E_DISCONNECTED;
+
+    hr = IRpcChannelBuffer_GetDestCtx(ifstub->chan, &ctx, &data);
+    if (SUCCEEDED(hr))
+    {
+        *dest_context = ctx;
+        *dest_context_data = data;
+    }
+
+    stub_manager_int_release(stubmgr);
+    apartment_release(apt);
+
+    return hr;
 }
 
 /* returns TRUE if it is possible to unmarshal, FALSE otherwise. */

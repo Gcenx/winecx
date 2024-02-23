@@ -19,8 +19,6 @@
 
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -37,24 +35,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wintrust);
-
-
-/* Utility functions */
-void * WINAPI WINTRUST_Alloc(DWORD cb)
-{
-    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cb);
-}
-
-static void* WINTRUST_ReAlloc(void *ptr, DWORD cb) __WINE_ALLOC_SIZE(2);
-static void* WINTRUST_ReAlloc(void *ptr, DWORD cb)
-{
-    return HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ptr, cb);
-}
-
-void WINAPI WINTRUST_Free(void *p)
-{
-    HeapFree(GetProcessHeap(), 0, p);
-}
 
 /***********************************************************************
  *		TrustIsCertificateSelfSigned (WINTRUST.@)
@@ -92,7 +72,7 @@ BOOL WINAPI TrustIsCertificateSelfSigned( PCCERT_CONTEXT cert )
                 if (directoryName)
                 {
                     ret = CertCompareCertificateName(cert->dwCertEncodingType,
-                     &directoryName->u.DirectoryName, &cert->pCertInfo->Issuer)
+                     &directoryName->DirectoryName, &cert->pCertInfo->Issuer)
                      && CertCompareIntegerBlob(&info->AuthorityCertSerialNumber,
                      &cert->pCertInfo->SerialNumber);
                 }
@@ -202,23 +182,22 @@ static CRYPT_PROVIDER_DATA *WINTRUST_AllocateProviderData(void)
 {
     CRYPT_PROVIDER_DATA *provData;
 
-    provData = WINTRUST_Alloc(sizeof(CRYPT_PROVIDER_DATA));
+    provData = calloc(1, sizeof(CRYPT_PROVIDER_DATA));
     if (!provData)
         goto oom;
     provData->cbStruct = sizeof(CRYPT_PROVIDER_DATA);
 
-    provData->padwTrustStepErrors =
-     WINTRUST_Alloc(TRUSTERROR_MAX_STEPS * sizeof(DWORD));
+    provData->padwTrustStepErrors = calloc(TRUSTERROR_MAX_STEPS, sizeof(DWORD));
     if (!provData->padwTrustStepErrors)
         goto oom;
     provData->cdwTrustStepErrors = TRUSTERROR_MAX_STEPS;
 
-    provData->u.pPDSip = WINTRUST_Alloc(sizeof(PROVDATA_SIP));
-    if (!provData->u.pPDSip)
+    provData->pPDSip = calloc(1, sizeof(PROVDATA_SIP));
+    if (!provData->pPDSip)
         goto oom;
-    provData->u.pPDSip->cbStruct = sizeof(PROVDATA_SIP);
+    provData->pPDSip->cbStruct = sizeof(PROVDATA_SIP);
 
-    provData->psPfns = WINTRUST_Alloc(sizeof(CRYPT_PROVIDER_FUNCTIONS));
+    provData->psPfns = calloc(1, sizeof(CRYPT_PROVIDER_FUNCTIONS));
     if (!provData->psPfns)
         goto oom;
     provData->psPfns->cbStruct = sizeof(CRYPT_PROVIDER_FUNCTIONS);
@@ -227,10 +206,10 @@ static CRYPT_PROVIDER_DATA *WINTRUST_AllocateProviderData(void)
 oom:
     if (provData)
     {
-        WINTRUST_Free(provData->padwTrustStepErrors);
-        WINTRUST_Free(provData->u.pPDSip);
-        WINTRUST_Free(provData->psPfns);
-        WINTRUST_Free(provData);
+        free(provData->padwTrustStepErrors);
+        free(provData->pPDSip);
+        free(provData->psPfns);
+        free(provData);
     }
     return NULL;
 }
@@ -311,10 +290,10 @@ static LONG WINTRUST_DefaultVerify(HWND hwnd, GUID *actionID,
     goto done;
 
 error:
-    WINTRUST_Free(provData->padwTrustStepErrors);
-    WINTRUST_Free(provData->u.pPDSip);
-    WINTRUST_Free(provData->psPfns);
-    WINTRUST_Free(provData);
+    free(provData->padwTrustStepErrors);
+    free(provData->pPDSip);
+    free(provData->psPfns);
+    free(provData);
 
 done:
     TRACE("returning %08lx\n", err);
@@ -334,10 +313,10 @@ static LONG WINTRUST_DefaultClose(HWND hwnd, GUID *actionID,
         if (provData->psPfns->pfnCleanupPolicy)
             err = provData->psPfns->pfnCleanupPolicy(provData);
 
-        WINTRUST_Free(provData->padwTrustStepErrors);
-        WINTRUST_Free(provData->u.pPDSip);
-        WINTRUST_Free(provData->psPfns);
-        WINTRUST_Free(provData);
+        free(provData->padwTrustStepErrors);
+        free(provData->pPDSip);
+        free(provData->psPfns);
+        free(provData);
         data->hWVTStateData = NULL;
     }
     TRACE("returning %08lx\n", err);
@@ -371,7 +350,7 @@ static LONG WINTRUST_PublishedSoftware(HWND hwnd, GUID *actionID,
     TRACE("subjectFile->lpPath: %s\n", debugstr_w(subjectFile->lpPath));
     fileInfo.pcwszFilePath = subjectFile->lpPath;
     fileInfo.hFile = subjectFile->hFile;
-    wintrust_data.u.pFile = &fileInfo;
+    wintrust_data.pFile = &fileInfo;
     wintrust_data.dwUnionChoice = WTD_CHOICE_FILE;
     wintrust_data.dwUIChoice = WTD_UI_NONE;
 
@@ -395,16 +374,16 @@ static HRESULT WINAPI WINTRUST_CertVerifyObjTrust(CRYPT_PROVIDER_DATA *data)
     switch (data->pWintrustData->dwUnionChoice)
     {
     case WTD_CHOICE_BLOB:
-        if (data->pWintrustData->u.pBlob &&
+        if (data->pWintrustData->pBlob &&
          WVT_IS_CBSTRUCT_GT_MEMBEROFFSET(WINTRUST_BLOB_INFO,
-         data->pWintrustData->u.pBlob->cbStruct, pbMemObject) &&
-         data->pWintrustData->u.pBlob->cbMemObject ==
+         data->pWintrustData->pBlob->cbStruct, pbMemObject) &&
+         data->pWintrustData->pBlob->cbMemObject ==
          sizeof(CERT_VERIFY_CERTIFICATE_TRUST) &&
-         data->pWintrustData->u.pBlob->pbMemObject)
+         data->pWintrustData->pBlob->pbMemObject)
         {
             CERT_VERIFY_CERTIFICATE_TRUST *pCert =
              (CERT_VERIFY_CERTIFICATE_TRUST *)
-             data->pWintrustData->u.pBlob->pbMemObject;
+             data->pWintrustData->pBlob->pbMemObject;
 
             if (pCert->cbSize == sizeof(CERT_VERIFY_CERTIFICATE_TRUST) &&
              pCert->pccert)
@@ -502,10 +481,10 @@ static LONG WINTRUST_CertVerify(HWND hwnd, GUID *actionID,
     goto done;
 
 error:
-    WINTRUST_Free(provData->padwTrustStepErrors);
-    WINTRUST_Free(provData->u.pPDSip);
-    WINTRUST_Free(provData->psPfns);
-    WINTRUST_Free(provData);
+    free(provData->padwTrustStepErrors);
+    free(provData->pPDSip);
+    free(provData->psPfns);
+    free(provData);
 
 done:
     TRACE("returning %08lx\n", err);
@@ -641,19 +620,19 @@ static void dump_wintrust_data(WINTRUST_DATA *data)
         switch (data->dwUnionChoice)
         {
         case WTD_CHOICE_FILE:
-            dump_file_info(data->u.pFile);
+            dump_file_info(data->pFile);
             break;
         case WTD_CHOICE_CATALOG:
-            dump_catalog_info(data->u.pCatalog);
+            dump_catalog_info(data->pCatalog);
             break;
         case WTD_CHOICE_BLOB:
-            dump_blob_info(data->u.pBlob);
+            dump_blob_info(data->pBlob);
             break;
         case WTD_CHOICE_SIGNER:
-            dump_sgnr_info(data->u.pSgnr);
+            dump_sgnr_info(data->pSgnr);
             break;
         case WTD_CHOICE_CERT:
-            dump_cert_info(data->u.pCert);
+            dump_cert_info(data->pCert);
             break;
         }
         TRACE("dwStateAction: %ld\n", data->dwStateAction);
@@ -828,7 +807,7 @@ LPCWSTR WINAPI WTHelperGetFileName(WINTRUST_DATA *data)
 {
     TRACE("%p\n",data);
     if (data->dwUnionChoice == WTD_CHOICE_FILE)
-        return data->u.pFile->pcwszFilePath;
+        return data->pFile->pcwszFilePath;
     else
         return NULL;
 }
@@ -840,7 +819,7 @@ HANDLE WINAPI WTHelperGetFileHandle(WINTRUST_DATA *data)
 {
     TRACE("%p\n",data);
     if (data->dwUnionChoice == WTD_CHOICE_FILE)
-        return data->u.pFile->hFile;
+        return data->pFile->hFile;
     else
         return INVALID_HANDLE_VALUE;
 }
@@ -854,7 +833,7 @@ static BOOL WINAPI WINTRUST_enumUsages(PCCRYPT_OID_INFO pInfo, void *pvArg)
     if (!*usages)
     {
         cUsages = 0;
-        *usages = WINTRUST_Alloc(2 * sizeof(PCCRYPT_OID_INFO));
+        *usages = malloc(2 * sizeof(PCCRYPT_OID_INFO));
     }
     else
     {
@@ -865,8 +844,7 @@ static BOOL WINAPI WINTRUST_enumUsages(PCCRYPT_OID_INFO pInfo, void *pvArg)
          */
         for (cUsages = 0, ptr = *usages; *ptr; ptr++, cUsages++)
             ;
-        *usages = WINTRUST_ReAlloc(*usages,
-         (cUsages + 2) * sizeof(PCCRYPT_OID_INFO));
+        *usages = realloc(*usages, (cUsages + 2) * sizeof(PCCRYPT_OID_INFO));
     }
     if (*usages)
     {
@@ -918,7 +896,7 @@ BOOL WINAPI WTHelperGetKnownUsages(DWORD action, PCCRYPT_OID_INFO **usages)
     }
     else if (action == 2)
     {
-        WINTRUST_Free(*usages);
+        free(*usages);
         *usages = NULL;
         ret = TRUE;
     }
@@ -1005,14 +983,7 @@ BOOL WINAPI WINTRUST_AddStore(CRYPT_PROVIDER_DATA *data, HCERTSTORE store)
 
     TRACE("(%p, %p)\n", data, store);
 
-    if (data->chStores)
-        data->pahStores = WINTRUST_ReAlloc(data->pahStores,
-         (data->chStores + 1) * sizeof(HCERTSTORE));
-    else
-    {
-        data->pahStores = WINTRUST_Alloc(sizeof(HCERTSTORE));
-        data->chStores = 0;
-    }
+    data->pahStores = realloc(data->pahStores, (data->chStores + 1) * sizeof(HCERTSTORE));
     if (data->pahStores)
     {
         data->pahStores[data->chStores++] = CertDuplicateStore(store);
@@ -1041,14 +1012,8 @@ BOOL WINAPI WINTRUST_AddSgnr(CRYPT_PROVIDER_DATA *data,
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    if (data->csSigners)
-        data->pasSigners = WINTRUST_ReAlloc(data->pasSigners,
-         (data->csSigners + 1) * sizeof(CRYPT_PROVIDER_SGNR));
-    else
-    {
-        data->pasSigners = WINTRUST_Alloc(sizeof(CRYPT_PROVIDER_SGNR));
-        data->csSigners = 0;
-    }
+    data->pasSigners = realloc(data->pasSigners,
+     (data->csSigners + 1) * sizeof(CRYPT_PROVIDER_SGNR));
     if (data->pasSigners)
     {
         if (idxSigner < data->csSigners)
@@ -1090,17 +1055,10 @@ BOOL WINAPI WINTRUST_AddCert(CRYPT_PROVIDER_DATA *data, DWORD idxSigner,
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    if (data->pasSigners[idxSigner].csCertChain)
-        data->pasSigners[idxSigner].pasCertChain =
-         WINTRUST_ReAlloc(data->pasSigners[idxSigner].pasCertChain,
-         (data->pasSigners[idxSigner].csCertChain + 1) *
-         sizeof(CRYPT_PROVIDER_CERT));
-    else
-    {
-        data->pasSigners[idxSigner].pasCertChain =
-         WINTRUST_Alloc(sizeof(CRYPT_PROVIDER_CERT));
-        data->pasSigners[idxSigner].csCertChain = 0;
-    }
+    data->pasSigners[idxSigner].pasCertChain =
+     realloc(data->pasSigners[idxSigner].pasCertChain,
+     (data->pasSigners[idxSigner].csCertChain + 1) *
+     sizeof(CRYPT_PROVIDER_CERT));
     if (data->pasSigners[idxSigner].pasCertChain)
     {
         CRYPT_PROVIDER_CERT *cert = &data->pasSigners[idxSigner].pasCertChain[
@@ -1129,14 +1087,8 @@ BOOL WINAPI WINTRUST_AddPrivData(CRYPT_PROVIDER_DATA *data,
         WARN("invalid struct size\n");
         return FALSE;
     }
-    if (data->csProvPrivData)
-        data->pasProvPrivData = WINTRUST_ReAlloc(data->pasProvPrivData,
-         (data->csProvPrivData + 1) * sizeof(CRYPT_PROVIDER_SGNR));
-    else
-    {
-        data->pasProvPrivData = WINTRUST_Alloc(sizeof(CRYPT_PROVIDER_SGNR));
-        data->csProvPrivData = 0;
-    }
+    data->pasProvPrivData = realloc(data->pasProvPrivData,
+     (data->csProvPrivData + 1) * sizeof(CRYPT_PROVIDER_SGNR));
     if (data->pasProvPrivData)
     {
         DWORD i;

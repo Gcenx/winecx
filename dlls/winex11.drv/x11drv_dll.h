@@ -27,25 +27,16 @@
 #include "ntgdi.h"
 #include "unixlib.h"
 
-extern NTSTATUS WINAPI x11drv_dnd_enter_event( void *params, ULONG size ) DECLSPEC_HIDDEN;
-extern NTSTATUS WINAPI x11drv_dnd_position_event( void *params, ULONG size ) DECLSPEC_HIDDEN;
-extern NTSTATUS WINAPI x11drv_dnd_post_drop( void *data, ULONG size ) DECLSPEC_HIDDEN;
-extern NTSTATUS WINAPI x11drv_ime_set_composition_string( void *params, ULONG size ) DECLSPEC_HIDDEN;
-extern NTSTATUS WINAPI x11drv_ime_set_result( void *params, ULONG size ) DECLSPEC_HIDDEN;
-extern NTSTATUS WINAPI x11drv_systray_change_owner( void *params, ULONG size ) DECLSPEC_HIDDEN;
+extern NTSTATUS WINAPI x11drv_dnd_enter_event( void *params, ULONG size );
+extern NTSTATUS WINAPI x11drv_dnd_position_event( void *params, ULONG size );
+extern NTSTATUS WINAPI x11drv_dnd_post_drop( void *data, ULONG size );
 
-extern NTSTATUS x11drv_dnd_drop_event( UINT arg ) DECLSPEC_HIDDEN;
-extern NTSTATUS x11drv_dnd_leave_event( UINT arg ) DECLSPEC_HIDDEN;
-extern NTSTATUS x11drv_ime_get_cursor_pos( UINT arg ) DECLSPEC_HIDDEN;
-extern NTSTATUS x11drv_ime_set_composition_status( UINT arg ) DECLSPEC_HIDDEN;
-extern NTSTATUS x11drv_ime_set_cursor_pos( UINT pos ) DECLSPEC_HIDDEN;
-extern NTSTATUS x11drv_ime_set_open_status( UINT open ) DECLSPEC_HIDDEN;
-extern NTSTATUS x11drv_ime_update_association( UINT arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_dnd_drop_event( UINT arg );
+extern NTSTATUS x11drv_dnd_leave_event( UINT arg );
 
 extern LRESULT WINAPI foreign_window_proc( HWND hwnd, UINT msg, WPARAM wparam,
-                                           LPARAM lparam ) DECLSPEC_HIDDEN;
+                                           LPARAM lparam );
 
-extern BOOL show_systray DECLSPEC_HIDDEN;
-extern HMODULE x11drv_module DECLSPEC_HIDDEN;
+extern HMODULE x11drv_module;
 
 #endif /* __WINE_X11DRV_DLL_H */

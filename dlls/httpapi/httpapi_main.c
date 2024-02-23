@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define HTTPAPI_LINKAGE
 #include "wine/http.h"
 #include "winsvc.h"
 #include "winternl.h"
@@ -185,7 +186,7 @@ ULONG WINAPI HttpSetServiceConfiguration( HANDLE handle, HTTP_SERVICE_CONFIG_ID 
 ULONG WINAPI HttpCreateHttpHandle(HANDLE *handle, ULONG reserved)
 {
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING string;
+    UNICODE_STRING string = RTL_CONSTANT_STRING(L"\\Device\\Http\\ReqQueue");
     IO_STATUS_BLOCK iosb;
 
     TRACE("handle %p, reserved %#lx.\n", handle, reserved);
@@ -193,7 +194,6 @@ ULONG WINAPI HttpCreateHttpHandle(HANDLE *handle, ULONG reserved)
     if (!handle)
         return ERROR_INVALID_PARAMETER;
 
-    RtlInitUnicodeString(&string, L"\\Device\\Http\\ReqQueue");
     attr.ObjectName = &string;
     return RtlNtStatusToDosError(NtCreateFile(handle, 0, &attr, &iosb, NULL,
             FILE_ATTRIBUTE_NORMAL, 0, FILE_OPEN, FILE_NON_DIRECTORY_FILE, NULL, 0));
@@ -741,7 +741,7 @@ ULONG WINAPI HttpCreateRequestQueue(HTTPAPI_VERSION version, const WCHAR *name,
         SECURITY_ATTRIBUTES *sa, ULONG flags, HANDLE *handle)
 {
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING string;
+    UNICODE_STRING string = RTL_CONSTANT_STRING(L"\\Device\\Http\\ReqQueue");
     IO_STATUS_BLOCK iosb;
 
     TRACE("version %u.%u, name %s, sa %p, flags %#lx, handle %p.\n",
@@ -753,7 +753,6 @@ ULONG WINAPI HttpCreateRequestQueue(HTTPAPI_VERSION version, const WCHAR *name,
     if (flags)
         FIXME("Unhandled flags %#lx.\n", flags);
 
-    RtlInitUnicodeString(&string, L"\\Device\\Http\\ReqQueue");
     attr.ObjectName = &string;
     if (sa && sa->bInheritHandle)
         attr.Attributes |= OBJ_INHERIT;

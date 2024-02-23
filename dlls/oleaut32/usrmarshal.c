@@ -23,8 +23,6 @@
 #include <string.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -401,11 +399,11 @@ unsigned char * WINAPI VARIANT_UserMarshal(ULONG *pFlags, unsigned char *Buffer,
 
     header->clSize = 0; /* fixed up at the end */
     header->rpcReserved = 0;
-    header->vt = pvar->n1.n2.vt;
-    header->wReserved1 = pvar->n1.n2.wReserved1;
-    header->wReserved2 = pvar->n1.n2.wReserved2;
-    header->wReserved3 = pvar->n1.n2.wReserved3;
-    header->switch_is = pvar->n1.n2.vt;
+    header->vt = V_VT(pvar);
+    header->wReserved1 = pvar->wReserved1;
+    header->wReserved2 = pvar->wReserved2;
+    header->wReserved3 = pvar->wReserved3;
+    header->switch_is = V_VT(pvar);
     if(header->switch_is & VT_ARRAY)
         header->switch_is &= ~VT_TYPEMASK;
 
@@ -420,7 +418,7 @@ unsigned char * WINAPI VARIANT_UserMarshal(ULONG *pFlags, unsigned char *Buffer,
         Pos += 4;
         if((header->vt & VT_TYPEMASK) != VT_VARIANT)
         {
-            memcpy(Pos, pvar->n1.n2.n3.byref, type_size);
+            memcpy(Pos, V_BYREF(pvar), type_size);
             Pos += type_size;
         }
         else
@@ -434,7 +432,7 @@ unsigned char * WINAPI VARIANT_UserMarshal(ULONG *pFlags, unsigned char *Buffer,
         if((header->vt & VT_TYPEMASK) == VT_DECIMAL)
             memcpy(Pos, pvar, type_size);
         else
-            memcpy(Pos, &pvar->n1.n2.n3, type_size);
+            memcpy(Pos, &V_UI8(pvar), type_size);
         Pos += type_size;
     }
 
@@ -506,7 +504,10 @@ unsigned char * WINAPI VARIANT_UserUnmarshal(ULONG *pFlags, unsigned char *Buffe
         ULONG mem_size;
         Pos += 4;
 
-        switch (header->vt & ~VT_BYREF)
+        /* byref array needs to allocate a SAFEARRAY pointer */
+        if (header->vt & VT_ARRAY)
+            mem_size = sizeof(void *);
+        else switch (header->vt & ~VT_BYREF)
         {
         /* these types have a different memory size compared to wire size */
         case VT_UNKNOWN:
@@ -560,14 +561,14 @@ unsigned char * WINAPI VARIANT_UserUnmarshal(ULONG *pFlags, unsigned char *Buffe
         else if((header->vt & VT_TYPEMASK) == VT_DECIMAL)
             memcpy(pvar, Pos, type_size);
         else
-            memcpy(&pvar->n1.n2.n3, Pos, type_size);
+            memcpy(&V_UI8(pvar), Pos, type_size);
         Pos += type_size;
     }
 
-    pvar->n1.n2.vt = header->vt;
-    pvar->n1.n2.wReserved1 = header->wReserved1;
-    pvar->n1.n2.wReserved2 = header->wReserved2;
-    pvar->n1.n2.wReserved3 = header->wReserved3;
+    V_VT(pvar) = header->vt;
+    pvar->wReserved1 = header->wReserved1;
+    pvar->wReserved2 = header->wReserved2;
+    pvar->wReserved3 = header->wReserved3;
 
     if(header->vt & VT_ARRAY)
     {
@@ -620,7 +621,7 @@ void WINAPI VARIANT_UserFree(ULONG *pFlags, VARIANT *pvar)
   TRACE("%#lx, %p.\n", *pFlags, pvar);
   TRACE("vt=%04x\n", V_VT(pvar));
 
-  if (vt & VT_BYREF) ref = pvar->n1.n2.n3.byref;
+  if (vt & VT_BYREF) ref = V_BYREF(pvar);
 
   VariantClear(pvar);
   if (!ref) return;
@@ -1438,12 +1439,12 @@ static void free_embedded_arraydesc(ARRAYDESC *adesc)
     {
     case VT_PTR:
     case VT_SAFEARRAY:
-        free_embedded_typedesc(adesc->tdescElem.u.lptdesc);
-        CoTaskMemFree(adesc->tdescElem.u.lptdesc);
+        free_embedded_typedesc(adesc->tdescElem.lptdesc);
+        CoTaskMemFree(adesc->tdescElem.lptdesc);
         break;
     case VT_CARRAY:
-        free_embedded_arraydesc(adesc->tdescElem.u.lpadesc);
-        CoTaskMemFree(adesc->tdescElem.u.lpadesc);
+        free_embedded_arraydesc(adesc->tdescElem.lpadesc);
+        CoTaskMemFree(adesc->tdescElem.lpadesc);
         break;
     }
 }
@@ -1454,12 +1455,12 @@ static void free_embedded_typedesc(TYPEDESC *tdesc)
     {
     case VT_PTR:
     case VT_SAFEARRAY:
-        free_embedded_typedesc(tdesc->u.lptdesc);
-        CoTaskMemFree(tdesc->u.lptdesc);
+        free_embedded_typedesc(tdesc->lptdesc);
+        CoTaskMemFree(tdesc->lptdesc);
         break;
     case VT_CARRAY:
-        free_embedded_arraydesc(tdesc->u.lpadesc);
-        CoTaskMemFree(tdesc->u.lpadesc);
+        free_embedded_arraydesc(tdesc->lpadesc);
+        CoTaskMemFree(tdesc->lpadesc);
         break;
     }
 }
@@ -1467,8 +1468,8 @@ static void free_embedded_typedesc(TYPEDESC *tdesc)
 static void free_embedded_elemdesc(ELEMDESC *edesc)
 {
     free_embedded_typedesc(&edesc->tdesc);
-    if(edesc->u.paramdesc.wParamFlags & PARAMFLAG_FHASDEFAULT)
-        CoTaskMemFree(edesc->u.paramdesc.pparamdescex);
+    if(edesc->paramdesc.wParamFlags & PARAMFLAG_FHASDEFAULT)
+        CoTaskMemFree(edesc->paramdesc.pparamdescex);
 }
 
 /* ITypeComp */
@@ -1996,7 +1997,7 @@ void CALLBACK ITypeInfo_ReleaseVarDesc_Proxy(
     CoTaskMemFree(pVarDesc->lpstrSchema);
 
     if(pVarDesc->varkind == VAR_CONST)
-        CoTaskMemFree(pVarDesc->u.lpvarValue);
+        CoTaskMemFree(pVarDesc->lpvarValue);
 
     free_embedded_elemdesc(&pVarDesc->elemdescVar);
     CoTaskMemFree(pVarDesc);

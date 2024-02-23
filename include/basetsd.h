@@ -122,15 +122,15 @@ typedef unsigned __int64 ULONG_PTR, *PULONG_PTR;
 
 #define __int3264 __int32
 
-#ifdef WINE_NO_LONG_TYPES
-typedef long          INT_PTR, *PINT_PTR;
-typedef unsigned long UINT_PTR, *PUINT_PTR;
-#else
 typedef int           INT_PTR, *PINT_PTR;
 typedef unsigned int  UINT_PTR, *PUINT_PTR;
-#endif
+#if defined(__clang__) && defined(__MINGW32__)  /* llvm-mingw warns about long type in %I formats */
+typedef int           LONG_PTR, *PLONG_PTR;
+typedef unsigned int  ULONG_PTR, *PULONG_PTR;
+#else
 typedef long          LONG_PTR, *PLONG_PTR;
 typedef unsigned long ULONG_PTR, *PULONG_PTR;
+#endif
 
 #endif
 
@@ -142,8 +142,6 @@ typedef unsigned long ULONG_PTR, *PULONG_PTR;
 #define MININT_PTR 0x8000000000000000
 #define MAXUINT_PTR 0xffffffffffffffff
 
-typedef __int64 SHANDLE_PTR;
-typedef unsigned __int64 HANDLE_PTR;
 typedef int HALF_PTR, *PHALF_PTR;
 typedef unsigned int UHALF_PTR, *PUHALF_PTR;
 
@@ -259,8 +257,6 @@ static inline void *ULongToPtr(ULONG32 ul)
 #define MININT_PTR 0x80000000
 #define MAXUINT_PTR 0xffffffff
 
-typedef long SHANDLE_PTR;
-typedef unsigned long HANDLE_PTR;
 typedef signed short HALF_PTR, *PHALF_PTR;
 typedef unsigned short UHALF_PTR, *PUHALF_PTR;
 
@@ -290,44 +286,14 @@ typedef unsigned short UHALF_PTR, *PUHALF_PTR;
 #define UintToPtr(ui)           UIntToPtr(ui)
 #define UlongToPtr(ul)          ULongToPtr(ul)
 
+typedef LONG_PTR SHANDLE_PTR;
+typedef ULONG_PTR HANDLE_PTR;
 typedef LONG_PTR SSIZE_T, *PSSIZE_T;
 typedef ULONG_PTR SIZE_T, *PSIZE_T;
 typedef ULONG_PTR DWORD_PTR, *PDWORD_PTR;
 typedef ULONG_PTR KAFFINITY, *PKAFFINITY;
 
 #define MINLONGLONG             ((LONGLONG)~MAXLONGLONG)
-
-/* Some Wine-specific definitions */
-
-/* Architecture dependent settings. */
-/* These are hardcoded to avoid dependencies on config.h in Winelib apps. */
-#if defined(__i386__)
-# undef  WORDS_BIGENDIAN
-#elif defined(__x86_64__)
-# undef  WORDS_BIGENDIAN
-#elif defined(__powerpc64__) && defined(__BIG_ENDIAN__)
-# define WORDS_BIGENDIAN
-#elif defined(__powerpc64__)
-# undef  WORDS_BIGENDIAN
-#elif defined(__powerpc__)
-# define WORDS_BIGENDIAN
-#elif defined(__ALPHA__)
-# undef  WORDS_BIGENDIAN
-#elif defined(__ARMEB__)
-# define WORDS_BIGENDIAN
-#elif defined(__ARMEL__) || defined(__arm__)
-# undef  WORDS_BIGENDIAN
-#elif defined(__AARCH64EB__)
-# define WORDS_BIGENDIAN
-#elif defined(__AARCH64EL__) || defined(__aarch64__)
-# undef  WORDS_BIGENDIAN
-#elif defined(__MIPSEB__)
-# define WORDS_BIGENDIAN
-#elif defined(__MIPSEL__)
-# undef  WORDS_BIGENDIAN
-#elif !defined(RC_INVOKED) && !defined(__WIDL__) && !defined(__midl)
-# error Unknown CPU architecture!
-#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

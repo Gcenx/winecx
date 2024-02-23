@@ -18,8 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-extern HRESULT GameExplorer_create(IUnknown* pUnkOuter, IUnknown **ppObj) DECLSPEC_HIDDEN;
-extern HRESULT GameStatistics_create(IUnknown* pUnkOuter, IUnknown **ppObj) DECLSPEC_HIDDEN;
+extern HRESULT GameExplorer_create(IUnknown* pUnkOuter, IUnknown **ppObj);
+extern HRESULT GameStatistics_create(IUnknown* pUnkOuter, IUnknown **ppObj);
 
 /*******************************************************************************
  * Helper functions and structures
@@ -64,7 +64,7 @@ struct GAMEUX_GAME_DATA
 HRESULT GAMEUX_FindGameInstanceId(
         LPCWSTR sGDFBinaryPath,
         GAME_INSTALL_SCOPE installScope,
-        GUID* pInstanceId) DECLSPEC_HIDDEN;
+        GUID* pInstanceId);
 /*******************************************************************************
  * GAMEUX_buildGameRegistryPath
  *
@@ -78,7 +78,7 @@ HRESULT GAMEUX_FindGameInstanceId(
  *  lpRegistryPath              [O]     pointer which will receive address to string
  *                                      containing expected registry path. Path
  *                                      is relative to HKLM registry key. It
- *                                      must be freed by calling HeapFree(GetProcessHeap(), 0, ...)
+ *                                      must be freed by calling free(...)
  *
  * Name of game's registry key always follows patterns below:
  *  When game is installed for current user only (installScope is GIS_CURRENT_USER):
@@ -93,4 +93,4 @@ HRESULT GAMEUX_FindGameInstanceId(
  */
 HRESULT GAMEUX_buildGameRegistryPath(GAME_INSTALL_SCOPE installScope,
         LPCGUID gameInstanceId,
-        LPWSTR* lpRegistryPath) DECLSPEC_HIDDEN;
+        LPWSTR* lpRegistryPath);

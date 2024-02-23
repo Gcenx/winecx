@@ -244,9 +244,19 @@ sync_test("query_selector", function() {
         + '</div>'
         + '<script class="class1"></script>';
 
-    var e = document.querySelector("nomatch");
+    var frag = document.createDocumentFragment()
+    var e = document.createElement("div");
+    e.innerHTML = '<div class="class3"></div><a id="class3" class="class4"></a></div>';
+    frag.appendChild(e);
+    var e = document.createElement("script");
+    e.className = "class3";
+    frag.appendChild(e);
+
+    e = document.querySelector("nomatch");
     ok(e === null, "e = " + e);
     e = document.body.querySelector("nomatch");
+    ok(e === null, "e = " + e);
+    e = frag.querySelector("nomatch");
     ok(e === null, "e = " + e);
 
     e = document.querySelector(".class1");
@@ -255,11 +265,39 @@ sync_test("query_selector", function() {
     ok(e.tagName === "DIV", "e.tagName = " + e.tagName);
     ok(e.msMatchesSelector(".class1") === true, "msMatchesSelector returned " + e.msMatchesSelector(".class1"));
     ok(e.msMatchesSelector(".class2") === false, "msMatchesSelector returned " + e.msMatchesSelector(".class2"));
+    e = document.querySelector(".class3");
+    ok(e === null, "e = " + e);
+    e = document.body.querySelector(".class3");
+    ok(e === null, "e = " + e);
+
+    e = frag.querySelector(".class3");
+    ok(e.tagName === "DIV", "e.tagName = " + e.tagName);
+    e = frag.querySelector(".class4");
+    ok(e.tagName === "A", "e.tagName = " + e.tagName);
+    e = frag.querySelector(".class1");
+    ok(e === null, "e = " + e);
+    e = frag.querySelector(".class2");
+    ok(e === null, "e = " + e);
 
     e = document.querySelector("a");
     ok(e.tagName === "A", "e.tagName = " + e.tagName);
     e = document.body.querySelector("a");
     ok(e.tagName === "A", "e.tagName = " + e.tagName);
+    e = frag.querySelector("a");
+    ok(e.tagName === "A", "e.tagName = " + e.tagName);
+
+    e = document.querySelectorAll(".class1");
+    ok(e.length === 3, "e.length = " + e.length);
+    e = document.body.querySelectorAll(".class1");
+    ok(e.length === 3, "e.length = " + e.length);
+    e = document.querySelectorAll(".class2");
+    ok(e.length === 1, "e.length = " + e.length);
+    e = document.body.querySelectorAll(".class2");
+    ok(e.length === 1, "e.length = " + e.length);
+    e = frag.querySelectorAll(".class3");
+    ok(e.length === 2, "e.length = " + e.length);
+    e = frag.querySelectorAll(".class4");
+    ok(e.length === 1, "e.length = " + e.length);
 });
 
 sync_test("compare_position", function() {
@@ -293,6 +331,8 @@ sync_test("rects", function() {
     ok(rects.length === 1, "rect.length = " + rects.length);
     ok(rects[0].top === rect.top, "rects[0].top = " + rects[0].top + " rect.top = " + rect.top);
     ok(rects[0].bottom === rect.bottom, "rects[0].bottom = " + rects[0].bottom + " rect.bottom = " + rect.bottom);
+    ok(rect.height === rect.bottom - rect.top, "rect.height = " + rect.height + " rect.bottom = " + rect.bottom + " rect.top = " + rect.top);
+    ok(rect.width === rect.right - rect.left, "rect.width = " + rect.width + " rect.right = " + rect.right + " rect.left = " + rect.left);
 
     elem = document.createElement("style");
     rects = elem.getClientRects();
@@ -621,19 +661,31 @@ sync_test("hasAttribute", function() {
 
 sync_test("classList", function() {
     var elem = document.createElement("div");
-    var classList = elem.classList;
+    var classList = elem.classList, i, r;
+
+    var props = [ "add", "contains", "item", "length", "remove", "toggle" ];
+    for(i = 0; i < props.length; i++)
+        ok(props[i] in classList, props[i] + " not found in classList.");
+
+    props = [ "entries", "forEach", "keys", "replace", "supports", "value", "values"];
+    for(i = 0; i < props.length; i++)
+        ok(!(props[i] in classList), props[i] + " found in classList.");
 
     classList.add("a");
     ok(elem.className === "a", "Expected className 'a', got " + elem.className);
+    ok(classList.length === 1, "Expected length 1 for className 'a', got " + classList.length);
 
     classList.add("b");
     ok(elem.className === "a b", "Expected className 'a b', got " + elem.className);
+    ok(classList.length === 2, "Expected length 2 for className 'a b', got " + classList.length);
 
     classList.add("c");
     ok(elem.className === "a b c", "Expected className 'a b c', got " + elem.className);
+    ok(classList.length === 3, "Expected length 3 for className 'a b c', got " + classList.length);
 
     classList.add(4);
     ok(elem.className === "a b c 4", "Expected className 'a b c 4', got " + elem.className);
+    ok(classList.length === 4, "Expected length 4 for className 'a b c 4', got " + classList.length);
 
     classList.add("c");
     ok(elem.className === "a b c 4", "(2) Expected className 'a b c 4', got " + elem.className);
@@ -674,6 +726,56 @@ sync_test("classList", function() {
         exception = true;
     }
     ok(exception, "Expected exception for classList.add(\"e f\")");
+
+    exception = false;
+    try
+    {
+        classList.contains();
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.contains()");
+
+    exception = false;
+    try
+    {
+        classList.contains("");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.contains(\"\")");
+
+    exception = false;
+    try
+    {
+        classList.contains("a b");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.contains(\"a b\")");
+
+    ok(classList.contains("4") === true, "contains: expected '4' to return true");
+    ok(classList.contains("b") === true, "contains: expected 'b' to return true");
+    ok(classList.contains("d") === false, "contains: expected 'd' to return false");
+
+    r = classList.item(-1);
+    ok(r === null, "item(-1) = " + r);
+    r = classList.item(0);
+    ok(r === "a", "item(0) = " + r);
+    r = classList.item(1);
+    ok(r === "b", "item(1) = " + r);
+    r = classList.item(2);
+    ok(r === "c", "item(2) = " + r);
+    r = classList.item(3);
+    ok(r === "4", "item(3) = " + r);
+    r = classList.item(4);
+    ok(r === null, "item(4) = " + r);
 
     classList.remove("e");
     ok(elem.className === "a b c 4", "remove: expected className 'a b c 4', got " + elem.className);
@@ -718,9 +820,97 @@ sync_test("classList", function() {
     classList.remove("b");
     ok(elem.className === "", "remove: expected className '', got " + elem.className);
 
+    exception = false;
+    try
+    {
+        classList.toggle();
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.toggle()");
+
+    exception = false;
+    try
+    {
+        classList.toggle("");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.toggle(\"\")");
+
+    exception = false;
+    try
+    {
+        classList.toggle("a b");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.toggle(\"a b\")");
+
+    // toggle's second arg is not implemented by IE, and ignored
+    r = classList.toggle("abc");
+    ok(r === true, "toggle('abc') returned " + r);
+    ok(elem.className === "abc", "toggle('abc'): got className " + elem.className);
+
+    r = classList.toggle("def", false);
+    ok(r === true, "toggle('def', false) returned " + r);
+    ok(elem.className === "abc def", "toggle('def', false): got className " + elem.className);
+
+    r = classList.toggle("123", 1234);
+    ok(r === true, "toggle('123', 1234) returned " + r);
+    ok(elem.className === "abc def 123", "toggle('123', 1234): got className " + elem.className);
+
+    r = classList.toggle("def", true);
+    ok(r === false, "toggle('def', true) returned " + r);
+    ok(elem.className === "abc 123", "toggle('def', true): got className " + elem.className);
+
+    r = classList.toggle("123", null);
+    ok(r === false, "toggle('123', null) returned " + r);
+    ok(elem.className === "abc", "toggle('123', null): got className " + elem.className);
+
     elem.className = "  testclass    foobar  ";
+    ok(classList.length === 2, "Expected length 2 for className '  testclass    foobar  ', got " + classList.length);
     ok(("" + classList) === "  testclass    foobar  ", "Expected classList value '  testclass    foobar  ', got " + classList);
     ok(classList.toString() === "  testclass    foobar  ", "Expected classList toString '  testclass    foobar  ', got " + classList.toString());
+
+    r = classList[-1];
+    ok(r === null, "classList[-1] = " + r);
+    r = classList[0];
+    ok(r === "testclass", "classList[0] = " + r);
+    r = classList[1];
+    ok(r === "foobar", "classList[1] = " + r);
+    r = classList[2];
+    ok(r === null, "classList[2] = " + r);
+
+    classList[0] = "barfoo";
+    classList[2] = "added";
+    ok(classList.toString() === "  testclass    foobar  ", "Expected classList toString to not be changed after setting indexed props, got " + classList.toString());
+
+    try
+    {
+        classList[0]();
+        ok(false, "Expected exception calling classList[0]");
+    }
+    catch(e)
+    {
+        ok(e.number === 0xa138a - 0x80000000, "Calling classList[0] threw " + e.number);
+    }
+
+    try
+    {
+        new classList[0]();
+        ok(false, "Expected exception calling classList[0] as constructor");
+    }
+    catch(e)
+    {
+        ok(e.number === 0xa01bd - 0x80000000, "Calling classList[0] as constructor threw " + e.number);
+    }
 });
 
 sync_test("importNode", function() {

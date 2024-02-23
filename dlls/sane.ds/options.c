@@ -103,22 +103,13 @@ TW_UINT16 sane_option_set_str(const char *option_name, char *val, BOOL *needs_re
     struct option_descriptor opt;
     TW_UINT16 rc = sane_find_option(option_name, TYPE_STRING, &opt);
 
-    if (rc == TWCC_SUCCESS) rc = sane_option_set_value( opt.optno, &val, needs_reload );
+    if (rc == TWCC_SUCCESS) rc = sane_option_set_value( opt.optno, val, needs_reload );
     return rc;
 }
 
-TW_UINT16 sane_option_probe_resolution(const char *option_name, int *minval, int *maxval, int *quant)
+TW_UINT16 sane_option_probe_resolution(const char *option_name, struct option_descriptor *opt)
 {
-    struct option_descriptor opt;
-    TW_UINT16 rc = sane_find_option(option_name, TYPE_INT, &opt);
-
-    if (rc != TWCC_SUCCESS) return rc;
-    if (opt.constraint_type != CONSTRAINT_RANGE) return TWCC_CAPUNSUPPORTED;
-
-    *minval = opt.constraint.range.min;
-    *maxval = opt.constraint.range.max;
-    *quant  = opt.constraint.range.quant;
-    return rc;
+    return sane_find_option(option_name, TYPE_INT, opt);
 }
 
 TW_UINT16 sane_option_probe_mode(TW_UINT16 *current, TW_UINT32 *choices, int *count)
@@ -207,6 +198,11 @@ TW_FIX32 convert_sane_res_to_twain(int res)
     value.Whole = res / 65536;
     value.Frac  = res & 0xffff;
     return value;
+}
+
+int convert_twain_res_to_sane( TW_FIX32 res )
+{
+    return MulDiv( res.Whole * 65536 + res.Frac, 254, 10 );  /* inch -> mm */
 }
 
 TW_UINT16 get_sane_params( struct frame_parameters *params )

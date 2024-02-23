@@ -2502,7 +2502,7 @@ static void test_WM_DISPLAYCHANGE(void)
         {
             todo_wine
             win_skip( "ChangeDisplaySettingsExW returned %ld\n", res );
-            ok( res == DISP_CHANGE_BADMODE || broken( DISP_CHANGE_FAILED && bpp == 8 ),
+            ok( res == DISP_CHANGE_BADMODE || broken( res == DISP_CHANGE_FAILED && bpp == 8 ),
                 "ChangeDisplaySettingsExW returned %ld\n", res );
             ok( last_bpp == -1, "got WM_DISPLAYCHANGE bpp %d\n", last_bpp );
         }
@@ -3123,7 +3123,8 @@ static void test_EnumDisplaySettings(void)
 {
     static const DWORD mode_fields = DM_DISPLAYORIENTATION | DM_BITSPERPEL |
             DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
-    static const DWORD setting_fields = mode_fields | DM_POSITION;
+    static const DWORD setting_fields = DM_DISPLAYORIENTATION | DM_BITSPERPEL |
+            DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION;
     CHAR primary_adapter[CCHDEVICENAME];
     DPI_AWARENESS_CONTEXT ctx = NULL;
     DWORD err, val, device, mode;
@@ -4135,6 +4136,30 @@ static void test_GetAutoRotationState(void)
     ok(ret, "Expected GetAutoRotationState to succeed, error %ld\n", GetLastError());
 }
 
+static void test_LOGFONT_charset(void)
+{
+    CHARSETINFO csi;
+    LOGFONTA lf;
+    NONCLIENTMETRICSA ncm;
+    BOOL ret;
+
+    ret = TranslateCharsetInfo(ULongToPtr(GetACP()), &csi, TCI_SRCCODEPAGE);
+    ok(ret, "TranslateCharsetInfo(%d) error %lu\n", GetACP(), GetLastError());
+
+    GetObjectA(GetStockObject(DEFAULT_GUI_FONT), sizeof(lf), &lf);
+    ok(lf.lfCharSet == csi.ciCharset, "got %d, expected %d\n", lf.lfCharSet, csi.ciCharset);
+
+    ret = SystemParametersInfoA(SPI_GETICONTITLELOGFONT, sizeof(lf), &lf, FALSE);
+    ok(ret, "SystemParametersInfoW error %lu\n", GetLastError());
+    ok(lf.lfCharSet == DEFAULT_CHARSET, "got %d\n", lf.lfCharSet);
+
+    ncm.cbSize = FIELD_OFFSET(NONCLIENTMETRICSA, iPaddedBorderWidth);
+    ret = SystemParametersInfoA(SPI_GETNONCLIENTMETRICS, 0, &ncm, 0);
+    ok(ret, "SystemParametersInfoW error %lu\n", GetLastError());
+    ok(ncm.lfCaptionFont.lfCharSet == DEFAULT_CHARSET, "got %d\n", ncm.lfCaptionFont.lfCharSet);
+    ok(ncm.lfSmCaptionFont.lfCharSet == DEFAULT_CHARSET, "got %d\n", ncm.lfSmCaptionFont.lfCharSet);
+}
+
 START_TEST(sysparams)
 {
     int argc;
@@ -4181,6 +4206,8 @@ START_TEST(sysparams)
     argc = winetest_get_mainargs(&argv);
     strict=(argc >= 3 && strcmp(argv[2],"strict")==0);
     trace("strict=%d\n",strict);
+
+    test_LOGFONT_charset();
 
     trace("testing GetSystemMetrics with your current desktop settings\n");
     test_GetSystemMetrics( );

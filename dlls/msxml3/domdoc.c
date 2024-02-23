@@ -68,6 +68,7 @@ static const WCHAR PropertyResolveExternalsW[] = {'R','e','s','o','l','v','e','E
 static const WCHAR PropertyAllowXsltScriptW[] = {'A','l','l','o','w','X','s','l','t','S','c','r','i','p','t',0};
 static const WCHAR PropertyAllowDocumentFunctionW[] = {'A','l','l','o','w','D','o','c','u','m','e','n','t','F','u','n','c','t','i','o','n',0};
 static const WCHAR PropertyNormalizeAttributeValuesW[] = {'N','o','r','m','a','l','i','z','e','A','t','t','r','i','b','u','t','e','V','a','l','u','e','s',0};
+static const WCHAR PropertyValidateOnParse[] = L"ValidateOnParse";
 
 /* Anything that passes the test_get_ownerDocument()
  * tests can go here (data shared between all instances).
@@ -77,6 +78,7 @@ typedef struct {
     LONG refs;
     MSXML_VERSION version;
     VARIANT_BOOL preserving;
+    VARIANT_BOOL validating;
     IXMLDOMSchemaCollection2* schemaCache;
     struct list selectNsList;
     xmlChar const* selectNsStr;
@@ -123,7 +125,6 @@ struct domdoc
     IConnectionPointContainer IConnectionPointContainer_iface;
     LONG ref;
     VARIANT_BOOL async;
-    VARIANT_BOOL validating;
     VARIANT_BOOL resolving;
     domdoc_properties* properties;
     HRESULT error;
@@ -288,6 +289,7 @@ static domdoc_properties *create_properties(MSXML_VERSION version)
     properties->refs = 1;
     list_init(&properties->selectNsList);
     properties->preserving = VARIANT_FALSE;
+    properties->validating = VARIANT_TRUE;
     properties->schemaCache = NULL;
     properties->selectNsStr = heap_alloc_zero(sizeof(xmlChar));
     properties->selectNsStr_len = 0;
@@ -315,6 +317,7 @@ static domdoc_properties* copy_properties(domdoc_properties const* properties)
         pcopy->refs = 1;
         pcopy->version = properties->version;
         pcopy->preserving = properties->preserving;
+        pcopy->validating = properties->validating;
         pcopy->schemaCache = properties->schemaCache;
         if (pcopy->schemaCache)
             IXMLDOMSchemaCollection2_AddRef(pcopy->schemaCache);
@@ -2709,8 +2712,8 @@ static HRESULT WINAPI domdoc_get_validateOnParse(
     VARIANT_BOOL* isValidating )
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
-    TRACE("(%p)->(%p: %d)\n", This, isValidating, This->validating);
-    *isValidating = This->validating;
+    TRACE("(%p)->(%p: %d)\n", This, isValidating, This->properties->validating);
+    *isValidating = This->properties->validating;
     return S_OK;
 }
 
@@ -2721,7 +2724,7 @@ static HRESULT WINAPI domdoc_put_validateOnParse(
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
     TRACE("(%p)->(%d)\n", This, isValidating);
-    This->validating = isValidating;
+    This->properties->validating = isValidating;
     return S_OK;
 }
 
@@ -3187,6 +3190,16 @@ static HRESULT WINAPI domdoc_setProperty(
         VariantClear(&varStr);
         return hr;
     }
+    else if (lstrcmpiW(p, PropertyValidateOnParse) == 0)
+    {
+        if (This->properties->version < MSXML4)
+            return E_FAIL;
+        else
+        {
+            This->properties->validating = V_BOOL(&value);
+            return S_OK;
+        }
+    }
     else if (lstrcmpiW(p, PropertyProhibitDTDW) == 0 ||
              lstrcmpiW(p, PropertyNewParserW) == 0 ||
              lstrcmpiW(p, PropertyResolveExternalsW) == 0 ||
@@ -3257,6 +3270,17 @@ static HRESULT WINAPI domdoc_getProperty(
         V_BSTR(var) = SysAllocString(rebuiltStr);
         heap_free(rebuiltStr);
         return S_OK;
+    }
+    else if (lstrcmpiW(p, PropertyValidateOnParse) == 0)
+    {
+        if (This->properties->version < MSXML4)
+            return E_FAIL;
+        else
+        {
+            V_VT(var) = VT_BOOL;
+            V_BOOL(var) = This->properties->validating;
+            return S_OK;
+        }
     }
 
     FIXME("Unknown property %s\n", debugstr_w(p));
@@ -3740,7 +3764,6 @@ HRESULT get_domdoc_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument3 **document)
     doc->IConnectionPointContainer_iface.lpVtbl = &ConnectionPointContainerVtbl;
     doc->ref = 1;
     doc->async = VARIANT_TRUE;
-    doc->validating = 0;
     doc->resolving = 0;
     doc->properties = properties_add_ref(properties_from_xmlDocPtr(xmldoc));
     doc->error = S_OK;

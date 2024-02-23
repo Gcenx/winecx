@@ -19,9 +19,6 @@
  */
 
 #include "dmime_private.h"
-#include "dmobject.h"
-
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmime);
 
@@ -98,11 +95,10 @@ static ULONG WINAPI segment_track_Release(IDirectMusicTrack8 *iface)
 
             if (item->dmobj)
                 IDirectMusicObject_Release(item->dmobj);
-            heap_free(item);
+            free(item);
         }
 
-        heap_free(This);
-        DMIME_UnlockModule();
+        free(This);
     }
 
     return ref;
@@ -275,8 +271,7 @@ static HRESULT parse_segment_item(IDirectMusicSegTriggerTrack *This, IStream *st
     /* First chunk is a header */
     if (stream_get_chunk(stream, &chunk) != S_OK || chunk.id != DMUS_FOURCC_SEGMENTITEM_CHUNK)
         return DMUS_E_TRACK_HDR_NOT_FIRST_CK;
-    if (!(item = heap_alloc_zero(sizeof(*item))))
-        return E_OUTOFMEMORY;
+    if (!(item = calloc(1, sizeof(*item)))) return E_OUTOFMEMORY;
     hr = stream_chunk_get_data(stream, &chunk, &item->header, sizeof(DMUS_IO_SEGMENT_ITEM_HEADER));
     if (FAILED(hr))
         goto error;
@@ -312,7 +307,7 @@ static HRESULT parse_segment_item(IDirectMusicSegTriggerTrack *This, IStream *st
     return S_OK;
 
 error:
-    heap_free(item);
+    free(item);
     return hr;
 }
 
@@ -387,11 +382,8 @@ HRESULT create_dmsegtriggertrack(REFIID lpcGUID, void **ppobj)
     IDirectMusicSegTriggerTrack *track;
     HRESULT hr;
 
-    track = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*track));
-    if (!track) {
-        *ppobj = NULL;
-        return E_OUTOFMEMORY;
-    }
+    *ppobj = NULL;
+    if (!(track = calloc(1, sizeof(*track)))) return E_OUTOFMEMORY;
     track->IDirectMusicTrack8_iface.lpVtbl = &dmtrack8_vtbl;
     track->ref = 1;
     dmobject_init(&track->dmobj, &CLSID_DirectMusicSegTriggerTrack,
@@ -399,7 +391,6 @@ HRESULT create_dmsegtriggertrack(REFIID lpcGUID, void **ppobj)
     track->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
     list_init(&track->Items);
 
-    DMIME_LockModule();
     hr = IDirectMusicTrack8_QueryInterface(&track->IDirectMusicTrack8_iface, lpcGUID, ppobj);
     IDirectMusicTrack8_Release(&track->IDirectMusicTrack8_iface);
 

@@ -1,11 +1,11 @@
 EXTRADEFS = -D_CRTIMP=
 MODULE    = ucrtbase.dll
 IMPORTLIB = ucrtbase
-IMPORTS   = ntdll
+IMPORTS   = $(MUSL_PE_LIBS) ntdll
 DELAYIMPORTS = advapi32 user32
 PARENTSRC = ../msvcrt
 
-C_SRCS = \
+SOURCES = \
 	console.c \
 	cpp.c \
 	crt_gccmain.c \
@@ -21,11 +21,13 @@ C_SRCS = \
 	except.c \
 	except_arm.c \
 	except_arm64.c \
+	except_arm64ec.c \
 	except_i386.c \
 	except_x86_64.c \
 	exception_ptr.c \
 	exit.c \
 	file.c \
+	handler4.c \
 	heap.c \
 	locale.c \
 	lock.c \
@@ -42,6 +44,5 @@ C_SRCS = \
 	thread.c \
 	time.c \
 	undname.c \
+	version.rc \
 	wcs.c
-
-RC_SRCS = version.rc

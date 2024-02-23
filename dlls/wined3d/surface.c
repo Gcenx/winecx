@@ -27,6 +27,7 @@
  */
 
 #include "wined3d_private.h"
+#include "wined3d_gl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
@@ -358,35 +359,35 @@ void texture2d_read_from_framebuffer(struct wined3d_texture *texture, unsigned i
     uint8_t *offset;
     unsigned int i;
 
+    TRACE("texture %p, sub_resource_idx %u, context %p, src_location %s, dst_location %s.\n",
+            texture, sub_resource_idx, context, wined3d_debug_location(src_location), wined3d_debug_location(dst_location));
+
     /* dst_location was already prepared by the caller. */
     wined3d_texture_get_bo_address(texture, sub_resource_idx, &data, dst_location);
     offset = data.addr;
 
     restore_texture = context->current_rt.texture;
     restore_idx = context->current_rt.sub_resource_idx;
-    if (restore_texture != texture || restore_idx != sub_resource_idx)
+    if (!wined3d_resource_is_offscreen(resource) && (restore_texture != texture || restore_idx != sub_resource_idx))
         context = context_acquire(device, texture, sub_resource_idx);
     else
         restore_texture = NULL;
     context_gl = wined3d_context_gl(context);
     gl_info = context_gl->gl_info;
 
-    if (src_location != resource->draw_binding)
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
-        wined3d_context_gl_apply_fbo_state_blit(context_gl, GL_READ_FRAMEBUFFER,
-                resource, sub_resource_idx, NULL, 0, src_location);
-        wined3d_context_gl_check_fbo_status(context_gl, GL_READ_FRAMEBUFFER);
-        context_invalidate_state(context, STATE_FRAMEBUFFER);
-    }
-    else
-    {
-        wined3d_context_gl_apply_blit_state(context_gl, device);
+        if (resource->format->depth_size || resource->format->stencil_size)
+            wined3d_context_gl_apply_fbo_state_explicit(context_gl, GL_READ_FRAMEBUFFER,
+                    NULL, 0, resource, sub_resource_idx, src_location);
+        else
+            wined3d_context_gl_apply_fbo_state_explicit(context_gl, GL_READ_FRAMEBUFFER,
+                    resource, sub_resource_idx, NULL, 0, src_location);
     }
 
-    /* Select the correct read buffer, and give some debug output.
-     * There is no need to keep track of the current read buffer or reset it,
-     * every part of the code that reads sets the read buffer as desired.
-     */
+    /* Select the correct read buffer, and give some debug output. There is no
+     * need to keep track of the current read buffer or reset it, every part
+     * of the code that reads pixels sets the read buffer as desired. */
     if (src_location != WINED3D_LOCATION_DRAWABLE || wined3d_resource_is_offscreen(resource))
     {
         /* Mapping the primary render target which is not on a swapchain.
@@ -404,6 +405,8 @@ void texture2d_read_from_framebuffer(struct wined3d_texture *texture, unsigned i
         src_is_upside_down = FALSE;
     }
     checkGLcall("glReadBuffer");
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
+        wined3d_context_gl_check_fbo_status(context_gl, GL_READ_FRAMEBUFFER);
 
     if (data.buffer_object)
     {

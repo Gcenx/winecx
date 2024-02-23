@@ -73,7 +73,6 @@ struct process
     struct event        *idle_event;      /* event for input idle */
     obj_handle_t         winstation;      /* main handle to process window station */
     obj_handle_t         desktop;         /* handle to desktop to use for new threads */
-    struct list          surfaces;        /* list of surfaces that are flushed to this process */
     struct token        *token;           /* security token associated with this process */
     struct list          views;           /* list of memory views */
     client_ptr_t         peb;             /* PEB address in client address space */
@@ -111,7 +110,6 @@ extern void add_process_thread( struct process *process,
                                 struct thread *thread );
 extern void remove_process_thread( struct process *process,
                                    struct thread *thread );
-extern void remove_process_surfaces( struct process *process );
 extern void suspend_process( struct process *process );
 extern void resume_process( struct process *process );
 extern void kill_process( struct process *process, int violent_death );

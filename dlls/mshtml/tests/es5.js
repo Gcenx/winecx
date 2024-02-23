@@ -18,6 +18,7 @@
 
 var E_INVALIDARG = 0x80070057;
 var JS_E_PROP_DESC_MISMATCH = 0x800a01bd;
+var JS_E_INVALID_ACTION = 0x800a01bd;
 var JS_E_NUMBER_EXPECTED = 0x800a1389;
 var JS_E_FUNCTION_EXPECTED = 0x800a138a;
 var JS_E_DATE_EXPECTED = 0x800a138e;
@@ -26,6 +27,7 @@ var JS_E_BOOLEAN_EXPECTED = 0x800a1392;
 var JS_E_VBARRAY_EXPECTED = 0x800a1395;
 var JS_E_ENUMERATOR_EXPECTED = 0x800a1397;
 var JS_E_REGEXP_EXPECTED = 0x800a1398;
+var JS_E_UNEXPECTED_QUANTIFIER = 0x800a139a;
 var JS_E_INVALID_WRITABLE_PROP_DESC = 0x800a13ac;
 var JS_E_NONCONFIGURABLE_REDEFINED = 0x800a13d6;
 var JS_E_NONWRITABLE_MODIFIED = 0x800a13d7;
@@ -372,6 +374,13 @@ sync_test("isArray", function() {
     expect_array(new C(), false);
 });
 
+sync_test("array_splice", function() {
+    var arr = [1,2,3,4,5]
+    var tmp = arr.splice(2);
+    ok(arr.toString() === "1,2", "arr = " + arr);
+    ok(tmp.toString() === "3,4,5", "tmp = " + tmp);
+});
+
 sync_test("array_map", function() {
     var calls, m, arr, ctx;
 
@@ -422,6 +431,13 @@ sync_test("array_map", function() {
     [1,2].map(function() {
         ok(this.valueOf() === 137, "this.valueOf() = " + this.valueOf());
     }, 137);
+
+    r = [1,,2,].map(function(x) { return "" + x; });
+    ok(r.length === 3, "[1,,2,].map length = " + r.length);
+    ok(r[0] === "1", "[1,,2,].map[0] = " + r[0]);
+    ok(r[2] === "2", "[1,,2,].map[2] = " + r[2]);
+    ok(!("1" in r), "[1,,2,].map[1] exists");
+    ok(!("3" in r), "[1,,2,].map[3] exists");
 });
 
 sync_test("array_sort", function() {
@@ -524,11 +540,16 @@ sync_test("getOwnPropertyDescriptor", function() {
     (function() {
         test_own_data_prop_desc(arguments, "length", true, false, true);
         test_own_data_prop_desc(arguments, "callee", true, false, true);
+        ok(!("caller" in arguments), "caller in arguments");
     })();
 
     test_own_data_prop_desc(String, "prototype", false, false, false);
     test_own_data_prop_desc(function(){}, "prototype", true, false, false);
+    test_own_data_prop_desc(function(){}, "caller", false, false, false);
+    test_own_data_prop_desc(function(){}, "arguments", false, false, false);
     test_own_data_prop_desc(Function, "prototype", false, false, false);
+    test_own_data_prop_desc(Function.prototype, "caller", false, false, false);
+    test_own_data_prop_desc(Function.prototype, "arguments", false, false, false);
     test_own_data_prop_desc(String.prototype, "constructor", true, false, true);
 
     try {
@@ -787,6 +808,7 @@ sync_test("defineProperty", function() {
     /* call prop with getter */
     desc = {
         get: function() {
+            ok(this === obj, "this != obj");
             return function(x) {
                 ok(x === 100, "x = " + x);
                 return 10;
@@ -796,6 +818,10 @@ sync_test("defineProperty", function() {
     Object.defineProperty(obj, "funcprop", desc);
     test_accessor_prop_desc(obj, "funcprop", desc);
     ok(obj.funcprop(100) === 10, "obj.funcprop() = " + obj.funcprop(100));
+
+    Object.defineProperty(child.prototype, "funcprop_prot", desc);
+    test_accessor_prop_desc(child.prototype, "funcprop_prot", desc);
+    ok(obj.funcprop_prot(100) === 10, "obj.funcprop_prot() = " + obj.funcprop_prot(100));
 
     expect_exception(function() {
         Object.defineProperty(null, "funcprop", desc);
@@ -1120,6 +1146,9 @@ sync_test("toString", function() {
     obj = Object.create(Number.prototype);
     tmp = Object.prototype.toString.call(obj);
     ok(tmp === "[object Object]", "toString.call(Object.create(Number.prototype)) = " + tmp);
+
+    tmp = (new Number(303)).toString(undefined);
+    ok(tmp === "303", "Number 303 toString(undefined) = " + tmp);
 });
 
 sync_test("bind", function() {
@@ -1134,6 +1163,21 @@ sync_test("bind", function() {
     ok(f.length === 0, "f.length = " + f.length);
     r = f.call(o2);
     ok(r === 1, "r = " + r);
+
+    try {
+        f.arguments;
+        ok(false, "expected exception getting f.arguments");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_INVALID_ACTION, "f.arguments threw " + n);
+    }
+    try {
+        f.caller;
+        ok(false, "expected exception getting f.caller");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_INVALID_ACTION, "f.caller threw " + n);
+    }
 
     f = (function() {
         ok(this === o, "this != o");
@@ -1291,6 +1335,9 @@ sync_test("reduce", function() {
 
     r = [1,2,3].reduce(function(a, value) { return a + value; }, "str");
     ok(r === "str123", "reduce() returned " + r);
+
+    r = [1,2,].reduce(function(a, value) { return a + value; }, "str");
+    ok(r === "str12", "reduce() returned " + r);
 
     array = [1,2,3];
     r = array.reduce(function(a, value, index, src) {
@@ -1610,6 +1657,30 @@ sync_test("isFrozen", function() {
     }
 });
 
+sync_test("RegExp", function() {
+    var r;
+
+    r = /()/.exec("")[1];
+    ok(r === "", "/()/ captured: " + r);
+    r = /()?/.exec("")[1];
+    ok(r === undefined, "/()?/ captured: " + r);
+    r = /()??/.exec("")[1];
+    ok(r === undefined, "/()??/ captured: " + r);
+    r = /()*/.exec("")[1];
+    ok(r === undefined, "/()*/ captured: " + r);
+    r = /()??()/.exec("");
+    ok(r[1] === undefined, "/()??()/ [1] captured: " + r);
+    ok(r[2] === "", "/()??()/ [2] captured: " + r);
+
+    try {
+        r = new RegExp("(?<a>b)", "g");
+        ok(false, "expected exception with /(?<a>b)/ regex");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_UNEXPECTED_QUANTIFIER, "/(?<a>b)/ regex threw " + n);
+    }
+});
+
 sync_test("builtin_context", function() {
     var nullDisp = external.nullDisp;
     var tests = [
@@ -1666,6 +1737,9 @@ sync_test("builtin_context", function() {
     ok(obj === window, "obj = " + obj);
     obj = (function() { return this; }).call(42);
     ok(obj.valueOf() === 42, "obj = " + obj);
+
+    obj = Object.create([100]);
+    ok(obj.length === 1, "obj.length = " + obj.length);
 });
 
 sync_test("host this", function() {
@@ -2071,8 +2145,8 @@ sync_test("console", function() {
     ok(except, "console.timeLog: expected exception");
 });
 
-sync_test("matchMedia", function() {
-    var i, r, mql;
+async_test("matchMedia", function() {
+    var i, r, mql, expect, event_fired, event2_fired;
 
     try {
         mql = window.matchMedia("");
@@ -2094,4 +2168,84 @@ sync_test("matchMedia", function() {
     }
     mql = window.matchMedia("(max-width: 1000px)");
     ok(mql.matches === true, "(max-width: 1000px) does not match");
+    mql = window.matchMedia("(max-width: 50px)");
+    ok(mql.matches === false, "(max-width: 50px) matches");
+
+    ok(!("addEventListener" in mql), "addEventListener in MediaQueryList");
+    ok(!("removeEventListener" in mql), "removeEventListener in MediaQueryList");
+    r = mql.addListener(null);
+    ok(r === undefined, "addListener with null returned " + r);
+    r = mql.removeListener(null);
+    ok(r === undefined, "removeListener with null returned " + r);
+    r = mql.addListener("function() { ok(false, 'string handler called'); }");
+    ok(r === undefined, "addListener with string returned " + r);
+
+    var handler = function(e) {
+        ok(this === window, "handler this = " + this);
+        ok(e === mql, "handler argument = " + e);
+        event_fired = true;
+        ok(event2_fired !== true, "second handler fired before first");
+    }
+    var handler2 = function(e) {
+        ok(this === window, "handler2 this = " + this);
+        ok(e === mql, "handler2 argument = " + e);
+        event2_fired = true;
+    }
+    var tests = [
+        [ 20, 20, function() {
+            var r = mql.removeListener("function() { ok(false, 'string handler called'); }");
+            ok(r === undefined, "removeListener with string returned " + r);
+            r = mql.addListener(handler);
+            ok(r === undefined, "addListener with function returned " + r);
+        }],
+        [ 120, 120, function() {
+            ok(event_fired === true, "event not fired after changing from 20x20 to 120x120 view");
+            mql.addListener(null);
+            mql.addListener("function() { ok(false, 'second string handler called'); }");
+            mql.addListener(handler2);
+        }],
+        [ 30, 30, function() {
+            ok(event_fired === true, "event not fired after changing from 120x120 to 30x30 view");
+            ok(event2_fired === true, "event not fired from second handler after changing from 120x120 to 30x30 view");
+            var r = mql.removeListener(handler);
+            ok(r === undefined, "removeListener with function returned " + r);
+        }],
+        [ 300, 300, function() {
+            ok(event_fired === false, "removed event handler fired after changing from 30x30 to 300x300 view");
+            ok(event2_fired === true, "event not fired from second handler after changing from 30x30 to 300x300 view");
+        }]
+    ];
+
+    function test() {
+        tests[i][2]();
+        if(++i >= tests.length) {
+            next_test();
+            return;
+        }
+        expect = !expect;
+        event_fired = event2_fired = false;
+        external.setViewSize(tests[i][0], tests[i][1]);
+        window.setTimeout(check);
+    }
+
+    // async dispatch once even after change confirmed, to ensure that any possible listeners are dispatched first (or not)
+    function check() { window.setTimeout(mql.matches === expect ? test : check); }
+
+    i = 0;
+    expect = !mql.matches;
+    external.setViewSize(tests[i][0], tests[i][1]);
+    window.setTimeout(check);
+});
+
+sync_test("initProgressEvent", function() {
+    var e = document.createEvent("ProgressEvent");
+    e.initProgressEvent("loadend", false, false, true, 13, 42);
+    ok(e.lengthComputable === true, "lengthComputable = " + e.lengthComputable);
+    ok(e.loaded === 13, "loaded = " + e.loaded);
+    ok(e.total === 42, "total = " + e.total);
+
+    e.initProgressEvent("loadstart", false, false, false, 99, 50);
+    ok(e.lengthComputable === false, "lengthComputable after re-init = " + e.lengthComputable);
+    ok(e.loaded === 99, "loaded after re-init = " + e.loaded);
+    ok(e.total === 50, "total after re-init = " + e.total);
 });

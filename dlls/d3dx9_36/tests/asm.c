@@ -111,14 +111,14 @@ static HRESULT WINAPI testD3DXInclude_open(ID3DXInclude *iface, D3DXINCLUDE_TYPE
     if (!strcmp(filename, "shader.vsh"))
     {
         size = test_include->terminated_data ? sizeof(shader) : sizeof(shader) - 1;
-        buffer = HeapAlloc(GetProcessHeap(), 0, size);
+        buffer = malloc(size);
         memcpy(buffer, shader, size);
         *bytes = size;
     }
     else if (!strcmp(filename, "incl.vsh"))
     {
         size = test_include->terminated_data ? sizeof(include) : sizeof(include) - 1;
-        buffer = HeapAlloc(GetProcessHeap(), 0, size);
+        buffer = malloc(size);
         memcpy(buffer, include, size);
         *bytes = size;
         /* This is included from the first D3DXAssembleShader with non-null ID3DXInclude test
@@ -129,14 +129,14 @@ static HRESULT WINAPI testD3DXInclude_open(ID3DXInclude *iface, D3DXINCLUDE_TYPE
     else if (!strcmp(filename, "incl2.vsh"))
     {
         size = test_include->terminated_data ? sizeof(include2) : sizeof(include2) - 1;
-        buffer = HeapAlloc(GetProcessHeap(), 0, size);
+        buffer = malloc(size);
         memcpy(buffer, include2, size);
         *bytes = size;
     }
     else if (!strcmp(filename, "incl3.vsh"))
     {
         size = test_include->terminated_data ? sizeof(include3) : sizeof(include3) - 1;
-        buffer = HeapAlloc(GetProcessHeap(), 0, size);
+        buffer = malloc(size);
         memcpy(buffer, include3, size);
         *bytes = size;
         ok(parent_data != NULL && !strncmp(include2, parent_data, strlen(include2)), "wrong parent_data value.\n");
@@ -144,7 +144,7 @@ static HRESULT WINAPI testD3DXInclude_open(ID3DXInclude *iface, D3DXINCLUDE_TYPE
     else if (!strcmp(filename, "include/incl3.vsh"))
     {
         size = test_include->terminated_data ? sizeof(include) : sizeof(include) - 1;
-        buffer = HeapAlloc(GetProcessHeap(), 0, size);
+        buffer = malloc(size);
         memcpy(buffer, include, size);
         *bytes = size;
         ok(!parent_data, "wrong parent_data value.\n");
@@ -160,7 +160,7 @@ static HRESULT WINAPI testD3DXInclude_open(ID3DXInclude *iface, D3DXINCLUDE_TYPE
 
 static HRESULT WINAPI testD3DXInclude_close(ID3DXInclude *iface, const void *data)
 {
-    HeapFree(GetProcessHeap(), 0, (void *)data);
+    free((void *)data);
     return S_OK;
 }
 
@@ -217,7 +217,7 @@ static void assembleshader_test(void)
     hr = D3DXAssembleShader(test1, strlen(test1),
                             defines, NULL, D3DXSHADER_SKIPVALIDATION,
                             &shader, &messages);
-    ok(hr == D3D_OK, "pDefines test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXAssembleShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -229,7 +229,7 @@ static void assembleshader_test(void)
     hr = D3DXAssembleShader(test1, strlen(test1),
                             defines, NULL, D3DXSHADER_SKIPVALIDATION,
                             &shader, NULL);
-    ok(hr == D3D_OK, "NULL messages test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
     if(shader) ID3DXBuffer_Release(shader);
 
     /* NULL shader test */
@@ -237,7 +237,7 @@ static void assembleshader_test(void)
     hr = D3DXAssembleShader(test1, strlen(test1),
                             defines, NULL, D3DXSHADER_SKIPVALIDATION,
                             NULL, &messages);
-    ok(hr == D3D_OK, "NULL shader test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXAssembleShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -316,7 +316,7 @@ static void assembleshader_test(void)
         hr = D3DXAssembleShaderFromFileA(shader_vsh_path,
                                          NULL, NULL, D3DXSHADER_SKIPVALIDATION,
                                          &shader, &messages);
-        ok(hr == D3D_OK, "D3DXAssembleShaderFromFile test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if(messages) {
             trace("D3DXAssembleShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
             ID3DXBuffer_Release(messages);
@@ -328,7 +328,7 @@ static void assembleshader_test(void)
         messages = NULL;
         hr = D3DXAssembleShaderFromFileA("shader.vsh", NULL, &include.ID3DXInclude_iface,
                                          D3DXSHADER_SKIPVALIDATION, &shader, &messages);
-        ok(hr == D3D_OK, "D3DXAssembleShaderFromFile + pInclude test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if(messages) {
             trace("D3DXAssembleShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
             ID3DXBuffer_Release(messages);
@@ -348,7 +348,7 @@ static void assembleshader_test(void)
             hr = D3DXAssembleShaderFromFileA(shader3_vsh_path, NULL, NULL,
                                              D3DXSHADER_SKIPVALIDATION,
                                              &shader, &messages);
-            ok(hr == D3D_OK, "D3DXAssembleShaderFromFile path search test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+            ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
             if(messages) {
                 trace("D3DXAssembleShaderFromFile path search messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
                 ID3DXBuffer_Release(messages);
@@ -369,8 +369,7 @@ static void assembleshader_test(void)
         messages = NULL;
         hr = D3DXAssembleShaderFromFileA("shader.vsh", NULL, &include.ID3DXInclude_iface,
                 D3DXSHADER_SKIPVALIDATION, &shader, &messages);
-        ok(hr == D3D_OK, "D3DXAssembleShaderFromFile + pInclude main shader test failed with error 0x%lx - %ld\n",
-                hr, hr & 0x0000ffff);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if (messages)
         {
             trace("D3DXAssembleShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
@@ -383,8 +382,7 @@ static void assembleshader_test(void)
         messages = NULL;
         hr = D3DXAssembleShaderFromFileW(L"shader.vsh", NULL, &include.ID3DXInclude_iface,
                 D3DXSHADER_SKIPVALIDATION, &shader, &messages);
-        ok(hr == D3D_OK, "D3DXAssembleShaderFromFile + pInclude main shader test failed with error 0x%lx - %ld\n",
-                hr, hr & 0x0000ffff);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if (messages)
         {
             trace("D3DXAssembleShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
@@ -400,7 +398,7 @@ static void assembleshader_test(void)
     hr = D3DXAssembleShader(NULL, 0,
                             NULL, NULL, D3DXSHADER_SKIPVALIDATION,
                             &shader, &messages);
-    ok(hr == D3DXERR_INVALIDDATA, "NULL shader test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3DXERR_INVALIDDATA, "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXAssembleShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -413,8 +411,7 @@ static void assembleshader_test(void)
                                      NULL, NULL, D3DXSHADER_SKIPVALIDATION,
                                      &shader, &messages);
     ok(hr == D3DXERR_INVALIDDATA || hr == E_FAIL, /* I get this on WinXP */
-        "D3DXAssembleShaderFromFile nonexistent file test failed with error 0x%lx - %ld\n",
-        hr, hr & 0x0000FFFF);
+            "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXAssembleShaderFromFile messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -427,7 +424,7 @@ static void assembleshader_test(void)
     hr = D3DXAssembleShaderFromResourceA(NULL, MAKEINTRESOURCEA(IDB_ASMSHADER),
                                          NULL, NULL, D3DXSHADER_SKIPVALIDATION,
                                          &shader, &messages);
-    ok(hr == D3D_OK, "D3DXAssembleShaderFromResource test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXAssembleShaderFromResource messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -440,7 +437,7 @@ static void assembleshader_test(void)
     hr = D3DXAssembleShaderFromResourceA(NULL, "notexisting",
                                          NULL, NULL, D3DXSHADER_SKIPVALIDATION,
                                          &shader, &messages);
-    ok(hr == D3DXERR_INVALIDDATA, "D3DXAssembleShaderFromResource NULL shader test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3DXERR_INVALIDDATA, "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXAssembleShaderFromResource messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -486,7 +483,7 @@ static void d3dxpreprocess_test(void)
             messages = NULL;
             hr = D3DXPreprocessShaderFromFileA(shader3_vsh_path, NULL, NULL,
                                                &shader, &messages);
-            ok(hr == D3D_OK, "D3DXPreprocessShaderFromFile path search test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+            ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
             if(messages) {
                 trace("D3DXPreprocessShaderFromFile path search messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
                 ID3DXBuffer_Release(messages);
@@ -500,7 +497,7 @@ static void d3dxpreprocess_test(void)
         hr = D3DXPreprocessShaderFromFileA(shader_vsh_path,
                                            NULL, NULL,
                                            &shader, &messages);
-        ok(hr == D3D_OK, "D3DXPreprocessShaderFromFile test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if(messages) {
             trace("D3DXPreprocessShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
             ID3DXBuffer_Release(messages);
@@ -512,7 +509,7 @@ static void d3dxpreprocess_test(void)
         messages = NULL;
         hr = D3DXPreprocessShaderFromFileA("shader.vsh", NULL, &include.ID3DXInclude_iface,
                                            &shader, &messages);
-        ok(hr == D3D_OK, "D3DXPreprocessShaderFromFile + pInclude test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if(messages) {
             trace("D3DXPreprocessShader messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
             ID3DXBuffer_Release(messages);
@@ -532,8 +529,7 @@ static void d3dxpreprocess_test(void)
         messages = NULL;
         hr = D3DXPreprocessShaderFromFileA("shader.vsh", NULL, &include.ID3DXInclude_iface,
                 &shader, &messages);
-        ok(hr == D3D_OK, "D3DXPreprocessShaderFromFile + pInclude main shader test failed with error 0x%lx - %ld\n",
-                hr, hr & 0x0000ffff);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if (messages)
         {
             trace("D3DXPreprocessShaderFromFile messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
@@ -546,8 +542,7 @@ static void d3dxpreprocess_test(void)
         messages = NULL;
         hr = D3DXPreprocessShaderFromFileW(L"shader.vsh", NULL, &include.ID3DXInclude_iface,
                 &shader, &messages);
-        ok(hr == D3D_OK, "D3DXPreprocessShaderFromFile + pInclude main shader test failed with error 0x%lx - %ld\n",
-                hr, hr & 0x0000ffff);
+        ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
         if (messages)
         {
             trace("D3DXPreprocessShaderFromFile messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
@@ -564,8 +559,7 @@ static void d3dxpreprocess_test(void)
                                        NULL, NULL,
                                        &shader, &messages);
     ok(hr == D3DXERR_INVALIDDATA || hr == E_FAIL, /* I get this on WinXP */
-        "D3DXPreprocessShaderFromFile nonexistent file test failed with error 0x%lx - %ld\n",
-        hr, hr & 0x0000FFFF);
+            "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXPreprocessShaderFromFile messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -578,7 +572,7 @@ static void d3dxpreprocess_test(void)
     hr = D3DXPreprocessShaderFromResourceA(NULL, MAKEINTRESOURCEA(IDB_ASMSHADER),
                                            NULL, NULL,
                                            &shader, &messages);
-    ok(hr == D3D_OK, "D3DXPreprocessShaderFromResource test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXPreprocessShaderFromResource messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);
@@ -591,7 +585,7 @@ static void d3dxpreprocess_test(void)
     hr = D3DXPreprocessShaderFromResourceA(NULL, "notexisting",
                                            NULL, NULL,
                                            &shader, &messages);
-    ok(hr == D3DXERR_INVALIDDATA, "D3DXPreprocessShaderFromResource NULL shader test failed with error 0x%lx - %ld\n", hr, hr & 0x0000FFFF);
+    ok(hr == D3DXERR_INVALIDDATA, "Unexpected hr %#lx.\n", hr);
     if(messages) {
         trace("D3DXPreprocessShaderFromResource messages:\n%s", (char *)ID3DXBuffer_GetBufferPointer(messages));
         ID3DXBuffer_Release(messages);

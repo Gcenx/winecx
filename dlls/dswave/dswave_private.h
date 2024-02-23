@@ -39,16 +39,4 @@
 #include "dmusicf.h"
 #include "dmusics.h"
 
-/*****************************************************************************
- * ClassFactory
- */
-extern HRESULT create_dswave(REFIID lpcGUID, void **ret_iface) DECLSPEC_HIDDEN;
-
-/**********************************************************************
- * Dll lifetime tracking declaration for dswave.dll
- */
-extern LONG DSWAVE_refCount DECLSPEC_HIDDEN;
-static inline void DSWAVE_LockModule(void) { InterlockedIncrement( &DSWAVE_refCount ); }
-static inline void DSWAVE_UnlockModule(void) { InterlockedDecrement( &DSWAVE_refCount ); }
-
 #endif	/* __WINE_DSWAVE_PRIVATE_H */

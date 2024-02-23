@@ -1203,18 +1203,19 @@ static void mark_drawable_dirty( struct gl_drawable *old, struct gl_drawable *ne
 static inline void sync_context(struct wgl_context *context)
 {
     BOOL refresh = FALSE;
+    struct gl_drawable *old[2] = { NULL };
 
     pthread_mutex_lock( &context_mutex );
     if (context->new_drawables[0])
     {
-        release_gl_drawable( context->drawables[0] );
+        old[0] = context->drawables[0];
         context->drawables[0] = context->new_drawables[0];
         context->new_drawables[0] = NULL;
         refresh = TRUE;
     }
     if (context->new_drawables[1])
     {
-        release_gl_drawable( context->drawables[1] );
+        old[1] = context->drawables[1];
         context->drawables[1] = context->new_drawables[1];
         context->new_drawables[1] = NULL;
         refresh = TRUE;
@@ -1226,6 +1227,8 @@ static inline void sync_context(struct wgl_context *context)
                                    context->drawables[1]->drawable, context->ctx);
         else
             pglXMakeCurrent(gdi_display, context->drawables[0]->drawable, context->ctx);
+        release_gl_drawable( old[0] );
+        release_gl_drawable( old[1] );
     }
     pthread_mutex_unlock( &context_mutex );
 }
@@ -1390,30 +1393,41 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel
 /***********************************************************************
  *              set_win_format
  */
-static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format, BOOL mutable_pf )
+static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format, BOOL internal )
 {
-    struct gl_drawable *gl;
+    struct gl_drawable *old, *gl;
 
     if (!format->visual) return FALSE;
 
-    if (!(gl = create_gl_drawable( hwnd, format, FALSE, mutable_pf ))) return FALSE;
+    old = get_gl_drawable( hwnd, 0 );
+
+    if (!(gl = create_gl_drawable( hwnd, format, FALSE, internal )))
+    {
+        release_gl_drawable( old );
+        return FALSE;
+    }
 
     TRACE( "created GL drawable %lx for win %p %s\n",
            gl->drawable, hwnd, debugstr_fbconfig( format->fbconfig ));
 
+    if (old)
+        mark_drawable_dirty( old, gl );
+
     XFlush( gdi_display );
     release_gl_drawable( gl );
+    release_gl_drawable( old );
 
-    NtUserSetWindowPixelFormat( hwnd, pixel_format_index( format ));
+    win32u_set_window_pixel_format( hwnd, pixel_format_index( format ), internal );
     return TRUE;
 }
 
 
-static BOOL set_pixel_format(HDC hdc, int format, BOOL allow_change)
+static BOOL set_pixel_format( HDC hdc, int format, BOOL internal )
 {
     const struct wgl_pixel_format *fmt;
     int value;
     HWND hwnd = NtUserWindowFromDC( hdc );
+    int prev;
 
     TRACE("(%p,%d)\n", hdc, format);
 
@@ -1437,20 +1451,14 @@ static BOOL set_pixel_format(HDC hdc, int format, BOOL allow_change)
         return FALSE;
     }
 
-    if (!allow_change)
-    {
-        struct gl_drawable *gl;
-        if ((gl = get_gl_drawable( hwnd, hdc )))
-        {
-            int prev = pixel_format_index( gl->format );
-            BOOL mutable_pf = gl->mutable_pf;
-            release_gl_drawable( gl );
-            if (!mutable_pf)
-                return prev == format;  /* cannot change it if already set */
-        }
-    }
+    /* Even for internal pixel format fail setting it if the app has already set a
+     * different pixel format. Let wined3d create a backup GL context instead.
+     * Switching pixel format involves drawable recreation and is much more expensive
+     * than blitting from backup context. */
+    if ((prev = win32u_get_window_pixel_format( hwnd )))
+        return prev == format;
 
-    return set_win_format( hwnd, fmt, allow_change );
+    return set_win_format( hwnd, fmt, internal );
 }
 
 
@@ -1514,7 +1522,7 @@ void set_gl_drawable_parent( HWND hwnd, HWND parent )
     else
     {
         destroy_gl_drawable( hwnd );
-        NtUserSetWindowPixelFormat( hwnd, 0 );
+        win32u_set_window_pixel_format( hwnd, 0, FALSE );
     }
     release_gl_drawable( old );
 }
@@ -1583,6 +1591,9 @@ static int describe_pixel_format( int iPixelFormat, PIXELFORMATDESCRIPTOR *ppfd,
    * We only set PFD_GENERIC_FORMAT on bitmap formats (see get_formats) as that's what ATI and Nvidia Windows drivers do  */
   ppfd->dwFlags |= fmt->dwFlags & (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED);
 
+  if (!(ppfd->dwFlags & PFD_GENERIC_FORMAT))
+    ppfd->dwFlags |= PFD_SUPPORT_COMPOSITION;
+
   pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DOUBLEBUFFER, &value);
   if (value) {
       ppfd->dwFlags |= PFD_DOUBLEBUFFER;
@@ -1608,14 +1619,17 @@ static int describe_pixel_format( int iPixelFormat, PIXELFORMATDESCRIPTOR *ppfd,
     pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_BLUE_SIZE, &bb);
     pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_ALPHA_SIZE, &ab);
 
-    ppfd->cRedBits = rb;
-    ppfd->cRedShift = gb + bb + ab;
     ppfd->cBlueBits = bb;
-    ppfd->cBlueShift = ab;
+    ppfd->cBlueShift = 0;
     ppfd->cGreenBits = gb;
-    ppfd->cGreenShift = bb + ab;
+    ppfd->cGreenShift = bb;
+    ppfd->cRedBits = rb;
+    ppfd->cRedShift = gb + bb;
     ppfd->cAlphaBits = ab;
-    ppfd->cAlphaShift = 0;
+    if (ab)
+        ppfd->cAlphaShift = rb + gb + bb;
+    else
+        ppfd->cAlphaShift = 0;
   } else {
     ppfd->cRedBits = 0;
     ppfd->cRedShift = 0;
@@ -1689,8 +1703,12 @@ static int glxdrv_wglGetPixelFormat( HDC hdc )
 {
     struct gl_drawable *gl;
     int ret = 0;
+    HWND hwnd;
 
-    if ((gl = get_gl_drawable( NtUserWindowFromDC( hdc ), hdc )))
+    if ((hwnd = NtUserWindowFromDC( hdc )))
+        return win32u_get_window_pixel_format( hwnd );
+
+    if ((gl = get_gl_drawable( NULL, hdc )))
     {
         ret = pixel_format_index( gl->format );
         /* Offscreen formats can't be used with traditional WGL calls.
@@ -1919,6 +1937,8 @@ done:
  */
 static BOOL glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
 {
+    struct wgl_context *keep, *clobber;
+
     TRACE("(%p, %p)\n", org, dest);
 
     /* Sharing of display lists works differently in GLX and WGL. In case of GLX it is done
@@ -1929,34 +1949,35 @@ static BOOL glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *de
      * so there delaying context creation doesn't work.
      *
      * The new approach is to create a GLX context in wglCreateContext / wglCreateContextAttribsARB
-     * and when a program requests sharing we recreate the destination context if it hasn't been made
-     * current or when it hasn't shared display lists before.
+     * and when a program requests sharing we recreate the destination or source context if it
+     * hasn't been made current and it hasn't shared display lists before.
      */
 
-    if((org->has_been_current && dest->has_been_current) || dest->has_been_current)
+    if (!dest->has_been_current && !dest->sharing)
     {
-        ERR("Could not share display lists, one of the contexts has been current already !\n");
-        return FALSE;
+        keep = org;
+        clobber = dest;
     }
-    else if(dest->sharing)
+    else if (!org->has_been_current && !org->sharing)
     {
-        ERR("Could not share display lists because hglrc2 has already shared lists before\n");
-        return FALSE;
+        keep = dest;
+        clobber = org;
     }
     else
     {
-        /* Re-create the GLX context and share display lists */
-        pglXDestroyContext(gdi_display, dest->ctx);
-        dest->ctx = create_glxcontext(gdi_display, dest, org->ctx);
-        TRACE(" re-created context (%p) for Wine context %p (%s) sharing lists with ctx %p (%s)\n",
-              dest->ctx, dest, debugstr_fbconfig(dest->fmt->fbconfig),
-              org->ctx, debugstr_fbconfig( org->fmt->fbconfig));
-
-        org->sharing = TRUE;
-        dest->sharing = TRUE;
-        return TRUE;
+        ERR("Could not share display lists because both of the contexts have already been current or shared\n");
+        return FALSE;
     }
-    return FALSE;
+
+    pglXDestroyContext(gdi_display, clobber->ctx);
+    clobber->ctx = create_glxcontext(gdi_display, clobber, keep->ctx);
+    TRACE("re-created context (%p) for Wine context %p (%s) sharing lists with ctx %p (%s)\n",
+          clobber->ctx, clobber, debugstr_fbconfig(clobber->fmt->fbconfig),
+          keep->ctx, debugstr_fbconfig(keep->fmt->fbconfig));
+
+    org->sharing = TRUE;
+    dest->sharing = TRUE;
+    return TRUE;
 }
 
 static void wglFinish(void)

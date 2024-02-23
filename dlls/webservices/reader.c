@@ -914,7 +914,7 @@ WS_XML_UINT64_TEXT *alloc_uint64_text( UINT64 value )
     return ret;
 }
 
-WS_XML_FLOAT_TEXT *alloc_float_text( float value )
+static WS_XML_FLOAT_TEXT *alloc_float_text( float value )
 {
     WS_XML_FLOAT_TEXT *ret;
 
@@ -6184,6 +6184,7 @@ static WS_READ_OPTION get_field_read_option( WS_TYPE type, ULONG options )
     case WS_BYTES_TYPE:
     case WS_XML_STRING_TYPE:
     case WS_XML_QNAME_TYPE:
+    case WS_XML_BUFFER_TYPE:
     case WS_STRUCT_TYPE:
     case WS_ENUM_TYPE:
     case WS_UNION_TYPE:

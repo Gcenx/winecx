@@ -18,8 +18,11 @@
  */
 
 #include <stdarg.h>
+#include <wchar.h>
 
+#include "ntstatus.h"
 #define COBJMACROS
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -39,7 +42,7 @@
 #include "winreg.h"
 #include "spatialaudioclient.h"
 
-#include "mmdevapi.h"
+#include "mmdevapi_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mmdevapi);
@@ -65,7 +68,9 @@ static const char *get_priority_string(int prio)
 
 static BOOL load_driver(const WCHAR *name, DriverFuncs *driver)
 {
-    WCHAR driver_module[264];
+    NTSTATUS status;
+    WCHAR driver_module[264], path[MAX_PATH];
+    struct test_connect_params params;
 
     lstrcpyW(driver_module, L"wine");
     lstrcatW(driver_module, name);
@@ -80,24 +85,44 @@ static BOOL load_driver(const WCHAR *name, DriverFuncs *driver)
         return FALSE;
     }
 
+    if ((status = NtQueryVirtualMemory(GetCurrentProcess(), driver->module, MemoryWineUnixFuncs,
+        &driver->module_unixlib, sizeof(driver->module_unixlib), NULL))) {
+        ERR("Unable to load UNIX functions: %lx\n", status);
+        goto fail;
+    }
+
+    if ((status = __wine_unix_call(driver->module_unixlib, process_attach, NULL))) {
+        ERR("Unable to initialize library: %lx\n", status);
+        goto fail;
+    }
+
 #define LDFC(n) do { driver->p##n = (void*)GetProcAddress(driver->module, #n);\
-        if(!driver->p##n) { FreeLibrary(driver->module); return FALSE; } } while(0)
-    LDFC(GetPriority);
-    LDFC(GetEndpointIDs);
-    LDFC(GetAudioEndpoint);
-    LDFC(GetAudioSessionManager);
+        if(!driver->p##n) { goto fail; } } while(0)
+    LDFC(get_device_guid);
+    LDFC(get_device_name_from_guid);
 #undef LDFC
 
-    /* optional - do not fail if not found */
-    driver->pGetPropValue = (void*)GetProcAddress(driver->module, "GetPropValue");
+    GetModuleFileNameW(NULL, path, ARRAY_SIZE(path));
+    params.name     = wcsrchr(path, '\\');
+    params.name     = params.name ? params.name + 1 : path;
+    params.priority = Priority_Neutral;
 
-    driver->priority = driver->pGetPriority();
+    if ((status = __wine_unix_call(driver->module_unixlib, test_connect, &params))) {
+        ERR("Unable to retrieve driver priority: %lx\n", status);
+        goto fail;
+    }
+
+    driver->priority = params.priority;
+
     lstrcpyW(driver->module_name, driver_module);
 
     TRACE("Successfully loaded %s with priority %s\n",
             wine_dbgstr_w(driver_module), get_priority_string(driver->priority));
 
     return TRUE;
+fail:
+    FreeLibrary(driver->module);
+    return FALSE;
 }
 
 static BOOL WINAPI init_driver(INIT_ONCE *once, void *param, void **context)
@@ -167,9 +192,16 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             DisableThreadLibraryCalls(hinstDLL);
             break;
         case DLL_PROCESS_DETACH:
-            if(lpvReserved)
-                break;
-            MMDevEnum_Free();
+            if (drvs.module_unixlib) {
+                const NTSTATUS status = __wine_unix_call(drvs.module_unixlib, process_detach, NULL);
+                if (status)
+                    WARN("Unable to deinitialize library: %lx\n", status);
+            }
+
+            main_loop_stop();
+
+            if (!lpvReserved)
+                MMDevEnum_Free();
             break;
     }
 
@@ -263,10 +295,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     unsigned int i = 0;
     TRACE("(%s, %s, %p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
 
-    if(!InitOnceExecuteOnce(&init_once, init_driver, NULL, NULL)) {
-        ERR("Driver initialization failed\n");
-        return E_FAIL;
-    }
+    InitOnceExecuteOnce(&init_once, init_driver, NULL, NULL);
 
     if (ppv == NULL) {
         WARN("invalid parameter\n");
@@ -348,7 +377,7 @@ static ULONG WINAPI activate_async_op_Release(IActivateAudioInterfaceAsyncOperat
         if(This->result_iface)
             IUnknown_Release(This->result_iface);
         IActivateAudioInterfaceCompletionHandler_Release(This->callback);
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     }
     return ref;
 }
@@ -445,7 +474,7 @@ HRESULT WINAPI ActivateAudioInterfaceAsync(const WCHAR *path, REFIID riid,
     TRACE("(%s, %s, %p, %p, %p)\n", debugstr_w(path), debugstr_guid(riid),
             params, done_handler, op_out);
 
-    op = HeapAlloc(GetProcessHeap(), 0, sizeof(*op));
+    op = malloc(sizeof(*op));
     if (!op)
         return E_OUTOFMEMORY;
 

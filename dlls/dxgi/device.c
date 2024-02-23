@@ -21,6 +21,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static void STDMETHODCALLTYPE dxgi_null_wined3d_object_destroyed(void *parent) {}
+
+static const struct wined3d_parent_ops dxgi_null_wined3d_parent_ops =
+{
+    dxgi_null_wined3d_object_destroyed,
+};
+
 static inline struct dxgi_device *impl_from_IWineDXGIDevice(IWineDXGIDevice *iface)
 {
     return CONTAINING_RECORD(iface, struct dxgi_device, IWineDXGIDevice_iface);
@@ -93,7 +100,7 @@ static ULONG STDMETHODCALLTYPE dxgi_device_Release(IWineDXGIDevice *iface)
         wined3d_mutex_unlock();
         IWineDXGIAdapter_Release(device->adapter);
         wined3d_private_store_cleanup(&device->private_store);
-        heap_free(device);
+        free(device);
     }
 
     return refcount;
@@ -168,7 +175,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *ifac
         const DXGI_SURFACE_DESC *desc, UINT surface_count, DXGI_USAGE usage,
         const DXGI_SHARED_RESOURCE *shared_resource, IDXGISurface **surface)
 {
-    struct wined3d_device_parent *device_parent;
+    struct dxgi_device *device = impl_from_IWineDXGIDevice(iface);
     struct wined3d_resource_desc surface_desc;
     IWineDXGIDeviceParent *dxgi_device_parent;
     HRESULT hr;
@@ -184,8 +191,6 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *ifac
         ERR("Device should implement IWineDXGIDeviceParent.\n");
         return E_FAIL;
     }
-
-    device_parent = IWineDXGIDeviceParent_get_wined3d_device_parent(dxgi_device_parent);
 
     surface_desc.resource_type = WINED3D_RTYPE_TEXTURE_2D;
     surface_desc.format = wined3dformat_from_dxgi_format(desc->Format);
@@ -204,23 +209,22 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *ifac
     for (i = 0; i < surface_count; ++i)
     {
         struct wined3d_texture *wined3d_texture;
-        IUnknown *parent;
 
-        if (FAILED(hr = device_parent->ops->create_swapchain_texture(device_parent,
-                NULL, &surface_desc, 0, &wined3d_texture)))
+        if (FAILED(hr = wined3d_texture_create(device->wined3d_device, &surface_desc,
+                1, 1, 0, NULL, NULL, &dxgi_null_wined3d_parent_ops, &wined3d_texture)))
         {
-            ERR("Failed to create surface, hr %#lx.\n", hr);
+            ERR("Failed to create wined3d texture, hr %#lx.\n", hr);
             goto fail;
         }
 
-        parent = wined3d_texture_get_parent(wined3d_texture);
-        hr = IUnknown_QueryInterface(parent, &IID_IDXGISurface, (void **)&surface[i]);
+        if (FAILED(hr = IWineDXGIDeviceParent_register_swapchain_texture(
+                dxgi_device_parent, wined3d_texture, 0, &surface[i])))
+        {
+            wined3d_texture_decref(wined3d_texture);
+            ERR("Failed to create parent swapchain texture, hr %#lx.\n", hr);
+            goto fail;
+        }
         wined3d_texture_decref(wined3d_texture);
-        if (FAILED(hr))
-        {
-            ERR("Surface should implement IDXGISurface.\n");
-            goto fail;
-        }
 
         TRACE("Created IDXGISurface %p (%u/%u).\n", surface[i], i + 1, surface_count);
     }
@@ -333,10 +337,11 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_create_resource(IWineDXGIDevice *if
     struct dxgi_resource *object;
     HRESULT hr;
 
-    TRACE("iface %p, wined3d_resource %p, usage %#x, shared_resource %p, outer %p, surface %p.\n",
-            iface, wined3d_resource, usage, shared_resource, outer, resource);
+    TRACE("iface %p, wined3d_resource %p, usage %#x, shared_resource %p, outer %p, needs_surface %d, "
+            "resource %p.\n", iface, wined3d_resource, usage, shared_resource, outer, needs_surface,
+            resource);
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
     {
         ERR("Failed to allocate DXGI resource object memory.\n");
         return E_OUTOFMEMORY;
@@ -345,7 +350,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_create_resource(IWineDXGIDevice *if
     if (FAILED(hr = dxgi_resource_init(object, (IDXGIDevice *)iface, outer, needs_surface, wined3d_resource)))
     {
         WARN("Failed to initialize resource, hr %#lx.\n", hr);
-        heap_free(object);
+        free(object);
         return hr;
     }
 
@@ -450,7 +455,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_swapchain_factory_create_swapchain(IWineDX
     if (FAILED(hr))
         return hr;
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
     {
         ERR("Failed to allocate swapchain memory.\n");
         return E_OUTOFMEMORY;
@@ -459,7 +464,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_swapchain_factory_create_swapchain(IWineDX
     if (FAILED(hr = d3d11_swapchain_init(object, device, &wined3d_desc)))
     {
         WARN("Failed to initialise swapchain, hr %#lx.\n", hr);
-        heap_free(object);
+        free(object);
         return hr;
     }
 
@@ -485,7 +490,6 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
     struct wined3d_device_parent *wined3d_device_parent;
     struct wined3d_swapchain_desc swapchain_desc;
     IWineDXGIDeviceParent *dxgi_device_parent;
-    struct d3d11_swapchain *swapchain;
     struct dxgi_adapter *dxgi_adapter;
     struct dxgi_factory *dxgi_factory;
     struct dxgi_output *dxgi_output;
@@ -567,29 +571,16 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
     swapchain_desc.output = dxgi_output->wined3d_output;
     IDXGIOutput_Release(output);
 
-    if (!(swapchain = heap_alloc_zero(sizeof(*swapchain))))
+    if (FAILED(hr = wined3d_swapchain_create(device->wined3d_device, &swapchain_desc,
+            NULL, NULL, &dxgi_null_wined3d_parent_ops, &device->implicit_swapchain)))
     {
-        ERR("Failed to allocate swapchain memory.\n");
+        ERR("Failed to create implicit swapchain, hr %#lx.\n", hr);
         wined3d_device_decref(device->wined3d_device);
         IUnknown_Release(device->child_layer);
         wined3d_private_store_cleanup(&device->private_store);
         wined3d_mutex_unlock();
         return E_OUTOFMEMORY;
     }
-
-    if (FAILED(hr = d3d11_swapchain_init(swapchain, device, &swapchain_desc)))
-    {
-        WARN("Failed to initialize swapchain, hr %#lx.\n", hr);
-        heap_free(swapchain);
-        wined3d_device_decref(device->wined3d_device);
-        IUnknown_Release(device->child_layer);
-        wined3d_private_store_cleanup(&device->private_store);
-        wined3d_mutex_unlock();
-        return hr;
-    }
-    device->implicit_swapchain = swapchain->wined3d_swapchain;
-
-    TRACE("Created swapchain %p.\n", swapchain);
 
     wined3d_mutex_unlock();
 

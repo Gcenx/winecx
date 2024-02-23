@@ -1,5 +1,5 @@
 @ stdcall -private DllCanUnloadNow()
-@ stub DllGetClassObject
+@ stdcall -private DllGetClassObject(ptr ptr ptr)
 @ stdcall -private DllRegisterServer()
 @ stdcall -private DllUnregisterServer()
 @ stub DockPattern_SetDockPosition
@@ -65,18 +65,18 @@
 @ stdcall UiaGetPropertyValue(ptr long ptr)
 @ stdcall UiaGetReservedMixedAttributeValue(ptr)
 @ stdcall UiaGetReservedNotSupportedValue(ptr)
-@ stub UiaGetRootNode
+@ stdcall UiaGetRootNode(ptr)
 @ stdcall UiaGetRuntimeId(ptr ptr)
 @ stdcall UiaGetUpdatedCache(ptr ptr long ptr ptr ptr)
 @ stub UiaHPatternObjectFromVariant
 @ stub UiaHTextRangeFromVariant
 @ stdcall UiaHUiaNodeFromVariant(ptr ptr)
-@ stub UiaHasServerSideProvider
+@ stdcall UiaHasServerSideProvider(long)
 @ stdcall UiaHostProviderFromHwnd(long ptr)
 #@ stub UiaIAccessibleFromProvider
 @ stdcall UiaLookupId(long ptr)
 @ stdcall UiaNavigate(ptr long ptr ptr ptr ptr)
-@ stub UiaNodeFromFocus
+@ stdcall UiaNodeFromFocus(ptr ptr ptr)
 @ stdcall UiaNodeFromHandle(long ptr)
 @ stub UiaNodeFromPoint
 @ stdcall UiaNodeFromProvider(ptr ptr)
@@ -84,13 +84,13 @@
 @ stub UiaPatternRelease
 #@ stub UiaProviderForNonClient
 @ stdcall UiaProviderFromIAccessible(ptr long long ptr)
-@ stub UiaRaiseAsyncContentLoadedEvent
+@ stdcall UiaRaiseAsyncContentLoadedEvent(ptr long double)
 @ stdcall UiaRaiseAutomationEvent(ptr long)
 @ stdcall UiaRaiseAutomationPropertyChangedEvent(ptr long int128 int128)
-#@ stub UiaRaiseChangesEvent
-#@ stub UiaRaiseNotificationEvent
-@ stub UiaRaiseStructureChangedEvent
-#@ stub UiaRaiseTextEditTextChangedEvent
+@ stdcall UiaRaiseChangesEvent(ptr long ptr)
+@ stdcall UiaRaiseNotificationEvent(ptr long long wstr wstr)
+@ stdcall UiaRaiseStructureChangedEvent(ptr long ptr long)
+@ stdcall UiaRaiseTextEditTextChangedEvent(ptr long ptr)
 @ stdcall UiaRegisterProviderCallback(ptr)
 @ stdcall UiaRemoveEvent(ptr)
 @ stdcall UiaReturnRawElementProvider(long long long ptr)

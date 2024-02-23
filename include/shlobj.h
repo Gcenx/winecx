@@ -74,8 +74,9 @@ enum
 
 typedef int GPFIDL_FLAGS;
 
+WINSHELLAPI void         WINAPI SHFree(void*);
 WINSHELLAPI UINT         WINAPI SHAddFromPropSheetExtArray(HPSXA,LPFNADDPROPSHEETPAGE,LPARAM);
-WINSHELLAPI LPVOID       WINAPI SHAlloc(ULONG) __WINE_ALLOC_SIZE(1);
+WINSHELLAPI void*        WINAPI SHAlloc(ULONG) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(SHFree) __WINE_MALLOC;
 WINSHELLAPI HRESULT      WINAPI SHCoCreateInstance(LPCWSTR,const CLSID*,IUnknown*,REFIID,LPVOID*);
 WINSHELLAPI HPSXA        WINAPI SHCreatePropSheetExtArray(HKEY,LPCWSTR,UINT);
 WINSHELLAPI HPSXA        WINAPI SHCreatePropSheetExtArrayEx(HKEY,LPCWSTR,UINT,IDataObject*);
@@ -88,7 +89,6 @@ WINSHELLAPI HRESULT      WINAPI SHCreateStdEnumFmtEtc(DWORD,const FORMATETC *,IE
 WINSHELLAPI void         WINAPI SHDestroyPropSheetExtArray(HPSXA);
 WINSHELLAPI BOOL         WINAPI SHFindFiles(LPCITEMIDLIST,LPCITEMIDLIST);
 WINSHELLAPI DWORD        WINAPI SHFormatDrive(HWND,UINT,UINT,UINT);
-WINSHELLAPI void         WINAPI SHFree(LPVOID);
 WINSHELLAPI BOOL         WINAPI GetFileNameFromBrowse(HWND,LPWSTR,DWORD,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR);
 WINSHELLAPI HRESULT      WINAPI SHGetInstanceExplorer(IUnknown**);
 WINSHELLAPI HRESULT      WINAPI SHGetFolderPathAndSubDirA(HWND,int,HANDLE,DWORD,LPCSTR,LPSTR);
@@ -1747,6 +1747,9 @@ WINSHELLAPI HRESULT WINAPI SHGetFolderPathW(HWND hwnd, int nFolder, HANDLE hToke
  * SHGetDesktopFolder API
  */
 WINSHELLAPI HRESULT WINAPI SHGetDesktopFolder(IShellFolder * *);
+
+WINSHELLAPI HRESULT WINAPI SHBindToFolderIDListParent(IShellFolder *psf, LPCITEMIDLIST pidl, REFIID riid,
+                                                      LPVOID *ppv, LPCITEMIDLIST *ppidlLast);
 
 /****************************************************************************
  * SHBindToParent API

@@ -429,10 +429,34 @@ INT PSDRV_WriteHeader( print_ctx *ctx, LPCWSTR title )
 
     /* BBox co-ords are in default user co-ord system so urx < ury even in
        landscape mode */
-    llx = ctx->ImageableArea.left * 72.0 / ctx->logPixelsX;
-    lly = ctx->ImageableArea.bottom * 72.0 / ctx->logPixelsY;
-    urx = ctx->ImageableArea.right * 72.0 / ctx->logPixelsX;
-    ury = ctx->ImageableArea.top * 72.0 / ctx->logPixelsY;
+    if ((ctx->Devmode->dmPublic.dmFields & DM_PAPERSIZE) && page)
+    {
+        if (page->ImageableArea)
+        {
+            llx = page->ImageableArea->llx;
+            lly = page->ImageableArea->lly;
+            urx = page->ImageableArea->urx;
+            ury = page->ImageableArea->ury;
+        }
+        else
+        {
+            llx = lly = 0;
+            urx = page->PaperDimension->x;
+            ury = page->PaperDimension->y;
+        }
+    }
+    else if ((ctx->Devmode->dmPublic.dmFields & DM_PAPERLENGTH) &&
+            (ctx->Devmode->dmPublic.dmFields & DM_PAPERWIDTH))
+    {
+        /* Devmode sizes in 1/10 mm */
+        llx = lly = 0;
+        urx = ctx->Devmode->dmPublic.dmPaperWidth * 72.0 / 254.0;
+        ury = ctx->Devmode->dmPublic.dmPaperLength * 72.0 / 254.0;
+    }
+    else
+    {
+        llx = lly = urx = ury = 0;
+    }
     /* FIXME should do something better with BBox */
 
     dmOrientation = (ctx->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE ? "Landscape" : "Portrait");
@@ -478,7 +502,7 @@ INT PSDRV_WriteFooter( print_ctx *ctx )
 
     sprintf(buf, psfooter, ctx->job.PageNo);
 
-    if( write_spool( ctx, buf, strlen(buf) ) != strlen(buf) || !flush_spool(ctx) ) {
+    if( write_spool( ctx, buf, strlen(buf) ) != strlen(buf) ) {
         WARN("WriteSpool error\n");
         ret = 0;
     }
@@ -517,22 +541,25 @@ INT PSDRV_WriteNewPage( print_ctx *ctx )
 
     if(ctx->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) {
         if(ctx->pi->ppd->LandscapeOrientation == -90) {
-	    xtrans = ctx->ImageableArea.right;
-	    ytrans = ctx->ImageableArea.top;
-	    rotation = 90;
-	} else {
-	    xtrans = ctx->ImageableArea.left;
-	    ytrans = ctx->ImageableArea.bottom;
-	    rotation = -90;
-	}
+            xtrans = GetDeviceCaps(ctx->hdc, PHYSICALHEIGHT) -
+                GetDeviceCaps(ctx->hdc, PHYSICALOFFSETY);
+            ytrans = GetDeviceCaps(ctx->hdc, PHYSICALWIDTH) -
+                GetDeviceCaps(ctx->hdc, PHYSICALOFFSETX);
+            rotation = 90;
+        } else {
+            xtrans = GetDeviceCaps(ctx->hdc, PHYSICALOFFSETY);
+            ytrans = GetDeviceCaps(ctx->hdc, PHYSICALOFFSETX);
+            rotation = -90;
+        }
     } else {
-        xtrans = ctx->ImageableArea.left;
-	ytrans = ctx->ImageableArea.top;
-	rotation = 0;
+        xtrans = GetDeviceCaps(ctx->hdc, PHYSICALOFFSETX);
+        ytrans = GetDeviceCaps(ctx->hdc, PHYSICALHEIGHT) -
+            GetDeviceCaps(ctx->hdc, PHYSICALOFFSETY);
+        rotation = 0;
     }
 
     sprintf(buf, psnewpage, name, ctx->job.PageNo,
-	    ctx->logPixelsX, ctx->logPixelsY,
+	    GetDeviceCaps(ctx->hdc, ASPECTX), GetDeviceCaps(ctx->hdc, ASPECTY),
 	    xtrans, ytrans, rotation);
 
     if( write_spool( ctx, buf, strlen(buf) ) != strlen(buf) ) {
@@ -635,7 +662,6 @@ BOOL PSDRV_WriteSetColor(print_ctx *ctx, PSCOLOR *color)
 {
     char buf[256];
 
-    PSDRV_CopyColor(&ctx->inkColor, color);
     switch(color->type) {
     case PSCOLOR_RGB:
         push_lc_numeric("C");
@@ -959,31 +985,59 @@ BOOL PSDRV_WriteDIBPatternDict(print_ctx *ctx, const BITMAPINFO *bmi, BYTE *bits
 	return FALSE;
     }
 
-    w = bmi->bmiHeader.biWidth & ~0x7;
-    h = abs_height & ~0x7;
+    if (usage > 2)
+    {
+        FIXME("wrong usage: %d\n", usage);
+        return FALSE;
+    }
+
+    w = bmi->bmiHeader.biWidth;
+    h = abs_height;
 
     buf = HeapAlloc( GetProcessHeap(), 0, max(sizeof(do_pattern) + 100, 2 * w/8 * h + 1) );
     ptr = buf;
-    for(y = h-1; y >= 0; y--) {
-        for(x = 0; x < w/8; x++) {
-	    sprintf(ptr, "%02x", *(bits + x/8 + y *
+    for(y = 0; y < h; y++) {
+        for(x = 0; x < (w + 7) / 8; x++) {
+	    sprintf(ptr, "%02x", *(bits + x + y *
 				   ((bmi->bmiHeader.biWidth + 31) / 32) * 4));
 	    ptr += 2;
 	}
     }
     PSDRV_WriteSpool(ctx, mypat, sizeof(mypat) - 1);
-    PSDRV_WriteImageDict(ctx, 1, FALSE, 8, 8, buf, bmi->bmiHeader.biHeight < 0);
+    PSDRV_WriteImageDict(ctx, 1, FALSE, w, h, buf, bmi->bmiHeader.biHeight < 0);
     PSDRV_WriteSpool(ctx, "def\n", 4);
 
     PSDRV_WriteIndexColorSpaceBegin(ctx, 1);
-    map[0] = GetTextColor( ctx->hdc );
-    map[1] = GetBkColor( ctx->hdc );
+    if (usage == DIB_RGB_COLORS)
+    {
+        map[0] = RGB( bmi->bmiColors[0].rgbRed, bmi->bmiColors[0].rgbGreen,
+                bmi->bmiColors[0].rgbBlue );
+        map[1] = RGB( bmi->bmiColors[1].rgbRed, bmi->bmiColors[1].rgbGreen,
+                bmi->bmiColors[1].rgbBlue );
+    }
+    else if (usage == DIB_PAL_COLORS)
+    {
+        HPALETTE hpal = GetCurrentObject( ctx->hdc, OBJ_PAL );
+        PALETTEENTRY pal[2];
+
+        memset(pal, 0, sizeof(pal));
+        if (hpal) GetPaletteEntries(hpal, 0, 2, pal);
+
+        map[0] = RGB(pal[0].peRed, pal[0].peGreen, pal[0].peBlue);
+        map[1] = RGB(pal[1].peRed, pal[1].peGreen, pal[1].peBlue);
+    }
+    else if (usage == 2 /* DIB_PAL_INDICES */)
+    {
+        map[0] = GetTextColor( ctx->hdc );
+        map[1] = GetBkColor( ctx->hdc );
+    }
+
     PSDRV_WriteRGB(ctx, map, 2);
     PSDRV_WriteIndexColorSpaceEnd(ctx);
 
     /* Windows seems to scale patterns so that a one pixel corresponds to 1/300" */
-    w_mult = (ctx->logPixelsX + 150) / 300;
-    h_mult = (ctx->logPixelsY + 150) / 300;
+    w_mult = (GetDeviceCaps(ctx->hdc, ASPECTX) + 150) / 300;
+    h_mult = (GetDeviceCaps(ctx->hdc, ASPECTY) + 150) / 300;
     sprintf(buf, do_pattern, w * w_mult, h * h_mult, w * w_mult, h * h_mult, w * w_mult, h * h_mult);
     PSDRV_WriteSpool(ctx,  buf, strlen(buf));
     HeapFree( GetProcessHeap(), 0, buf );

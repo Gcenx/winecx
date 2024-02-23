@@ -52,6 +52,7 @@ static DWORD   (WINAPI *pStrCatChainW)(LPWSTR,DWORD,DWORD,LPCWSTR);
 static LPSTR   (WINAPI *pStrCpyNXA)(LPSTR,LPCSTR,int);
 static LPWSTR  (WINAPI *pStrCpyNXW)(LPWSTR,LPCWSTR,int);
 static LPSTR   (WINAPI *pStrFormatByteSize64A)(LONGLONG,LPSTR,UINT);
+static HRESULT (WINAPI *pStrFormatByteSizeEx)(LONGLONG,SFBS_FLAGS,LPWSTR,UINT);
 static LPSTR   (WINAPI *pStrFormatKBSizeA)(LONGLONG,LPSTR,UINT);
 static LPWSTR  (WINAPI *pStrFormatKBSizeW)(LONGLONG,LPWSTR,UINT);
 static BOOL    (WINAPI *pStrIsIntlEqualA)(BOOL,LPCSTR,LPCSTR,int);
@@ -715,6 +716,38 @@ static void test_StrFormatByteSize64A(void)
   }
 }
 
+static void test_StrFormatByteSizeEx(void)
+{
+  WCHAR szBuff[256];
+  HRESULT hr;
+  LONGLONG test_value = 2147483647;
+
+  if (!pStrFormatByteSizeEx)
+  {
+    win_skip("StrFormatByteSizeEx is not available \n");
+    return;
+  }
+
+  hr = pStrFormatByteSizeEx(0xdeadbeef,
+                            SFBS_FLAGS_TRUNCATE_UNDISPLAYED_DECIMAL_DIGITS, szBuff, 0);
+  ok(hr == E_INVALIDARG, "Unexpected hr: %#lx expected: %#lx\n", hr, E_INVALIDARG);
+
+  hr = pStrFormatByteSizeEx(0xdeadbeef, 10, szBuff, 256);
+  ok(hr == E_INVALIDARG, "Unexpected hr: %#lx expected: %#lx\n", hr, E_INVALIDARG);
+
+  hr = pStrFormatByteSizeEx(test_value, SFBS_FLAGS_ROUND_TO_NEAREST_DISPLAYED_DIGIT,
+                            szBuff, 256);
+  ok(hr == S_OK, "Invalid arguments \n");
+  ok(!wcscmp(szBuff, L"2.00 GB"), "Formatted %s wrong: got %ls, expected 2.00 GB\n",
+     wine_dbgstr_longlong(test_value), szBuff);
+
+  hr = pStrFormatByteSizeEx(test_value, SFBS_FLAGS_TRUNCATE_UNDISPLAYED_DECIMAL_DIGITS,
+                            szBuff, 256);
+  ok(hr == S_OK, "Invalid arguments \n");
+  ok(!wcscmp(szBuff, L"1.99 GB"), "Formatted %s wrong: got %ls, expected 1.99 GB\n",
+     wine_dbgstr_longlong(test_value), szBuff);
+}
+
 static void test_StrFormatKBSizeW(void)
 {
   WCHAR szBuffW[256];
@@ -863,7 +896,7 @@ static void test_StrRetToBSTR(void)
     }
 
     strret.uType = STRRET_WSTR;
-    U(strret).pOleStr = CoDupStrW("Test");
+    strret.pOleStr = CoDupStrW("Test");
     bstr = 0;
     ret = pStrRetToBSTR(&strret, NULL, &bstr);
     ok(ret == S_OK && bstr && !wcscmp(bstr, szTestW),
@@ -871,14 +904,14 @@ static void test_StrRetToBSTR(void)
     SysFreeString(bstr);
 
     strret.uType = STRRET_CSTR;
-    lstrcpyA(U(strret).cStr, "Test");
+    lstrcpyA(strret.cStr, "Test");
     ret = pStrRetToBSTR(&strret, NULL, &bstr);
     ok(ret == S_OK && bstr && !wcscmp(bstr, szTestW),
        "STRRET_CSTR: dup failed, ret=0x%08lx, bstr %p\n", ret, bstr);
     SysFreeString(bstr);
 
     strret.uType = STRRET_OFFSET;
-    U(strret).uOffset = 1;
+    strret.uOffset = 1;
     strcpy((char*)&iidl, " Test");
     ret = pStrRetToBSTR(&strret, iidl, &bstr);
     ok(ret == S_OK && bstr && !wcscmp(bstr, szTestW),
@@ -1095,7 +1128,7 @@ if (0)
     {
         memset(wbuf, 0xbf, sizeof(wbuf));
         strret.uType = STRRET_WSTR;
-        U(strret).pOleStr = StrDupW(wstr1);
+        strret.pOleStr = StrDupW(wstr1);
         hres = pStrRetToBufW(&strret, NULL, wbuf, 10);
         ok(hres == E_NOT_SUFFICIENT_BUFFER || broken(hres == S_OK) /* winxp */,
            "StrRetToBufW returned %08lx\n", hres);
@@ -1106,14 +1139,14 @@ if (0)
 
         memset(wbuf, 0xbf, sizeof(wbuf));
         strret.uType = STRRET_CSTR;
-        StrCpyNA(U(strret).cStr, str1, MAX_PATH);
+        StrCpyNA(strret.cStr, str1, MAX_PATH);
         hres = pStrRetToBufW(&strret, NULL, wbuf, 10);
         ok(hres == S_OK, "StrRetToBufW returned %08lx\n", hres);
         ok(!memcmp(wbuf, wstr1, 9*sizeof(WCHAR)) && !wbuf[9], "StrRetToBuf returned %s\n", wine_dbgstr_w(wbuf));
 
         memset(wbuf, 0xbf, sizeof(wbuf));
         strret.uType = STRRET_WSTR;
-        U(strret).pOleStr = NULL;
+        strret.pOleStr = NULL;
         hres = pStrRetToBufW(&strret, NULL, wbuf, 10);
         ok(hres == E_FAIL, "StrRetToBufW returned %08lx\n", hres);
         ok(!wbuf[0], "StrRetToBuf returned %s\n", wine_dbgstr_w(wbuf));
@@ -1125,7 +1158,7 @@ if (0)
     {
         memset(buf, 0xbf, sizeof(buf));
         strret.uType = STRRET_CSTR;
-        StrCpyNA(U(strret).cStr, str1, MAX_PATH);
+        StrCpyNA(strret.cStr, str1, MAX_PATH);
         expect_eq2(pStrRetToBufA(&strret, NULL, buf, 10), S_OK, E_NOT_SUFFICIENT_BUFFER /* Vista */, HRESULT, "%lx");
         expect_eq(buf[9], 0, CHAR, "%x");
         expect_eq(buf[10], (CHAR)0xbf, CHAR, "%x");
@@ -1680,6 +1713,7 @@ START_TEST(string)
   pStrCpyNXW = (void *)GetProcAddress(hShlwapi, (LPSTR)400);
   pStrChrNW = (void *)GetProcAddress(hShlwapi, "StrChrNW");
   pStrFormatByteSize64A = (void *)GetProcAddress(hShlwapi, "StrFormatByteSize64A");
+  pStrFormatByteSizeEx = (void *)GetProcAddress(hShlwapi, "StrFormatByteSizeEx");
   pStrFormatKBSizeA = (void *)GetProcAddress(hShlwapi, "StrFormatKBSizeA");
   pStrFormatKBSizeW = (void *)GetProcAddress(hShlwapi, "StrFormatKBSizeW");
   pStrIsIntlEqualA = (void *)GetProcAddress(hShlwapi, "StrIsIntlEqualA");
@@ -1716,6 +1750,7 @@ START_TEST(string)
   if (is_lang_english() && is_locale_english())
   {
     test_StrFormatByteSize64A();
+    test_StrFormatByteSizeEx();
     test_StrFormatKBSizeA();
     test_StrFormatKBSizeW();
   }

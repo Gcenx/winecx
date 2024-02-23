@@ -191,6 +191,76 @@ static void test_createfont(void)
     GdipDeleteFontFamily(fontfamily);
 }
 
+static void test_createfont_charset(void)
+{
+    GpFontFamily* fontfamily = NULL;
+    GpGraphics *graphics;
+    GpFont* font = NULL;
+    GpStatus stat;
+    LOGFONTW lf;
+    HDC hdc;
+    UINT i;
+
+    static const struct {
+        LPCWSTR family_name;
+        BYTE char_set;
+    } td[] =
+    {
+        {L"Tahoma", ANSI_CHARSET},
+        {L"Symbol", SYMBOL_CHARSET},
+        {L"Marlett", SYMBOL_CHARSET},
+        {L"Wingdings", SYMBOL_CHARSET},
+    };
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipCreateFromHDC(hdc, &graphics);
+    expect (Ok, stat);
+
+    for (i = 0; i < ARRAY_SIZE(td); i++)
+    {
+        winetest_push_context("%u", i);
+
+        stat = GdipCreateFontFamilyFromName(td[i].family_name, NULL, &fontfamily);
+        expect (Ok, stat);
+        stat = GdipCreateFont(fontfamily, 30, FontStyleRegular, UnitPoint, &font);
+        expect (Ok, stat);
+
+        stat = GdipGetLogFontW(font, graphics, &lf);
+        expect(Ok, stat);
+
+        if (lstrcmpiW(lf.lfFaceName, td[i].family_name) != 0)
+        {
+            skip("%s not installed\n", wine_dbgstr_w(td[i].family_name));
+        }
+        else
+        {
+            ok(lf.lfHeight < 0, "Expected negative height, got %ld\n", lf.lfHeight);
+            expect(0, lf.lfWidth);
+            expect(0, lf.lfEscapement);
+            expect(0, lf.lfOrientation);
+            ok((lf.lfWeight >= 100) && (lf.lfWeight <= 900), "Expected weight to be set\n");
+            expect(0, lf.lfItalic);
+            expect(0, lf.lfUnderline);
+            expect(0, lf.lfStrikeOut);
+            ok(td[i].char_set == lf.lfCharSet ||
+                (td[i].char_set == ANSI_CHARSET && lf.lfCharSet == GetTextCharset(hdc)),
+                "got %#x\n", lf.lfCharSet);
+            expect(0, lf.lfOutPrecision);
+            expect(0, lf.lfClipPrecision);
+            expect(0, lf.lfQuality);
+            expect(0, lf.lfPitchAndFamily);
+        }
+
+        GdipDeleteFont(font);
+        GdipDeleteFontFamily(fontfamily);
+
+        winetest_pop_context();
+    }
+
+    GdipDeleteGraphics(graphics);
+    DeleteDC(hdc);
+}
+
 static void test_logfont(void)
 {
     LOGFONTA lfa, lfa2;
@@ -1239,6 +1309,20 @@ static void test_font_transform(void)
     todo_wine
     expectf_(1532.984985, bounds.Height, 0.05);
 
+    GdipDeleteGraphics(graphics);
+
+    SetMapMode( hdc, MM_ISOTROPIC);
+    SetWindowExtEx(hdc, 200, 200, NULL);
+    SetViewportExtEx(hdc, 100, 100, NULL);
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    status = GdipGetLogFontA(font, graphics, &lf);
+    expect(Ok, status);
+    expect(-50, lf.lfHeight);
+    expect(0, lf.lfWidth);
+    expect(0, lf.lfEscapement);
+    expect(0, lf.lfOrientation);
+
     GdipDeleteMatrix(matrix);
     GdipDeleteFont(font);
     GdipDeleteGraphics(graphics);
@@ -1465,6 +1549,7 @@ START_TEST(font)
     test_font_substitution();
     test_font_metrics();
     test_createfont();
+    test_createfont_charset();
     test_logfont();
     test_fontfamily();
     test_fontfamily_properties();

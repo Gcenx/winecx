@@ -290,9 +290,9 @@ unsigned int CDECL _set_abort_behavior(unsigned int flags, unsigned int mask)
 /*********************************************************************
  *              _wassert (MSVCRT.@)
  */
-void CDECL _wassert(const wchar_t* str, const wchar_t* file, unsigned int line)
+void DECLSPEC_NORETURN CDECL _wassert(const wchar_t* str, const wchar_t* file, unsigned int line)
 {
-  TRACE("(%s,%s,%d)\n", debugstr_w(str), debugstr_w(file), line);
+  ERR("(%s,%s,%d)\n", debugstr_w(str), debugstr_w(file), line);
 
   if ((MSVCRT_error_mode == _OUT_TO_MSGBOX) ||
      ((MSVCRT_error_mode == _OUT_TO_DEFAULT) && (MSVCRT_app_type == 2)))
@@ -311,7 +311,7 @@ void CDECL _wassert(const wchar_t* str, const wchar_t* file, unsigned int line)
 /*********************************************************************
  *		_assert (MSVCRT.@)
  */
-void CDECL _assert(const char* str, const char* file, unsigned int line)
+void DECLSPEC_NORETURN CDECL _assert(const char* str, const char* file, unsigned int line)
 {
     wchar_t strW[1024], fileW[1024];
 

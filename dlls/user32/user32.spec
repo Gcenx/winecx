@@ -205,7 +205,7 @@
 @ stdcall EditWndProc(long long long long) EditWndProcA
 @ stdcall EmptyClipboard() NtUserEmptyClipboard
 @ stdcall EnableMenuItem(long long long) NtUserEnableMenuItem
-@ stdcall EnableMouseInPointer(long)
+@ stdcall EnableMouseInPointer(long) NtUserEnableMouseInPointer
 @ stdcall EnableNonClientDpiScaling(long)
 @ stdcall -import EnableScrollBar(long long long) NtUserEnableScrollBar
 @ stdcall EnableWindow(long long)
@@ -386,6 +386,7 @@
 @ stdcall GetSubMenu(long long)
 @ stdcall GetSysColor(long)
 @ stdcall GetSysColorBrush(long)
+@ stdcall GetSystemDpiForProcess(long) NtUserGetSystemDpiForProcess
 @ stdcall GetSystemMenu(long long) NtUserGetSystemMenu
 @ stdcall GetSystemMetrics(long)
 @ stdcall GetSystemMetricsForDpi(long long)
@@ -394,6 +395,7 @@
 @ stdcall GetTaskmanWindow ()
 @ stdcall GetThreadDesktop(long) NtUserGetThreadDesktop
 @ stdcall GetThreadDpiAwarenessContext()
+@ stdcall GetThreadDpiHostingBehavior()
 @ stdcall GetTitleBarInfo(long ptr) NtUserGetTitleBarInfo
 @ stdcall GetTopWindow(long)
 @ stdcall GetTouchInputInfo(long long ptr long)
@@ -409,6 +411,7 @@
 @ stdcall GetWindowDC(long) NtUserGetWindowDC
 @ stdcall GetWindowDisplayAffinity(long ptr)
 @ stdcall GetWindowDpiAwarenessContext(long)
+@ stdcall GetWindowDpiHostingBehavior(long)
 @ stdcall GetWindowInfo(long ptr)
 @ stdcall GetWindowLongA(long long)
 @ stdcall -arch=win64 GetWindowLongPtrA(long long)
@@ -475,6 +478,7 @@
 # @ stub IsHungThread
 @ stdcall IsIconic(long)
 @ stdcall IsMenu(long)
+@ stdcall IsMouseInPointerEnabled() NtUserIsMouseInPointerEnabled
 @ stdcall IsProcessDPIAware()
 @ stdcall IsRectEmpty(ptr)
 # @ stub IsServerSideWindow
@@ -585,7 +589,7 @@
 # @ stub PrivateSetDbgTag
 # @ stub PrivateSetRipFlags
 @ stdcall PtInRect(ptr int64)
-@ stdcall QueryDisplayConfig(long ptr ptr ptr ptr ptr)
+@ stdcall QueryDisplayConfig(long ptr ptr ptr ptr ptr) NtUserQueryDisplayConfig
 @ stub QuerySendMessage
 # @ stub QueryUserCounters
 @ stdcall RealChildWindowFromPoint(long int64)
@@ -610,7 +614,7 @@
 @ stub RegisterNetworkCapabilities
 @ stdcall RegisterPointerDeviceNotifications(long long)
 @ stdcall RegisterPowerSettingNotification(long ptr long)
-@ stdcall RegisterRawInputDevices(ptr long long) NtUserRegisterRawInputDevices
+@ stdcall -import RegisterRawInputDevices(ptr long long) NtUserRegisterRawInputDevices
 @ stdcall RegisterServicesProcess(long)
 @ stdcall RegisterShellHookWindow (long)
 @ stdcall RegisterSuspendResumeNotification(long long)
@@ -667,9 +671,9 @@
 @ stub SetCursorContents
 @ stdcall -import SetCursorPos(long long) NtUserSetCursorPos
 @ stdcall SetDebugErrorLevel(long)
-@ stdcall SetDeskWallPaper(str)
-# @ stub SetDeskWallpaper
+@ stdcall SetDeskWallpaper(str)
 # @ stub SetDesktopBitmap
+@ stdcall SetDisplayAutoRotationPreferences(long)
 @ stdcall SetDisplayConfig(long ptr long ptr long)
 @ stdcall SetDlgItemInt(long long long long)
 @ stdcall SetDlgItemTextA(long long str)
@@ -717,6 +721,7 @@
 @ stdcall SetTaskmanWindow (long)
 @ stdcall SetThreadDesktop(long) NtUserSetThreadDesktop
 @ stdcall SetThreadDpiAwarenessContext(ptr)
+@ stdcall SetThreadDpiHostingBehavior(long)
 @ stdcall SetTimer(long long long ptr)
 @ stdcall SetUserObjectInformationA(long long ptr long)
 @ stdcall SetUserObjectInformationW(long long ptr long) NtUserSetObjectInformation

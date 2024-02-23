@@ -36,7 +36,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
 static const REAL mm_per_inch = 25.4;
+static const REAL inch_per_mm = 1.0 / 25.4;
 static const REAL point_per_inch = 72.0;
+static const REAL inch_per_point = 1.0 / 72.0;
 
 static Status WINAPI NotificationHook(ULONG_PTR *token)
 {
@@ -141,7 +143,7 @@ ULONG WINAPI GdiplusShutdown_wrapper(ULONG_PTR token)
  */
 void* WINGDIPAPI GdipAlloc(SIZE_T size)
 {
-    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+    return calloc(1, size);
 }
 
 /*****************************************************
@@ -149,7 +151,7 @@ void* WINGDIPAPI GdipAlloc(SIZE_T size)
  */
 void WINGDIPAPI GdipFree(void* ptr)
 {
-    HeapFree(GetProcessHeap(), 0, ptr);
+    free(ptr);
 }
 
 /* Calculates the bezier points needed to fill in the arc portion starting at
@@ -333,17 +335,17 @@ REAL units_to_pixels(REAL units, GpUnit unit, REAL dpi, BOOL printer_display)
         return units;
     case UnitDisplay:
         if (printer_display)
-            return units * dpi / 100.0;
+            return units * dpi * 0.01f;
         else
             return units;
     case UnitPoint:
-        return units * dpi / point_per_inch;
+        return units * dpi * inch_per_point;
     case UnitInch:
         return units * dpi;
     case UnitDocument:
-        return units * dpi / 300.0; /* Per MSDN */
+        return units * dpi * (1.0f / 300.0f); /* Per MSDN */
     case UnitMillimeter:
-        return units * dpi / mm_per_inch;
+        return units * dpi * inch_per_mm;
     default:
         FIXME("Unhandled unit type: %d\n", unit);
         return 0;
@@ -416,12 +418,12 @@ BOOL lengthen_path(GpPath *path, INT len)
     if(path->datalen == 0){
         path->datalen = len * 2;
 
-        path->pathdata.Points = heap_alloc_zero(path->datalen * sizeof(PointF));
-        if(!path->pathdata.Points)   return FALSE;
+        path->pathdata.Points = calloc(path->datalen, sizeof(PointF));
+        if(!path->pathdata.Points) return FALSE;
 
-        path->pathdata.Types = heap_alloc_zero(path->datalen);
+        path->pathdata.Types = calloc(1, path->datalen);
         if(!path->pathdata.Types){
-            heap_free(path->pathdata.Points);
+            free(path->pathdata.Points);
             return FALSE;
         }
     }
@@ -430,11 +432,11 @@ BOOL lengthen_path(GpPath *path, INT len)
         while(path->datalen - path->pathdata.Count < len)
             path->datalen *= 2;
 
-        path->pathdata.Points = heap_realloc(path->pathdata.Points, path->datalen * sizeof(PointF));
-        if(!path->pathdata.Points)  return FALSE;
+        path->pathdata.Points = realloc(path->pathdata.Points, path->datalen * sizeof(PointF));
+        if(!path->pathdata.Points) return FALSE;
 
-        path->pathdata.Types = heap_realloc(path->pathdata.Types, path->datalen);
-        if(!path->pathdata.Types)   return FALSE;
+        path->pathdata.Types = realloc(path->pathdata.Types, path->datalen);
+        if(!path->pathdata.Types) return FALSE;
     }
 
     return TRUE;
@@ -475,8 +477,8 @@ void delete_element(region_element* element)
         default:
             delete_element(element->elementdata.combine.left);
             delete_element(element->elementdata.combine.right);
-            heap_free(element->elementdata.combine.left);
-            heap_free(element->elementdata.combine.right);
+            free(element->elementdata.combine.left);
+            free(element->elementdata.combine.right);
             break;
     }
 }
@@ -491,4 +493,11 @@ const char *debugstr_pointf(const PointF* pt)
 {
     if (!pt) return "(null)";
     return wine_dbg_sprintf("(%0.2f,%0.2f)", pt->X, pt->Y);
+}
+
+const char *debugstr_matrix(const GpMatrix *matrix)
+{
+    if (!matrix) return "(null)";
+    return wine_dbg_sprintf("%p(%0.2f,%0.2f,%0.2f,%0.2f,%0.2f,%0.2f)",matrix, matrix->matrix[0], matrix->matrix[1],
+                            matrix->matrix[2], matrix->matrix[3], matrix->matrix[4], matrix->matrix[5]);
 }

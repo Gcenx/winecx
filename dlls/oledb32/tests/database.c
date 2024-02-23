@@ -38,8 +38,6 @@
 
 DEFINE_GUID(CSLID_MSDAER, 0xc8b522cf,0x5cf3,0x11ce,0xad,0xe5,0x00,0xaa,0x00,0x44,0x77,0x3d);
 
-static WCHAR initstring_default[] = {'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y',';',0};
-
 #define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
 static void _expect_ref(IUnknown* obj, ULONG ref, int line)
 {
@@ -49,7 +47,20 @@ static void _expect_ref(IUnknown* obj, ULONG ref, int line)
     ok_(__FILE__, line)(rc == ref, "expected refcount %ld, got %ld\n", ref, rc);
 }
 
-static void test_GetDataSource(WCHAR *initstring)
+static void free_dbpropinfoset(ULONG count, DBPROPINFOSET *propinfoset)
+{
+    ULONG i, j;
+
+    for (i = 0; i < count; i++)
+    {
+        for (j = 0; j < propinfoset[i].cPropertyInfos; j++)
+            VariantClear(&propinfoset[i].rgPropertyInfos[j].vValues);
+        CoTaskMemFree(propinfoset[i].rgPropertyInfos);
+    }
+    CoTaskMemFree(propinfoset);
+}
+
+static void test_GetDataSource(const WCHAR *initstring)
 {
     IDataInitialize *datainit = NULL;
     IDBInitialize *dbinit = NULL;
@@ -92,7 +103,7 @@ static void test_GetDataSource(WCHAR *initstring)
                                              pInfoset->rgPropertyInfos[i].vtType);
                 }
 
-                CoTaskMemFree(pInfoset);
+                free_dbpropinfoset(cnt, pInfoset);
                 CoTaskMemFree(ary);
             }
 
@@ -158,10 +169,31 @@ if (propsets->cProperties == 2) {
     ok(propsets->rgProperties[0].dwStatus == 0, "got status[0] %lu\n", propsets->rgProperties[0].dwStatus);
     ok(V_VT(&propsets->rgProperties[0].vValue) == VT_BSTR, "got vartype[0] %u\n", V_VT(&propsets->rgProperties[0].vValue));
 
-    ok(propsets->rgProperties[1].dwPropertyID == DBPROP_INIT_PROVIDERSTRING, "got propid[1] %lu\n", propsets->rgProperties[1].dwPropertyID);
-    ok(propsets->rgProperties[1].dwOptions == DBPROPOPTIONS_REQUIRED, "got options[1] %lu\n", propsets->rgProperties[1].dwOptions);
-    ok(propsets->rgProperties[1].dwStatus == 0, "got status[1] %lu\n", propsets->rgProperties[1].dwStatus);
-    ok(V_VT(&propsets->rgProperties[1].vValue) == VT_BSTR, "got vartype[1] %u\n", V_VT(&propsets->rgProperties[1].vValue));
+    if (!wcscmp(V_BSTR(&propsets->rgProperties[0].vValue), L"dummy"))
+    {
+        ok(propsets->rgProperties[1].dwPropertyID == DBPROP_INIT_PROVIDERSTRING, "got propid[1] %lu\n", propsets->rgProperties[1].dwPropertyID);
+        ok(propsets->rgProperties[1].dwOptions == DBPROPOPTIONS_REQUIRED, "got options[1] %lu\n", propsets->rgProperties[1].dwOptions);
+        ok(propsets->rgProperties[1].dwStatus == 0, "got status[1] %lu\n", propsets->rgProperties[1].dwStatus);
+        ok(V_VT(&propsets->rgProperties[1].vValue) == VT_BSTR, "got vartype[1] %u\n", V_VT(&propsets->rgProperties[1].vValue));
+    }
+    else if (!wcscmp(V_BSTR(&propsets->rgProperties[0].vValue), L"initial_catalog_test"))
+    {
+        ok(propsets->rgProperties[1].dwPropertyID == DBPROP_INIT_CATALOG, "got propid[1] %lu\n", propsets->rgProperties[1].dwPropertyID);
+        ok(propsets->rgProperties[1].dwOptions == DBPROPOPTIONS_REQUIRED, "got options[1] %lu\n", propsets->rgProperties[1].dwOptions);
+        ok(propsets->rgProperties[1].dwStatus == 0, "got status[1] %lu\n", propsets->rgProperties[1].dwStatus);
+        ok(V_VT(&propsets->rgProperties[1].vValue) == VT_BSTR, "got vartype[1] %u\n", V_VT(&propsets->rgProperties[1].vValue));
+        ok(!wcscmp(V_BSTR(&propsets->rgProperties[1].vValue), L"dummy_catalog"), "got initial catalog %s\n",
+           wine_dbgstr_variant(&propsets->rgProperties[1].vValue));
+    }
+    else if (!wcscmp(V_BSTR(&propsets->rgProperties[0].vValue), L"provider_prop_test"))
+    {
+        ok(propsets->rgProperties[1].dwPropertyID == DBPROP_INIT_PROVIDERSTRING, "got propid[1] %lu\n", propsets->rgProperties[1].dwPropertyID);
+        ok(propsets->rgProperties[1].dwOptions == DBPROPOPTIONS_REQUIRED, "got options[1] %lu\n", propsets->rgProperties[1].dwOptions);
+        ok(propsets->rgProperties[1].dwStatus == 0, "got status[1] %lu\n", propsets->rgProperties[1].dwStatus);
+        ok(V_VT(&propsets->rgProperties[1].vValue) == VT_BSTR, "got vartype[1] %u\n", V_VT(&propsets->rgProperties[1].vValue));
+        ok(!wcscmp(V_BSTR(&propsets->rgProperties[1].vValue), L"a=1;b=2;c=3"), "got provider string %s\n",
+           wine_dbgstr_variant(&propsets->rgProperties[1].vValue));
+    }
 }
     return S_OK;
 }
@@ -202,8 +234,7 @@ static ULONG WINAPI dbpersist_Release(IPersist *iface)
 
 static HRESULT WINAPI dbpersist_GetClassID(IPersist *iface, CLSID *clsid)
 {
-    static const WCHAR msdasqlW[] = {'M','S','D','A','S','Q','L',0};
-    return CLSIDFromProgID(msdasqlW, clsid);
+    return CLSIDFromProgID(L"MSDASQL", clsid);
 }
 
 static const IPersistVtbl dbpersistvtbl = {
@@ -268,7 +299,7 @@ static const IDBInitializeVtbl dbinitvtbl = {
 
 static IDBInitialize dbinittest = { &dbinitvtbl };
 
-static void test_GetDataSource2(WCHAR *initstring)
+static void test_GetDataSource2(const WCHAR *initstring)
 {
     IDataInitialize *datainit = NULL;
     IDBInitialize *dbinit = NULL;
@@ -286,18 +317,14 @@ static void test_GetDataSource2(WCHAR *initstring)
 
 static void test_database(void)
 {
-    static WCHAR initstring_jet[] = {'P','r','o','v','i','d','e','r','=','M','i','c','r','o','s','o','f','t','.',
-         'J','e','t','.','O','L','E','D','B','.','4','.','0',';',
-         'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y',';',
-         'P','e','r','s','i','s','t',' ','S','e','c','u','r','i','t','y',' ','I','n','f','o','=','F','a','l','s','e',';',0};
-    static WCHAR initstring_lower[] = {'d','a','t','a',' ','s','o','u','r','c','e','=','d','u','m','m','y',';',0};
-    static WCHAR customprop[] = {'d','a','t','a',' ','s','o','u','r','c','e','=','d','u','m','m','y',';',
-        'c','u','s','t','o','m','p','r','o','p','=','1','2','3','.','4',';',0};
-    static WCHAR extended_prop[] = {'d','a','t','a',' ','s','o','u','r','c','e','=','d','u','m','m','y',';',
-        'E','x','t','e','n','d','e','d',' ','P','r','o','p','e','r','t','i','e','s','=','\"','D','R','I','V','E','R','=','A',
-        ' ','W','i','n','e',' ','O','D','B','C',' ','d','r','i','v','e','r',';','U','I','D','=','w','i','n','e',';','\"',';',0};
-    static WCHAR extended_prop2[] = {'d','a','t','a',' ','s','o','u','r','c','e','=','\'','d','u','m','m','y','\'',';',
-        'c','u','s','t','o','m','p','r','o','p','=','\'','1','2','3','.','4','\'',';',0};
+    static const WCHAR *initstring_default = L"Data Source=dummy;";
+    static const WCHAR *initstring_jet = L"Provider=Microsoft.Jet.OLEDB.4.0;Data Source=dummy;Persist Security Info=False;";
+    static const WCHAR *initstring_lower = L"data source=dummy;";
+    static const WCHAR *customprop = L"data source=dummy;customprop=123.4;";
+    static const WCHAR *initial_catalog_prop = L"Data Source=initial_catalog_test;Initial Catalog=dummy_catalog";
+    static const WCHAR *extended_prop = L"data source=dummy;Extended Properties=\"DRIVER=A Wine ODBC driver;UID=wine;\";";
+    static const WCHAR *extended_prop2 = L"data source=\'dummy\';customprop=\'123.4\';";
+    static const WCHAR *multi_provider_prop_test = L"Data Source=provider_prop_test;a=1;b=2;c=3;";
     IDataInitialize *datainit = NULL;
     HRESULT hr;
 
@@ -314,8 +341,10 @@ static void test_database(void)
     test_GetDataSource(initstring_default);
     test_GetDataSource(initstring_lower);
     test_GetDataSource2(customprop);
+    test_GetDataSource2(initial_catalog_prop);
     test_GetDataSource2(extended_prop);
     test_GetDataSource2(extended_prop2);
+    test_GetDataSource2(multi_provider_prop_test);
 }
 
 static void free_dispparams(DISPPARAMS *params)
@@ -501,23 +530,47 @@ static void test_errorinfo(void)
     IUnknown_Release(unk);
 }
 
+#define expect_initstring(a, b, c) _expect_initstring(__LINE__, a, b, c)
+static void _expect_initstring(int line, IDataInitialize *datainit, const WCHAR *initstring, const WCHAR *expected)
+{
+    IDBInitialize *dbinit = NULL;
+    WCHAR *result = NULL;
+    HRESULT hr;
+
+    hr = IDataInitialize_GetDataSource(datainit, NULL, CLSCTX_INPROC_SERVER, initstring,
+                                       &IID_IDBInitialize, (IUnknown**)&dbinit);
+    ok_(__FILE__, line)(hr == S_OK, "got %08lx\n", hr);
+    hr = IDataInitialize_GetInitializationString(datainit, (IUnknown*)dbinit, 0, &result);
+    ok_(__FILE__, line)(hr == S_OK, "got %08lx\n", hr);
+    ok_(__FILE__, line)(!lstrcmpW(expected, result), "expected %s, got %s\n",
+                        wine_dbgstr_w(expected), wine_dbgstr_w(result));
+    CoTaskMemFree(result);
+    IDBInitialize_Release(dbinit);
+}
+
 static void test_initializationstring(void)
 {
-    static const WCHAR initstring_msdasql[] = {'P','r','o','v','i','d','e','r','=','M','S','D','A','S','Q','L','.','1',';',
-         'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y', 0};
-    static const WCHAR initstring_msdasql2[] = {'p','R','o','V','i','D','e','R','=','M','S','D','A','S','Q','L','.','1',';',
-         'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y', 0};
-    static const WCHAR initstring_sqloledb[] = {'P','r','o','v','i','d','e','r','=','S','Q','L','O','L','E','D','B','.','1',';',
-         'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y', 0};
-    static const WCHAR initstring_mode[] = {'P','r','o','v','i','d','e','r','=','M','S','D','A','S','Q','L','.','1',';',
-         'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y',';',
-         'M','o','d','e','=','i','n','v','a','l','i','d',0};
-    static const WCHAR initstring_mode2[] = {'P','r','o','v','i','d','e','r','=','M','S','D','A','S','Q','L','.','1',';',
-         'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y',';',
-         'M','o','d','e','=','W','r','i','t','e','R','e','a','d',0};
-    static const WCHAR initstring_mode3[] = {'P','r','o','v','i','d','e','r','=','M','S','D','A','S','Q','L','.','1',';',
-         'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y',';',
-         'M','o','d','e','=','R','e','a','d','W','R','I','T','E',0};
+    static const WCHAR *initstring_default = L"Data Source=dummy;";
+    static const WCHAR *initstring_msdasql = L"Provider=MSDASQL.1;Data Source=dummy";
+    static const WCHAR *initstring_msdasql2 = L"pRoViDeR=MSDASQL.1;Data Source=dummy";
+    static const WCHAR *initstring_sqloledb = L"Provider=SQLOLEDB.1;Data Source=dummy";
+    static const WCHAR *initstring_mode = L"Provider=MSDASQL.1;Data Source=dummy;Mode=invalid";
+    static const WCHAR *initstring_mode2 = L"Provider=MSDASQL.1;Data Source=dummy;Mode=WriteRead";
+    static const WCHAR *initstring_mode3 = L"Provider=MSDASQL.1;Data Source=dummy;Mode=ReadWRITE";
+    static const WCHAR *initstring_quote_semicolon = L"Provider=MSDASQL.1;"
+                                                     "Data Source=dummy;"
+                                                     "Extended Properties=\"ConnectTo=11.0;Cell Error Mode=TextValue;Optimize Response=3;\"";
+    static const WCHAR *initstring_duplicate = L"Provider=MSDASQL.1;"
+                                               "Data Source=dummy;"
+                                               "Data Source=dummy;";
+    static const WCHAR *initstring_skip_properties = L"Provider=MSDASQL.1;"
+                                                     "Data Source=dummy;"
+                                                     "Window Handle=0;"
+                                                     "Prompt=4;"
+                                                     "Connect Timeout=1000;"
+                                                     "General Timeout=1000;"
+                                                     "OLE DB Services=0;"
+                                                     "Locale Identifier=1033";
     IDataInitialize *datainit = NULL;
     IDBInitialize *dbinit;
     HRESULT hr;
@@ -542,8 +595,8 @@ static void test_initializationstring(void)
             if(hr == S_OK)
             {
                 trace("Init String: %s\n", wine_dbgstr_w(initstring));
-                todo_wine ok(!lstrcmpW(initstring_msdasql, initstring) ||
-                             !lstrcmpW(initstring_sqloledb, initstring), "got %s\n", wine_dbgstr_w(initstring));
+                ok(!lstrcmpW(initstring_msdasql, initstring) ||
+                   !lstrcmpW(initstring_sqloledb, initstring), "got %s\n", wine_dbgstr_w(initstring));
                 CoTaskMemFree(initstring);
             }
 
@@ -575,6 +628,15 @@ static void test_initializationstring(void)
         }
         else
             ok(dbinit == NULL, "got %p\n", dbinit);
+
+        /* Test quoting property values */
+        expect_initstring(datainit, initstring_quote_semicolon, initstring_quote_semicolon);
+
+        /* Test duplicate properties */
+        expect_initstring(datainit, initstring_duplicate, initstring_msdasql);
+
+        /* Test properties that should be skipped */
+        expect_initstring(datainit, initstring_skip_properties, initstring_msdasql);
 
         IDataInitialize_Release(datainit);
     }
@@ -976,87 +1038,6 @@ static void test_dslocator(void)
     }
 }
 
-static void test_odbc_provider(void)
-{
-    HRESULT hr;
-    IDBProperties *props;
-    DBPROPIDSET propidset;
-    ULONG infocount;
-    DBPROPINFOSET *propinfoset;
-    WCHAR *desc;
-    DBPROPID properties[14] =
-    {
-        DBPROP_AUTH_PASSWORD, DBPROP_AUTH_PERSIST_SENSITIVE_AUTHINFO, DBPROP_AUTH_USERID,
-        DBPROP_INIT_DATASOURCE, DBPROP_INIT_HWND, DBPROP_INIT_LOCATION,
-        DBPROP_INIT_MODE, DBPROP_INIT_PROMPT, DBPROP_INIT_TIMEOUT,
-        DBPROP_INIT_PROVIDERSTRING, DBPROP_INIT_LCID, DBPROP_INIT_CATALOG,
-        DBPROP_INIT_OLEDBSERVICES, DBPROP_INIT_GENERALTIMEOUT
-    };
-
-    hr = CoCreateInstance( &CLSID_MSDASQL, NULL, CLSCTX_ALL, &IID_IDBProperties, (void **)&props);
-    ok(hr == S_OK, "Failed to create object 0x%08lx\n", hr);
-    if (FAILED(hr))
-    {
-        return;
-    }
-
-    propidset.rgPropertyIDs = NULL;
-    propidset.cPropertyIDs = 0;
-    propidset.guidPropertySet = DBPROPSET_DBINITALL;
-
-    infocount = 0;
-    hr = IDBProperties_GetPropertyInfo(props, 1, &propidset, &infocount, &propinfoset, &desc);
-    ok(hr == S_OK, "got 0x%08lx\n", hr);
-    if (hr == S_OK)
-    {
-        ULONG i;
-        DBPROPIDSET propidlist;
-        ULONG propcnt;
-        DBPROPSET *propset;
-
-        ok(IsEqualGUID(&propinfoset->guidPropertySet, &DBPROPSET_DBINIT), "got %s\n",
-                debugstr_guid(&propinfoset->guidPropertySet));
-        ok(propinfoset->cPropertyInfos == 14, "got %ld\n", propinfoset->cPropertyInfos);
-
-        propidlist.guidPropertySet = DBPROPSET_DBINIT;
-        propidlist.cPropertyIDs = propinfoset->cPropertyInfos;
-        propidlist.rgPropertyIDs = CoTaskMemAlloc(propinfoset->cPropertyInfos * sizeof(DBPROP));
-
-        for (i = 0; i < propinfoset->cPropertyInfos; i++)
-        {
-            ok(properties[i] == propinfoset->rgPropertyInfos[i].dwPropertyID, "%ld, got %ld\n", i,
-                    propinfoset->rgPropertyInfos[i].dwPropertyID);
-            ok(propinfoset->rgPropertyInfos[i].vtType != VT_EMPTY, "%ld, got %d\n", i,
-                    propinfoset->rgPropertyInfos[i].vtType);
-
-            propidlist.rgPropertyIDs[i] = propinfoset->rgPropertyInfos[i].dwPropertyID;
-        }
-
-        for (i = 0; i < propinfoset->cPropertyInfos; i++)
-            VariantClear(&propinfoset->rgPropertyInfos[i].vValues);
-
-        CoTaskMemFree(propinfoset->rgPropertyInfos);
-        CoTaskMemFree(propinfoset);
-
-        hr = IDBProperties_GetProperties(props, 1, &propidlist, &propcnt, &propset);
-        ok(hr == S_OK, "got 0x%08lx\n", hr);
-        ok(propidlist.cPropertyIDs == 14, "got %ld\n", propinfoset->cPropertyInfos);
-
-        for (i = 0; i < propidlist.cPropertyIDs; i++)
-        {
-            ok(properties[i] == propidlist.rgPropertyIDs[i], "%ld, got %ld\n", i,
-                    propidlist.rgPropertyIDs[i]);
-
-            propidlist.rgPropertyIDs[i] = propinfoset->rgPropertyInfos[i].dwPropertyID;
-        }
-
-        CoTaskMemFree(propidlist.rgPropertyIDs);
-        CoTaskMemFree(propset);
-    }
-
-    IDBProperties_Release(props);
-}
-
 static void test_odbc_enumerator(void)
 {
     HRESULT hr;
@@ -1101,7 +1082,6 @@ START_TEST(database)
     test_errorinfo();
     test_initializationstring();
     test_dslocator();
-    test_odbc_provider();
     test_odbc_enumerator();
 
     /* row position */

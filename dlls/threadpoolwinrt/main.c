@@ -37,15 +37,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(threadpool);
 
-static const char *debugstr_hstring(HSTRING hstr)
-{
-    const WCHAR *str;
-    UINT32 len;
-    if (hstr && !((ULONG_PTR)hstr >> 16)) return "(invalid)";
-    str = WindowsGetStringRawBuffer(hstr, &len);
-    return wine_dbgstr_wn(str, len);
-}
-
 struct threadpool_factory
 {
     IActivationFactory IActivationFactory_iface;
@@ -202,7 +193,7 @@ static ULONG STDMETHODCALLTYPE async_info_AddRef(IAsyncInfo *iface)
 static ULONG STDMETHODCALLTYPE async_info_Release(IAsyncInfo *iface)
 {
     struct async_action *action = impl_from_IAsyncInfo(iface);
-    return IAsyncAction_AddRef(&action->IAsyncAction_iface);
+    return IAsyncAction_Release(&action->IAsyncAction_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE async_info_GetIids(IAsyncInfo *iface, ULONG *iid_count, IID **iids)

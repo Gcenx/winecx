@@ -24,7 +24,6 @@
 
 #include "wsdapi_internal.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "iphlpapi.h"
 #include "bcrypt.h"
 
@@ -92,50 +91,43 @@ static DWORD WINAPI sending_thread(LPVOID lpParam)
         MULTICAST_UDP_REPEAT);
     closesocket(params->sock);
 
-    heap_free(params->data);
-    heap_free(params);
+    free(params->data);
+    free(params);
 
     return 0;
 }
 
+static IP_ADAPTER_ADDRESSES *get_adapters(ULONG family)
+{
+    ULONG err, size = 4096;
+    IP_ADAPTER_ADDRESSES *tmp, *ret;
+
+    if (!(ret = malloc( size ))) return NULL;
+    err = GetAdaptersAddresses( family, 0, NULL, ret, &size );
+    while (err == ERROR_BUFFER_OVERFLOW)
+    {
+        if (!(tmp = realloc( ret, size ))) break;
+        ret = tmp;
+        err = GetAdaptersAddresses( family, 0, NULL, ret, &size );
+    }
+    if (err == ERROR_SUCCESS) return ret;
+    free( ret );
+    return NULL;
+}
+
 static BOOL send_udp_multicast_of_type(char *data, int length, int max_initial_delay, ULONG family)
 {
-    IP_ADAPTER_ADDRESSES *adapter_addresses = NULL, *adapter_addr;
+    IP_ADAPTER_ADDRESSES *adapter_addresses, *adapter_addr;
     static const struct in6_addr i_addr_zero;
     sending_thread_params *send_params;
-    ULONG bufferSize = 0;
     LPSOCKADDR sockaddr;
-    BOOL ret = FALSE;
     HANDLE thread_handle;
     const char ttl = 8;
-    ULONG retval;
     SOCKET s;
 
-    /* Get size of buffer for adapters */
-    retval = GetAdaptersAddresses(family, 0, NULL, NULL, &bufferSize);
-
-    if (retval != ERROR_BUFFER_OVERFLOW)
-    {
-        WARN("GetAdaptorsAddresses failed with error %08lx\n", retval);
-        goto cleanup;
-    }
-
-    adapter_addresses = (IP_ADAPTER_ADDRESSES *) heap_alloc(bufferSize);
-
-    if (adapter_addresses == NULL)
-    {
-        WARN("Out of memory allocating space for adapter information\n");
-        goto cleanup;
-    }
-
-    /* Get list of adapters */
-    retval = GetAdaptersAddresses(family, 0, NULL, adapter_addresses, &bufferSize);
-
-    if (retval != ERROR_SUCCESS)
-    {
-        WARN("GetAdaptorsAddresses failed with error %08lx\n", retval);
-        goto cleanup;
-    }
+    adapter_addresses = get_adapters(family);
+    if (!adapter_addresses)
+        return FALSE;
 
     for (adapter_addr = adapter_addresses; adapter_addr != NULL; adapter_addr = adapter_addr->Next)
     {
@@ -170,9 +162,9 @@ static BOOL send_udp_multicast_of_type(char *data, int length, int max_initial_d
         setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
 
         /* Set up the thread parameters */
-        send_params = heap_alloc(sizeof(*send_params));
+        send_params = malloc(sizeof(*send_params));
 
-        send_params->data = heap_alloc(length);
+        send_params->data = malloc(length);
         memcpy(send_params->data, data, length);
         send_params->length = length;
         send_params->sock = s;
@@ -203,8 +195,8 @@ static BOOL send_udp_multicast_of_type(char *data, int length, int max_initial_d
             WARN("CreateThread failed (error %ld)\n", GetLastError());
             closesocket(s);
 
-            heap_free(send_params->data);
-            heap_free(send_params);
+            free(send_params->data);
+            free(send_params);
 
             continue;
         }
@@ -212,12 +204,8 @@ static BOOL send_udp_multicast_of_type(char *data, int length, int max_initial_d
         CloseHandle(thread_handle);
     }
 
-    ret = TRUE;
-
-cleanup:
-    heap_free(adapter_addresses);
-
-    return ret;
+    free(adapter_addresses);
+    return TRUE;
 }
 
 BOOL send_udp_multicast(IWSDiscoveryPublisherImpl *impl, char *data, int length, int max_initial_delay)
@@ -359,7 +347,7 @@ static DWORD WINAPI listening_thread(LPVOID params)
     SOCKADDR_STORAGE source_addr;
     char *buffer;
 
-    buffer = heap_alloc(RECEIVE_BUFFER_SIZE);
+    buffer = malloc(RECEIVE_BUFFER_SIZE);
     address_len = parameter->ipv6 ? sizeof(SOCKADDR_IN6) : sizeof(SOCKADDR_IN);
 
     while (parameter->impl->publisherStarted)
@@ -386,8 +374,8 @@ static DWORD WINAPI listening_thread(LPVOID params)
     /* The publisher has been stopped */
     closesocket(parameter->listening_socket);
 
-    heap_free(buffer);
-    heap_free(parameter);
+    free(buffer);
+    free(parameter);
 
     return 0;
 }
@@ -477,7 +465,7 @@ static int start_listening(IWSDiscoveryPublisherImpl *impl, SOCKADDR_STORAGE *bi
     }
 
     /* Allocate memory for thread parameters */
-    parameter = heap_alloc(sizeof(listener_thread_params));
+    parameter = malloc(sizeof(*parameter));
 
     parameter->impl = impl;
     parameter->listening_socket = s;
@@ -498,43 +486,19 @@ static int start_listening(IWSDiscoveryPublisherImpl *impl, SOCKADDR_STORAGE *bi
 
 cleanup:
     closesocket(s);
-    heap_free(parameter);
+    free(parameter);
 
     return 0;
 }
 
 static BOOL start_listening_on_all_addresses(IWSDiscoveryPublisherImpl *impl, ULONG family)
 {
-    IP_ADAPTER_ADDRESSES *adapter_addresses = NULL, *adapter_address;
+    IP_ADAPTER_ADDRESSES *adapter_addresses, *adapter_address;
     int valid_listeners = 0;
-    ULONG bufferSize = 0;
-    ULONG ret;
 
-    ret = GetAdaptersAddresses(family, 0, NULL, NULL, &bufferSize); /* family should be AF_INET or AF_INET6 */
-
-    if (ret != ERROR_BUFFER_OVERFLOW)
-    {
-        WARN("GetAdaptorsAddresses failed with error %08lx\n", ret);
+    adapter_addresses = get_adapters(family); /* family should be AF_INET or AF_INET6 */
+    if (!adapter_addresses)
         return FALSE;
-    }
-
-    /* Get size of buffer for adapters */
-    adapter_addresses = (IP_ADAPTER_ADDRESSES *)heap_alloc(bufferSize);
-
-    if (adapter_addresses == NULL)
-    {
-        WARN("Out of memory allocating space for adapter information\n");
-        return FALSE;
-    }
-
-    /* Get list of adapters */
-    ret = GetAdaptersAddresses(family, 0, NULL, adapter_addresses, &bufferSize);
-
-    if (ret != ERROR_SUCCESS)
-    {
-        WARN("GetAdaptorsAddresses failed with error %08lx\n", ret);
-        goto cleanup;
-    }
 
     for (adapter_address = adapter_addresses; adapter_address != NULL; adapter_address = adapter_address->Next)
     {
@@ -554,8 +518,8 @@ static BOOL start_listening_on_all_addresses(IWSDiscoveryPublisherImpl *impl, UL
     }
 
 cleanup:
-    heap_free(adapter_addresses);
-    return (ret == ERROR_SUCCESS) && (valid_listeners > 0);
+    free(adapter_addresses);
+    return valid_listeners > 0;
 }
 
 HRESULT send_udp_unicast(char *data, int length, IWSDUdpAddress *remote_addr, int max_initial_delay)

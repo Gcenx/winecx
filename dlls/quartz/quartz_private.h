@@ -81,6 +81,7 @@ HRESULT system_clock_create(IUnknown *outer, IUnknown **out);
 HRESULT seeking_passthrough_create(IUnknown *outer, IUnknown **out);
 HRESULT video_renderer_create(IUnknown *outer, IUnknown **out);
 HRESULT video_renderer_default_create(IUnknown *outer, IUnknown **out);
+HRESULT vmr7_presenter_create(IUnknown *outer, IUnknown **out);
 HRESULT vmr7_create(IUnknown *outer, IUnknown **out);
 HRESULT vmr9_create(IUnknown *outer, IUnknown **out);
 
@@ -108,7 +109,7 @@ struct video_window
 
 struct video_window_ops
 {
-    RECT (*get_default_rect)(struct video_window *window);
+    void (*get_default_rect)(struct video_window *window, RECT *rect);
     HRESULT (*get_current_image)(struct video_window *window, LONG *size, LONG *image);
 };
 

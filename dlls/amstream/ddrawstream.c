@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
 #define COBJMACROS
 #include "amstream_private.h"
 #include "wine/debug.h"
@@ -123,14 +122,14 @@ static HRESULT process_update(struct ddraw_sample *sample, int stride, BYTE *poi
     if (FAILED(hr))
         return hr;
 
-    row_size = (sample->rect.right - sample->rect.left) * desc.ddpfPixelFormat.u1.dwRGBBitCount / 8;
+    row_size = (sample->rect.right - sample->rect.left) * desc.ddpfPixelFormat.dwRGBBitCount / 8;
     src_row = pointer;
     dst_row = desc.lpSurface;
     for (row = sample->rect.top; row < sample->rect.bottom; ++row)
     {
         memcpy(dst_row, src_row, row_size);
         src_row += stride;
-        dst_row += desc.u1.lPitch;
+        dst_row += desc.lPitch;
     }
 
     hr = IDirectDrawSurface_Unlock(sample->surface, desc.lpSurface);
@@ -155,9 +154,9 @@ static BOOL is_format_compatible(struct ddraw_stream *stream,
     {
         if (stream->format.pf.dwFlags & DDPF_FOURCC)
             return FALSE;
-        if (stream->format.pf.u1.dwRGBBitCount != connection_pf->u1.dwRGBBitCount)
+        if (stream->format.pf.dwRGBBitCount != connection_pf->dwRGBBitCount)
             return FALSE;
-        if (stream->format.pf.u1.dwRGBBitCount == 16 && stream->format.pf.u3.dwGBitMask != connection_pf->u3.dwGBitMask)
+        if (stream->format.pf.dwRGBBitCount == 16 && stream->format.pf.dwGBitMask != connection_pf->dwGBitMask)
             return FALSE;
     }
     return TRUE;
@@ -324,6 +323,10 @@ static HRESULT WINAPI ddraw_IAMMediaStream_Initialize(IAMMediaStream *iface, IUn
 
     stream->purpose_id = *purpose_id;
     stream->stream_type = stream_type;
+
+    if (stream->ddraw)
+        IDirectDraw_Release(stream->ddraw);
+    stream->ddraw = NULL;
 
     if (source_object
             && FAILED(hr = IUnknown_QueryInterface(source_object, &IID_IDirectDraw, (void **)&stream->ddraw)))
@@ -551,7 +554,7 @@ static HRESULT WINAPI ddraw_IDirectDrawMediaStream_SetFormat(IDirectDrawMediaStr
 
     TRACE("flags %#lx, pixel format flags %#lx, bit count %lu, size %lux%lu.\n",
             format->dwFlags, format->ddpfPixelFormat.dwFlags,
-            format->ddpfPixelFormat.u1.dwRGBBitCount, format->dwWidth, format->dwHeight);
+            format->ddpfPixelFormat.dwRGBBitCount, format->dwWidth, format->dwHeight);
 
     if (format->dwFlags & DDSD_PIXELFORMAT)
     {
@@ -560,7 +563,7 @@ static HRESULT WINAPI ddraw_IDirectDrawMediaStream_SetFormat(IDirectDrawMediaStr
 
         if (format->ddpfPixelFormat.dwFlags & DDPF_FOURCC)
         {
-            if (!format->ddpfPixelFormat.u1.dwRGBBitCount)
+            if (!format->ddpfPixelFormat.dwRGBBitCount)
                 return E_INVALIDARG;
         }
         else
@@ -572,7 +575,7 @@ static HRESULT WINAPI ddraw_IDirectDrawMediaStream_SetFormat(IDirectDrawMediaStr
             if (!(format->ddpfPixelFormat.dwFlags & DDPF_RGB))
                 return DDERR_INVALIDSURFACETYPE;
 
-            switch (format->ddpfPixelFormat.u1.dwRGBBitCount)
+            switch (format->ddpfPixelFormat.dwRGBBitCount)
             {
             case 8:
                 if (!(format->ddpfPixelFormat.dwFlags & DDPF_PALETTEINDEXED8))
@@ -581,21 +584,21 @@ static HRESULT WINAPI ddraw_IDirectDrawMediaStream_SetFormat(IDirectDrawMediaStr
             case 16:
                 if (format->ddpfPixelFormat.dwFlags & DDPF_PALETTEINDEXED8)
                     return DDERR_INVALIDSURFACETYPE;
-                if ((format->ddpfPixelFormat.u2.dwRBitMask != 0x7c00 ||
-                    format->ddpfPixelFormat.u3.dwGBitMask != 0x03e0 ||
-                    format->ddpfPixelFormat.u4.dwBBitMask != 0x001f) &&
-                    (format->ddpfPixelFormat.u2.dwRBitMask != 0xf800 ||
-                    format->ddpfPixelFormat.u3.dwGBitMask != 0x07e0 ||
-                    format->ddpfPixelFormat.u4.dwBBitMask != 0x001f))
+                if ((format->ddpfPixelFormat.dwRBitMask != 0x7c00 ||
+                    format->ddpfPixelFormat.dwGBitMask != 0x03e0 ||
+                    format->ddpfPixelFormat.dwBBitMask != 0x001f) &&
+                    (format->ddpfPixelFormat.dwRBitMask != 0xf800 ||
+                    format->ddpfPixelFormat.dwGBitMask != 0x07e0 ||
+                    format->ddpfPixelFormat.dwBBitMask != 0x001f))
                     return DDERR_INVALIDSURFACETYPE;
                 break;
             case 24:
             case 32:
                 if (format->ddpfPixelFormat.dwFlags & DDPF_PALETTEINDEXED8)
                     return DDERR_INVALIDSURFACETYPE;
-                if (format->ddpfPixelFormat.u2.dwRBitMask != 0xff0000 ||
-                    format->ddpfPixelFormat.u3.dwGBitMask != 0x00ff00 ||
-                    format->ddpfPixelFormat.u4.dwBBitMask != 0x0000ff)
+                if (format->ddpfPixelFormat.dwRBitMask != 0xff0000 ||
+                    format->ddpfPixelFormat.dwGBitMask != 0x00ff00 ||
+                    format->ddpfPixelFormat.dwBBitMask != 0x0000ff)
                     return DDERR_INVALIDSURFACETYPE;
                 break;
             default:
@@ -958,35 +961,35 @@ static HRESULT WINAPI ddraw_sink_ReceiveConnection(IPin *iface, IPin *peer, cons
     if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_RGB8))
     {
         pf.dwFlags |= DDPF_PALETTEINDEXED8;
-        pf.u1.dwRGBBitCount = 8;
+        pf.dwRGBBitCount = 8;
     }
     else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_RGB555))
     {
-        pf.u1.dwRGBBitCount = 16;
-        pf.u2.dwRBitMask = 0x7c00;
-        pf.u3.dwGBitMask = 0x03e0;
-        pf.u4.dwBBitMask = 0x001f;
+        pf.dwRGBBitCount = 16;
+        pf.dwRBitMask = 0x7c00;
+        pf.dwGBitMask = 0x03e0;
+        pf.dwBBitMask = 0x001f;
     }
     else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_RGB565))
     {
-        pf.u1.dwRGBBitCount = 16;
-        pf.u2.dwRBitMask = 0xf800;
-        pf.u3.dwGBitMask = 0x07e0;
-        pf.u4.dwBBitMask = 0x001f;
+        pf.dwRGBBitCount = 16;
+        pf.dwRBitMask = 0xf800;
+        pf.dwGBitMask = 0x07e0;
+        pf.dwBBitMask = 0x001f;
     }
     else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_RGB24))
     {
-        pf.u1.dwRGBBitCount = 24;
-        pf.u2.dwRBitMask = 0xff0000;
-        pf.u3.dwGBitMask = 0x00ff00;
-        pf.u4.dwBBitMask = 0x0000ff;
+        pf.dwRGBBitCount = 24;
+        pf.dwRBitMask = 0xff0000;
+        pf.dwGBitMask = 0x00ff00;
+        pf.dwBBitMask = 0x0000ff;
     }
     else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_RGB32))
     {
-        pf.u1.dwRGBBitCount = 32;
-        pf.u2.dwRBitMask = 0xff0000;
-        pf.u3.dwGBitMask = 0x00ff00;
-        pf.u4.dwBBitMask = 0x0000ff;
+        pf.dwRGBBitCount = 32;
+        pf.dwRBitMask = 0xff0000;
+        pf.dwGBitMask = 0x00ff00;
+        pf.dwBBitMask = 0x0000ff;
     }
     else
     {
@@ -1406,6 +1409,7 @@ static HRESULT WINAPI ddraw_meminput_Receive(IMemInputPin *iface, IMediaSample *
         if (!list_empty(&stream->update_queue))
         {
             struct ddraw_sample *sample = LIST_ENTRY(list_head(&stream->update_queue), struct ddraw_sample, entry);
+            IQualityControl *qc;
 
             sample->update_hr = process_update(sample, top_down_stride, top_down_pointer,
                     start_stream_time, end_stream_time);
@@ -1419,6 +1423,19 @@ static HRESULT WINAPI ddraw_meminput_Receive(IMemInputPin *iface, IMediaSample *
             {
                 remove_queued_update(sample);
             }
+
+            if (S_OK == IMediaStreamFilter_GetCurrentStreamTime(filter, &current_time)
+                    && SUCCEEDED(IPin_QueryInterface(stream->peer, &IID_IQualityControl, (void **)&qc)))
+            {
+                Quality q;
+                q.Type = Famine;
+                q.Proportion = 1000;
+                q.Late = current_time - start_time;
+                q.TimeStamp = start_time;
+                IQualityControl_Notify(qc, (IBaseFilter *)stream->filter, q);
+                IQualityControl_Release(qc);
+            }
+
             LeaveCriticalSection(&stream->cs);
             return S_OK;
         }
@@ -1776,11 +1793,11 @@ static HRESULT ddrawstreamsample_create(struct ddraw_stream *parent, IDirectDraw
         {
             desc.ddpfPixelFormat.dwSize = sizeof(desc.ddpfPixelFormat);
             desc.ddpfPixelFormat.dwFlags = DDPF_RGB;
-            desc.ddpfPixelFormat.u1.dwRGBBitCount = 32;
-            desc.ddpfPixelFormat.u2.dwRBitMask = 0xff0000;
-            desc.ddpfPixelFormat.u3.dwGBitMask = 0x00ff00;
-            desc.ddpfPixelFormat.u4.dwBBitMask = 0x0000ff;
-            desc.ddpfPixelFormat.u5.dwRGBAlphaBitMask = 0;
+            desc.ddpfPixelFormat.dwRGBBitCount = 32;
+            desc.ddpfPixelFormat.dwRBitMask = 0xff0000;
+            desc.ddpfPixelFormat.dwGBitMask = 0x00ff00;
+            desc.ddpfPixelFormat.dwBBitMask = 0x0000ff;
+            desc.ddpfPixelFormat.dwRGBAlphaBitMask = 0;
         }
         desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY|DDSCAPS_OFFSCREENPLAIN;
         desc.lpSurface = NULL;

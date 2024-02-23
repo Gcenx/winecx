@@ -31,7 +31,6 @@ struct hook_table;
 struct window_class;
 struct atom_table;
 struct clipboard;
-struct shm_surface;
 
 enum user_object
 {
@@ -58,7 +57,6 @@ struct global_cursor
     int                  x;                /* cursor position */
     int                  y;
     rectangle_t          clip;             /* cursor clip rectangle */
-    unsigned int         clip_msg;         /* message to post for cursor clip changes */
     unsigned int         last_change;      /* time of last position change */
     user_handle_t        win;              /* window that contains the cursor */
 };
@@ -99,7 +97,8 @@ extern void cleanup_clipboard_thread( struct thread *thread );
 
 extern void remove_thread_hooks( struct thread *thread );
 extern unsigned int get_active_hooks(void);
-extern struct thread *get_first_global_hook( int id );
+extern struct thread *get_first_global_hook( int id, thread_id_t *thread_id, client_ptr_t *proc );
+extern void disable_hung_hook( struct desktop *desktop, int id, thread_id_t thread_id, client_ptr_t proc );
 
 /* queue functions */
 
@@ -111,6 +110,8 @@ extern void queue_cleanup_window( struct thread *thread, user_handle_t win );
 extern int init_thread_queue( struct thread *thread );
 extern int attach_thread_input( struct thread *thread_from, struct thread *thread_to );
 extern void detach_thread_input( struct thread *thread_from );
+extern void set_clip_rectangle( struct desktop *desktop, const rectangle_t *rect,
+                                unsigned int flags, int reset );
 extern void post_message( user_handle_t win, unsigned int message,
                           lparam_t wparam, lparam_t lparam );
 extern void send_notify_message( user_handle_t win, unsigned int message,
@@ -121,7 +122,6 @@ extern void post_win_event( struct thread *thread, unsigned int event,
                             const WCHAR *module, data_size_t module_size,
                             user_handle_t handle );
 extern void free_hotkeys( struct desktop *desktop, user_handle_t window );
-extern void wake_queue_for_surface( struct process *process );
 
 /* region functions */
 
@@ -181,12 +181,6 @@ extern int is_hwnd_message_class( struct window_class *class );
 extern int get_class_style( struct window_class *class );
 extern atom_t get_class_atom( struct window_class *class );
 extern client_ptr_t get_class_client_ptr( struct window_class *class );
-
-/* window surface functions */
-
-extern struct shm_surface *find_pending_surface( struct process *process, user_handle_t *win,
-                                                 lparam_t *lparam, rectangle_t *bounds );
-extern void unlock_surface( struct shm_surface *obj );
 
 /* windows station functions */
 

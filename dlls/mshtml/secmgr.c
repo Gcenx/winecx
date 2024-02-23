@@ -34,7 +34,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 /* Defined as extern in urlmon.idl, but not exported by uuid.lib */
-DECLSPEC_HIDDEN const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
+const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
     {0x10200490,0xfa38,0x11d0,{0xac,0x0e,0x00,0xa0,0xc9,0xf,0xff,0xc0}};
 
 static inline HTMLDocumentNode *impl_from_IInternetHostSecurityManager(IInternetHostSecurityManager *iface)
@@ -76,10 +76,10 @@ static HRESULT WINAPI InternetHostSecurityManager_ProcessUrlAction(IInternetHost
 
     TRACE("(%p)->(%ld %p %ld %p %ld %lx %lx)\n", This, dwAction, pPolicy, cbPolicy, pContext, cbContext, dwFlags, dwReserved);
 
-    if(!This->outer_window)
+    if(!This->window || !This->window->base.outer_window)
         return E_UNEXPECTED;
 
-    url = This->outer_window->url ? This->outer_window->url : L"about:blank";
+    url = This->window->base.outer_window->url ? This->window->base.outer_window->url : L"about:blank";
 
     return IInternetSecurityManager_ProcessUrlAction(get_security_manager(), url, dwAction, pPolicy, cbPolicy,
             pContext, cbContext, dwFlags, dwReserved);
@@ -181,10 +181,10 @@ static HRESULT WINAPI InternetHostSecurityManager_QueryCustomPolicy(IInternetHos
 
     TRACE("(%p)->(%s %p %p %p %ld %lx)\n", This, debugstr_guid(guidKey), ppPolicy, pcbPolicy, pContext, cbContext, dwReserved);
 
-    if(!This->outer_window)
+    if(!This->window || !This->window->base.outer_window)
         return E_UNEXPECTED;
 
-    url = This->outer_window->url ? This->outer_window->url : L"about:blank";
+    url = This->window->base.outer_window->url ? This->window->base.outer_window->url : L"about:blank";
 
     hres = IInternetSecurityManager_QueryCustomPolicy(get_security_manager(), url, guidKey, ppPolicy, pcbPolicy,
             pContext, cbContext, dwReserved);

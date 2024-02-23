@@ -986,7 +986,9 @@ static void test_synthesized(void)
 
     SetLastError(0xdeadbeef);
     data = GetClipboardData( CF_TEXT );
-    ok(GetLastError() == 0xdeadbeef, "bad last error %ld\n", GetLastError());
+    ok(GetLastError() == ERROR_NOT_FOUND /* win11 */ ||
+       broken(GetLastError() == 0xdeadbeef),
+       "bad last error %ld\n", GetLastError());
     ok(!data, "GetClipboardData() should have returned NULL\n");
 
     r = CloseClipboard();
@@ -1587,7 +1589,9 @@ static void test_handles( HWND hwnd )
 
     SetLastError( 0xdeadbeef );
     data = GetClipboardData( CF_RIFF );
-    ok( GetLastError() == 0xdeadbeef, "unexpected last error %ld\n", GetLastError() );
+    ok( GetLastError() == ERROR_NOT_FOUND /* win11 */ ||
+        broken(GetLastError() == 0xdeadbeef),
+        "unexpected last error %ld\n", GetLastError() );
     ok( !data, "wrong data %p\n", data );
 
     h = SetClipboardData( CF_PRIVATEFIRST + 7, htext4 );
@@ -2213,35 +2217,39 @@ static const struct
     UINT  len;
 } test_data[] =
 {
-    { "foo", {}, 3 },      /* 0 */
+    { "foo", {}, 3 },                 /* 0 */
     { "foo", {}, 4 },
     { "foo\0bar", {}, 7 },
     { "foo\0bar", {}, 8 },
-    { "", {'f','o','o'}, 3 * sizeof(WCHAR) },
-    { "", {'f','o','o',0}, 4 * sizeof(WCHAR) },     /* 5 */
+    { "", {}, 0 },
+    { "", {'f'}, 1 },                 /* 5 */
+    { "", {'f'}, 2 },
+    { "", {0x3b1,0x3b2,0x3b3}, 5 }, /* Alpha, beta, ... */
+    { "", {0x3b1,0x3b2,0x3b3}, 6 },
+    { "", {0x3b1,0x3b2,0x3b3,0}, 7 }, /* 10 */
+    { "", {0x3b1,0x3b2,0x3b3,0}, 8 },
+    { "", {0x3b1,0x3b2,0x3b3,0,0x3b4}, 9 },
     { "", {'f','o','o',0,'b','a','r'}, 7 * sizeof(WCHAR) },
     { "", {'f','o','o',0,'b','a','r',0}, 8 * sizeof(WCHAR) },
-    { "", {'f','o','o'}, 1 },
-    { "", {'f','o','o'}, 2 },
-    { "", {'f','o','o'}, 5 },     /* 10 */
-    { "", {'f','o','o',0}, 7 },
-    { "", {'f','o','o',0}, 9 },
 };
 
 static void test_string_data(void)
 {
     UINT i;
     BOOL r;
-    HANDLE data;
+    HANDLE data, clip;
     char cmd[16];
     char bufferA[12];
     WCHAR bufferW[12];
 
     for (i = 0; i < ARRAY_SIZE(test_data); i++)
     {
-        /* 1-byte Unicode strings crash on Win64 */
 #ifdef _WIN64
-        if (!test_data[i].strA[0] && test_data[i].len < sizeof(WCHAR)) continue;
+        /* Before Windows 11 1-byte Unicode strings crash on Win64
+         * because it underflows when 'appending' a 2 bytes NUL character!
+         */
+        if (!test_data[i].strA[0] && test_data[i].len < sizeof(WCHAR) &&
+            strcmp(winetest_platform, "windows") == 0) continue;
 #endif
         winetest_push_context("%d", i);
         r = open_clipboard( 0 );
@@ -2261,11 +2269,17 @@ static void test_string_data(void)
         else
         {
             memcpy( data, test_data[i].strW, test_data[i].len );
-            SetClipboardData( CF_UNICODETEXT, data );
-            memcpy( bufferW, test_data[i].strW, test_data[i].len );
-            bufferW[(test_data[i].len + 1) / sizeof(WCHAR) - 1] = 0;
-            ok( !memcmp( data, bufferW, test_data[i].len ),
-                "wrong data %s\n", wine_dbgstr_wn( data, (test_data[i].len + 1) / sizeof(WCHAR) ));
+            clip = SetClipboardData( CF_UNICODETEXT, data );
+            if (test_data[i].len >= sizeof(WCHAR))
+            {
+                ok( clip == data, "SetClipboardData() returned %p != %p\n", clip, data );
+                memcpy( bufferW, test_data[i].strW, test_data[i].len );
+                *((WCHAR *)((char *)bufferW + test_data[i].len) - 1) = 0;
+                ok( !memcmp( data, bufferW, test_data[i].len ),
+                    "wrong data %s\n", wine_dbgstr_an( data, test_data[i].len ));
+            }
+            else
+                ok( !clip || broken(clip != NULL), "expected SetClipboardData() to fail\n" );
         }
         r = CloseClipboard();
         ok( r, "gle %ld\n", GetLastError() );
@@ -2305,13 +2319,27 @@ static void test_string_data_process( int i )
     else
     {
         data = GetClipboardData( CF_UNICODETEXT );
-        ok( data != 0, "could not get data\n" );
-        len = GlobalSize( data );
-        ok( len == test_data[i].len, "wrong size %u / %u\n", len, test_data[i].len );
-        memcpy( bufferW, test_data[i].strW, test_data[i].len );
-        bufferW[(test_data[i].len + 1) / sizeof(WCHAR) - 1] = 0;
-        ok( !memcmp( data, bufferW, len ),
-            "wrong data %s\n", wine_dbgstr_wn( data, (len + 1) / sizeof(WCHAR) ));
+        if (!data)
+        {
+            ok( test_data[i].len < sizeof(WCHAR), "got no data for len=%d\n", test_data[i].len );
+            ok( !IsClipboardFormatAvailable( CF_UNICODETEXT ), "unicode available\n" );
+        }
+        else if (test_data[i].len == 0)
+        {
+            /* 0-byte string handling is broken on Windows <= 10 */
+            len = GlobalSize( data );
+            ok( broken(len == 1), "wrong size %u / 0\n", len );
+            ok( broken(*((char*)data) == 0), "wrong data %s\n", wine_dbgstr_an( data, len ));
+        }
+        else
+        {
+            len = GlobalSize( data );
+            ok( len == test_data[i].len, "wrong size %u / %u\n", len, test_data[i].len );
+            memcpy( bufferW, test_data[i].strW, test_data[i].len );
+            *((WCHAR *)((char *)bufferW + test_data[i].len) - 1) = 0;
+            ok( !memcmp( data, bufferW, len ), "wrong data %s\n", wine_dbgstr_an( data, len ));
+        }
+
         data = GetClipboardData( CF_TEXT );
         if (test_data[i].len >= sizeof(WCHAR))
         {
@@ -2321,12 +2349,15 @@ static void test_string_data_process( int i )
                                         bufferA, ARRAY_SIZE(bufferA), NULL, NULL );
             bufferA[len2 - 1] = 0;
             ok( len == len2, "wrong size %u / %u\n", len, len2 );
-            ok( !memcmp( data, bufferA, len ), "wrong data %.*s\n", len, (char *)data );
+            ok( !memcmp( data, bufferA, len ), "wrong data %s, expected %s\n",
+                wine_dbgstr_an( data, len ), wine_dbgstr_an( bufferA, len2 ));
         }
         else
         {
+            BOOL available = IsClipboardFormatAvailable( CF_TEXT );
+            ok( !available || broken(available /* win10 */),
+                "available text %d\n", available );
             ok( !data, "got data for empty string\n" );
-            ok( IsClipboardFormatAvailable( CF_TEXT ), "text not available\n" );
         }
     }
     r = CloseClipboard();

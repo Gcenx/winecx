@@ -1,6 +1,8 @@
 MODULE    = findstr.exe
+IMPORTS   = user32
 
 EXTRADLLFLAGS = -mconsole -municode
 
-C_SRCS = \
+SOURCES = \
+	findstr.rc \
 	main.c

@@ -148,7 +148,7 @@ ME_Row *para_end_row( ME_Paragraph *para )
     return &item->member.row;
 }
 
-void ME_MakeFirstParagraph(ME_TextEditor *editor)
+void ME_MakeFirstParagraph(ME_TextEditor *editor, HDC hdc)
 {
   ME_Context c;
   CHARFORMAT2W cf;
@@ -160,7 +160,6 @@ void ME_MakeFirstParagraph(ME_TextEditor *editor)
   ME_Run *run;
   ME_Style *style;
   int eol_len;
-  HDC hdc = ITextHost_TxGetDC( editor->texthost );
 
   ME_InitContext( &c, editor, hdc );
 
@@ -222,7 +221,6 @@ void ME_MakeFirstParagraph(ME_TextEditor *editor)
   wine_rb_init( &editor->marked_paras, para_mark_compare );
   para_mark_add( editor, para );
   ME_DestroyContext(&c);
-  ITextHost_TxReleaseDC( editor->texthost, hdc );
 }
 
 static void para_mark_rewrap_paras( ME_TextEditor *editor, ME_Paragraph *first, const ME_Paragraph *end )
@@ -671,7 +669,7 @@ ME_Paragraph *para_split( ME_TextEditor *editor, ME_Run *run, ME_Style *style,
   para_mark_rewrap( editor, &new_para->prev_para->member.para );
 
   /* we've added the end run, so we need to modify nCharOfs in the next paragraphs */
-  editor_propagate_char_ofs( next_para, NULL, eol_len );
+  editor_propagate_char_ofs( editor, next_para, NULL, eol_len );
   editor->nParagraphs++;
 
   return new_para;
@@ -774,7 +772,7 @@ ME_Paragraph *para_join( ME_TextEditor *editor, ME_Paragraph *para, BOOL use_fir
   ME_Remove( para_get_di(next) );
   para_destroy( editor, next );
 
-  editor_propagate_char_ofs( para_next( para ), NULL, -end_len );
+  editor_propagate_char_ofs( editor, para_next( para ), NULL, -end_len );
 
   ME_CheckCharOffsets(editor);
 

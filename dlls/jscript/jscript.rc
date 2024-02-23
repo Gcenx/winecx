@@ -62,6 +62,7 @@ STRINGTABLE
     IDS_ENUMERATOR_EXPECTED "Enumerator object expected"
     IDS_REGEXP_EXPECTED     "Regular Expression object expected"
     IDS_REGEXP_SYNTAX_ERROR "Syntax error in regular expression"
+    IDS_UNEXPECTED_QUANTIFIER "Unexpected quantifier"
     IDS_EXCEPTION_THROWN    "Exception thrown and not caught"
     IDS_URI_INVALID_CODING  "URI to be decoded is incorrect"
     IDS_URI_INVALID_CHAR    "URI to be encoded contains invalid characters"
@@ -76,6 +77,7 @@ STRINGTABLE
     IDS_NONCONFIGURABLE_REDEFINED  "Cannot redefine non-configurable property '|'"
     IDS_NONWRITABLE_MODIFIED       "Cannot modify non-writable property '|'"
     IDS_WRONG_THIS                 "'this' is not a | object"
+    IDS_KEY_NOT_OBJECT             "'key' is not an object"
     IDS_PROP_DESC_MISMATCH         "Property cannot have both accessors and a value"
 
     IDS_COMPILATION_ERROR   "Microsoft JScript compilation error"

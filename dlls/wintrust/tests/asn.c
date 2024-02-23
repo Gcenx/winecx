@@ -143,7 +143,7 @@ static void test_encodeSPCLink(void)
         LocalFree(buf);
     }
     /* With an invalid char: */
-    U(link).pwszUrl = (LPWSTR)nihongoURL;
+    link.pwszUrl = (LPWSTR)nihongoURL;
     size = 1;
     SetLastError(0xdeadbeef);
     ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT, &link,
@@ -156,7 +156,7 @@ static void test_encodeSPCLink(void)
      * index of the first invalid character.
      */
     ok(size == 0, "Expected size 0, got %ld\n", size);
-    U(link).pwszUrl = url;
+    link.pwszUrl = url;
     ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT, &link,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
     ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
@@ -167,7 +167,7 @@ static void test_encodeSPCLink(void)
         LocalFree(buf);
     }
     link.dwLinkChoice = SPC_FILE_LINK_CHOICE;
-    U(link).pwszFile = (LPWSTR)nihongoURL;
+    link.pwszFile = (LPWSTR)nihongoURL;
     ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT, &link,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
     ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
@@ -178,7 +178,7 @@ static void test_encodeSPCLink(void)
         LocalFree(buf);
     }
     link.dwLinkChoice = SPC_MONIKER_LINK_CHOICE;
-    memset(&U(link).Moniker, 0, sizeof(U(link).Moniker));
+    memset(&link.Moniker, 0, sizeof(link.Moniker));
     ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT, &link,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
     ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
@@ -188,9 +188,9 @@ static void test_encodeSPCLink(void)
         ok(!memcmp(buf, emptyMonikerSPCLink, size), "Unexpected value\n");
         LocalFree(buf);
     }
-    memset(&U(link).Moniker.ClassId, 0xea, sizeof(U(link).Moniker.ClassId));
-    U(link).Moniker.SerializedData.pbData = data;
-    U(link).Moniker.SerializedData.cbData = sizeof(data);
+    memset(&link.Moniker.ClassId, 0xea, sizeof(link.Moniker.ClassId));
+    link.Moniker.SerializedData.pbData = data;
+    link.Moniker.SerializedData.cbData = sizeof(data);
     ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT, &link,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
     ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
@@ -228,7 +228,7 @@ static void test_decodeSPCLink(void)
         link = (SPC_LINK *)buf;
         ok(link->dwLinkChoice == SPC_URL_LINK_CHOICE,
          "Expected SPC_URL_LINK_CHOICE, got %ld\n", link->dwLinkChoice);
-        ok(lstrlenW(U(*link).pwszUrl) == 0, "Expected empty string\n");
+        ok(lstrlenW(link->pwszUrl) == 0, "Expected empty string\n");
         LocalFree(buf);
     }
     ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT,
@@ -240,7 +240,7 @@ static void test_decodeSPCLink(void)
         link = (SPC_LINK *)buf;
         ok(link->dwLinkChoice == SPC_URL_LINK_CHOICE,
          "Expected SPC_URL_LINK_CHOICE, got %ld\n", link->dwLinkChoice);
-        ok(!lstrcmpW(U(*link).pwszUrl, url), "Unexpected URL\n");
+        ok(!lstrcmpW(link->pwszUrl, url), "Unexpected URL\n");
         LocalFree(buf);
     }
     ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT,
@@ -252,7 +252,7 @@ static void test_decodeSPCLink(void)
         link = (SPC_LINK *)buf;
         ok(link->dwLinkChoice == SPC_FILE_LINK_CHOICE,
          "Expected SPC_FILE_LINK_CHOICE, got %ld\n", link->dwLinkChoice);
-        ok(!lstrcmpW(U(*link).pwszFile, nihongoURL), "Unexpected file\n");
+        ok(!lstrcmpW(link->pwszFile, nihongoURL), "Unexpected file\n");
         LocalFree(buf);
     }
     ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_LINK_STRUCT,
@@ -266,9 +266,9 @@ static void test_decodeSPCLink(void)
         link = (SPC_LINK *)buf;
         ok(link->dwLinkChoice == SPC_MONIKER_LINK_CHOICE,
          "Expected SPC_MONIKER_LINK_CHOICE, got %ld\n", link->dwLinkChoice);
-        ok(!memcmp(&U(*link).Moniker.ClassId, &emptyMoniker.ClassId,
+        ok(!memcmp(&link->Moniker.ClassId, &emptyMoniker.ClassId,
          sizeof(emptyMoniker.ClassId)), "Unexpected value\n");
-        ok(U(*link).Moniker.SerializedData.cbData == 0,
+        ok(link->Moniker.SerializedData.cbData == 0,
          "Expected no serialized data\n");
         LocalFree(buf);
     }
@@ -284,11 +284,11 @@ static void test_decodeSPCLink(void)
         ok(link->dwLinkChoice == SPC_MONIKER_LINK_CHOICE,
          "Expected SPC_MONIKER_LINK_CHOICE, got %ld\n", link->dwLinkChoice);
         memset(&id, 0xea, sizeof(id));
-        ok(!memcmp(&U(*link).Moniker.ClassId, &id, sizeof(id)),
+        ok(!memcmp(&link->Moniker.ClassId, &id, sizeof(id)),
          "Unexpected value\n");
-        ok(U(*link).Moniker.SerializedData.cbData == sizeof(data),
-           "Unexpected data size %ld\n", U(*link).Moniker.SerializedData.cbData);
-        ok(!memcmp(U(*link).Moniker.SerializedData.pbData, data, sizeof(data)),
+        ok(link->Moniker.SerializedData.cbData == sizeof(data),
+           "Unexpected data size %ld\n", link->Moniker.SerializedData.cbData);
+        ok(!memcmp(link->Moniker.SerializedData.pbData, data, sizeof(data)),
          "Unexpected value\n");
         LocalFree(buf);
     }
@@ -405,7 +405,7 @@ static void test_encodeSPCPEImage(void)
         LocalFree(buf);
     }
     /* Finally, a non-empty file: */
-    U(link).pwszFile = (LPWSTR)nihongoURL;
+    link.pwszFile = (LPWSTR)nihongoURL;
     ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_PE_IMAGE_DATA_STRUCT,
      &imageData, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
     ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
@@ -474,7 +474,7 @@ static void test_decodeSPCPEImage(void)
             ok(imageData->pFile->dwLinkChoice == SPC_FILE_LINK_CHOICE,
              "Expected SPC_FILE_LINK_CHOICE, got %ld\n",
              imageData->pFile->dwLinkChoice);
-            ok(!lstrcmpW(U(*imageData->pFile).pwszFile, emptyString),
+            ok(!lstrcmpW(imageData->pFile->pwszFile, emptyString),
              "Unexpected file\n");
         }
         LocalFree(buf);
@@ -497,7 +497,7 @@ static void test_decodeSPCPEImage(void)
             ok(imageData->pFile->dwLinkChoice == SPC_FILE_LINK_CHOICE,
              "Expected SPC_FILE_LINK_CHOICE, got %ld\n",
              imageData->pFile->dwLinkChoice);
-            ok(!lstrcmpW(U(*imageData->pFile).pwszFile, emptyString),
+            ok(!lstrcmpW(imageData->pFile->pwszFile, emptyString),
              "Unexpected file\n");
         }
         LocalFree(buf);
@@ -520,11 +520,250 @@ static void test_decodeSPCPEImage(void)
             ok(imageData->pFile->dwLinkChoice == SPC_FILE_LINK_CHOICE,
              "Expected SPC_FILE_LINK_CHOICE, got %ld\n",
              imageData->pFile->dwLinkChoice);
-            ok(!lstrcmpW(U(*imageData->pFile).pwszFile, nihongoURL),
+            ok(!lstrcmpW(imageData->pFile->pwszFile, nihongoURL),
              "Unexpected file\n");
         }
         LocalFree(buf);
     }
+}
+
+static const BYTE emptyIndirectData[] = {
+ 0x30,0x0c,0x30,0x02,0x06,0x00,0x30,0x06,0x30,0x02,0x06,0x00,0x04,0x00 };
+static const BYTE spcidcWithOnlyDigest[] = {
+ 0x30,0x20,0x30,0x02,0x06,0x00,0x30,0x1a,0x30,0x02,0x06,0x00,0x04,0x14,0x01,0x02,
+ 0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,0x11,0x12,
+ 0x13,0x14 };
+static const BYTE spcidcWithDigestAndAlgorithm[] = {
+ 0x30,0x27,0x30,0x02,0x06,0x00,0x30,0x21,0x30,0x09,0x06,0x05,0x2b,0x0e,0x03,0x02,
+ 0x1a,0x05,0x00,0x04,0x14,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,
+ 0x0c,0x0d,0x0e,0x0f,0x10,0x11,0x12,0x13,0x14 };
+static const BYTE spcidcWithDigestAndAlgorithmParams[] = {
+ 0x30,0x29,0x30,0x02,0x06,0x00,0x30,0x23,0x30,0x0b,0x06,0x05,0x2b,0x0e,0x03,0x02,
+ 0x1a,0x74,0x65,0x73,0x74,0x04,0x14,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,
+ 0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,0x11,0x12,0x13,0x14 };
+static const BYTE spcidcWithEverythingExceptDataValue[] = {
+ 0x30,0x33,0x30,0x0c,0x06,0x0a,0x2b,0x06,0x01,0x04,0x01,0x82,0x37,0x02,0x01,0x0f,
+ 0x30,0x23,0x30,0x0b,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x74,0x65,0x73,0x74,0x04,
+ 0x14,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+ 0x10,0x11,0x12,0x13,0x14 };
+static const BYTE spcidcWithEverything[] = {
+ 0x30,0x35,0x30,0x0e,0x06,0x0a,0x2b,0x06,0x01,0x04,0x01,0x82,0x37,0x02,0x01,0x0f,
+ 0x30,0x00,0x30,0x23,0x30,0x0b,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x74,0x65,0x73,
+ 0x74,0x04,0x14,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,
+ 0x0e,0x0f,0x10,0x11,0x12,0x13,0x14 };
+
+static BYTE fakeDigest[] = {
+ 0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,
+ 0x11,0x12,0x13,0x14 };
+static BYTE parameters[] = { 't','e','s','t' };
+
+static void test_encodeSPCIndirectDataContent(void)
+{
+    static char SPC_PE_IMAGE_DATA_OBJID_[] = SPC_PE_IMAGE_DATA_OBJID;
+    static char szOID_OIWSEC_sha1_[] = szOID_OIWSEC_sha1;
+
+    SPC_INDIRECT_DATA_CONTENT indirectData = { { 0 } };
+    DWORD size = 0;
+    LPBYTE buf;
+    BOOL ret;
+
+    if (!pCryptEncodeObjectEx)
+    {
+        win_skip("CryptEncodeObjectEx() is not available. Skipping the encodeSPCIndirectDataContent tests\n");
+        return;
+    }
+
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     &indirectData, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(emptyIndirectData), "Unexpected size %ld\n", size);
+        if (size == sizeof(emptyIndirectData))
+            ok(!memcmp(buf, emptyIndirectData, sizeof(emptyIndirectData)),
+             "Unexpected value\n");
+        LocalFree(buf);
+    }
+    /* With only digest */
+    indirectData.Digest.cbData = sizeof(fakeDigest);
+    indirectData.Digest.pbData = fakeDigest;
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     &indirectData, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(spcidcWithOnlyDigest), "Unexpected size %ld\n", size);
+        if (size == sizeof(spcidcWithOnlyDigest))
+            ok(!memcmp(buf, spcidcWithOnlyDigest, sizeof(spcidcWithOnlyDigest)),
+             "Unexpected value\n");
+        LocalFree(buf);
+    }
+    /* With digest and digest algorithm */
+    indirectData.DigestAlgorithm.pszObjId = szOID_OIWSEC_sha1_;
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     &indirectData, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(spcidcWithDigestAndAlgorithm), "Unexpected size %ld\n",
+         size);
+        if (size == sizeof(spcidcWithDigestAndAlgorithm))
+            ok(!memcmp(buf, spcidcWithDigestAndAlgorithm,
+                       sizeof(spcidcWithDigestAndAlgorithm)),
+             "Unexpected value\n");
+        LocalFree(buf);
+    }
+    /* With digest algorithm parameters */
+    indirectData.DigestAlgorithm.Parameters.cbData = sizeof(parameters);
+    indirectData.DigestAlgorithm.Parameters.pbData = parameters;
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     &indirectData, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(spcidcWithDigestAndAlgorithmParams),
+         "Unexpected size %ld\n", size);
+        if (size == sizeof(spcidcWithDigestAndAlgorithmParams))
+            ok(!memcmp(buf, spcidcWithDigestAndAlgorithmParams,
+                       sizeof(spcidcWithDigestAndAlgorithmParams)),
+             "Unexpected value\n");
+        LocalFree(buf);
+    }
+    /* With everything except Data.Value */
+    indirectData.Data.pszObjId = SPC_PE_IMAGE_DATA_OBJID_;
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     &indirectData, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(spcidcWithEverythingExceptDataValue),
+         "Unexpected size %ld\n", size);
+        if (size == sizeof(spcidcWithEverythingExceptDataValue))
+            ok(!memcmp(buf, spcidcWithEverythingExceptDataValue,
+                       sizeof(spcidcWithEverythingExceptDataValue)),
+             "Unexpected value\n");
+        LocalFree(buf);
+    }
+    /* With everything */
+    indirectData.Data.Value.cbData = sizeof(emptySequence);
+    indirectData.Data.Value.pbData = (void*)emptySequence;
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     &indirectData, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(spcidcWithEverything), "Unexpected size %ld\n", size);
+        if (size == sizeof(spcidcWithEverything))
+            ok(!memcmp(buf, spcidcWithEverything, sizeof(spcidcWithEverything)),
+             "Unexpected value\n");
+        LocalFree(buf);
+    }
+}
+
+static void test_decodeSPCIndirectDataContent(void)
+{
+    static const BYTE asn1Null[] = { 0x05,0x00 };
+
+    BOOL ret;
+    LPBYTE buf = NULL;
+    DWORD size = 0;
+    SPC_INDIRECT_DATA_CONTENT *indirectData;
+
+    if (!pCryptDecodeObjectEx)
+    {
+        win_skip("CryptDecodeObjectEx() is not available. Skipping the decodeSPCIndirectDataContent tests\n");
+        return;
+    }
+
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     emptyIndirectData, sizeof(emptyIndirectData),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        indirectData = (SPC_INDIRECT_DATA_CONTENT *)buf;
+        ok(indirectData->Data.pszObjId != NULL, "Expected non-NULL data objid\n");
+        if (indirectData->Data.pszObjId)
+            ok(!strcmp(indirectData->Data.pszObjId, ""),
+             "Expected empty data objid\n");
+        ok(indirectData->Data.Value.cbData == 0, "Expected no data value\n");
+        ok(indirectData->DigestAlgorithm.pszObjId != NULL,
+         "Expected non-NULL digest algorithm objid\n");
+        if (indirectData->DigestAlgorithm.pszObjId)
+            ok(!strcmp(indirectData->DigestAlgorithm.pszObjId, ""),
+             "Expected empty digest algorithm objid\n");
+        ok(indirectData->DigestAlgorithm.Parameters.cbData == 0,
+         "Expected no digest algorithm parameters\n");
+        ok(indirectData->Digest.cbData == 0, "Expected no digest\n");
+        LocalFree(buf);
+    }
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     spcidcWithOnlyDigest, sizeof(spcidcWithOnlyDigest),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        indirectData = (SPC_INDIRECT_DATA_CONTENT *)buf;
+        ok(indirectData->Digest.cbData == sizeof(fakeDigest),
+         "Unexpected digest size %ld\n", indirectData->Digest.cbData);
+        if (indirectData->Digest.cbData == sizeof(fakeDigest))
+            ok(!memcmp(indirectData->Digest.pbData, fakeDigest,
+                       sizeof(fakeDigest)),
+             "Unexpected flags\n");
+        LocalFree(buf);
+    }
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     spcidcWithDigestAndAlgorithm, sizeof(spcidcWithDigestAndAlgorithm),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08lx\n", GetLastError());
+    if (ret)
+    {
+        indirectData = (SPC_INDIRECT_DATA_CONTENT *)buf;
+        ok(indirectData->DigestAlgorithm.pszObjId != NULL,
+         "Expected non-NULL digest algorithm objid\n");
+        if (indirectData->DigestAlgorithm.pszObjId)
+            ok(!strcmp(indirectData->DigestAlgorithm.pszObjId, szOID_OIWSEC_sha1),
+             "Expected szOID_OIWSEC_sha1, got \"%s\"\n",
+             indirectData->DigestAlgorithm.pszObjId);
+        ok(indirectData->DigestAlgorithm.Parameters.cbData == sizeof(asn1Null),
+         "Unexpected digest algorithm parameters size %ld\n",
+         indirectData->DigestAlgorithm.Parameters.cbData);
+        if (indirectData->DigestAlgorithm.Parameters.cbData == sizeof(asn1Null))
+            ok(!memcmp(indirectData->DigestAlgorithm.Parameters.pbData,
+                       asn1Null, sizeof(asn1Null)),
+             "Unexpected digest algorithm parameters\n");
+        ok(indirectData->Digest.cbData == sizeof(fakeDigest),
+         "Unexpected digest size %ld\n", indirectData->Digest.cbData);
+        if (indirectData->Digest.cbData == sizeof(fakeDigest))
+            ok(!memcmp(indirectData->Digest.pbData, fakeDigest,
+                       sizeof(fakeDigest)),
+             "Unexpected flags\n");
+        LocalFree(buf);
+    }
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     spcidcWithDigestAndAlgorithmParams, sizeof(spcidcWithDigestAndAlgorithmParams),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, &buf, &size);
+    /* what? */
+    ok(!ret && GetLastError () == CRYPT_E_ASN1_EOD,
+     "Expected CRYPT_E_ASN1_EOD, got %08lx\n", GetLastError());
+    if (ret)
+        LocalFree(buf);
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     spcidcWithEverythingExceptDataValue, sizeof(spcidcWithEverythingExceptDataValue),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, &buf, &size);
+    /* huh??? */
+    ok(!ret && GetLastError () == CRYPT_E_ASN1_EOD,
+     "Expected CRYPT_E_ASN1_EOD, got %08lx\n", GetLastError());
+    if (ret)
+        LocalFree(buf);
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_INDIRECT_DATA_CONTENT_STRUCT,
+     spcidcWithEverything, sizeof(spcidcWithEverything),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, &buf, &size);
+    /* ?????? */
+    ok(!ret && GetLastError () == CRYPT_E_ASN1_EOD,
+     "Expected CRYPT_E_ASN1_EOD, got %08lx\n", GetLastError());
+    if (ret)
+        LocalFree(buf);
 }
 
 static WCHAR foo[] = { 'f','o','o',0 };
@@ -840,7 +1079,7 @@ static void test_encodeSpOpusInfo(void)
     ok(!ret && GetLastError() == E_INVALIDARG,
      "expected E_INVALIDARG, got %08lx\n", GetLastError());
     moreInfo.dwLinkChoice = SPC_URL_LINK_CHOICE;
-    U(moreInfo).pwszUrl = winehq;
+    moreInfo.pwszUrl = winehq;
     ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_SP_OPUS_INFO_STRUCT,
      &info, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
     ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
@@ -908,7 +1147,7 @@ static void test_decodeSpOpusInfo(void)
         {
             ok(info->pMoreInfo->dwLinkChoice == SPC_URL_LINK_CHOICE,
              "unexpected link choice %ld\n", info->pMoreInfo->dwLinkChoice);
-            ok(!lstrcmpW(U(*info->pMoreInfo).pwszUrl, winehq),
+            ok(!lstrcmpW(info->pMoreInfo->pwszUrl, winehq),
              "unexpected link value\n");
         }
         ok(!info->pPublisherInfo, "expected NULL\n");
@@ -929,7 +1168,7 @@ static void test_decodeSpOpusInfo(void)
             ok(info->pPublisherInfo->dwLinkChoice == SPC_URL_LINK_CHOICE,
              "unexpected link choice %ld\n",
              info->pPublisherInfo->dwLinkChoice);
-            ok(!lstrcmpW(U(*info->pPublisherInfo).pwszUrl, winehq),
+            ok(!lstrcmpW(info->pPublisherInfo->pwszUrl, winehq),
              "unexpected link value\n");
         }
         LocalFree(info);
@@ -948,6 +1187,8 @@ START_TEST(asn)
     test_decodeSPCLink();
     test_encodeSPCPEImage();
     test_decodeSPCPEImage();
+    test_encodeSPCIndirectDataContent();
+    test_decodeSPCIndirectDataContent();
     test_encodeCatMemberInfo();
     test_decodeCatMemberInfo();
     test_encodeCatNameValue();

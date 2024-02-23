@@ -552,8 +552,8 @@ static const NLS_LOCALE_DATA *get_locale_data( UINT idx )
 
 static const struct calendar *get_calendar_data( const NLS_LOCALE_DATA *locale, UINT id )
 {
-    if (id == CAL_HIJRI) id = locale->islamic_cal[0];
-    else if (id == CAL_PERSIAN) id = locale->islamic_cal[1];
+    if (id == CAL_HIJRI && locale->islamic_cal[0]) id = locale->islamic_cal[0];
+    else if (id == CAL_PERSIAN && locale->islamic_cal[1]) id = locale->islamic_cal[1];
 
     if (!id || id > locale_table->nb_calendars) return NULL;
     return (const struct calendar *)((const char *)locale_table + locale_table->calendars_offset +
@@ -1617,7 +1617,7 @@ static int get_calendar_info( const NLS_LOCALE_DATA *locale, CALID id, CALTYPE t
     }
     else if (len < 0 || value) goto invalid;
 
-    if (id != CAL_GREGORIAN)
+    if (id != CAL_GREGORIAN && type != CAL_ITWODIGITYEARMAX)
     {
         const USHORT *ids = locale_strings + locale->scalendartype;
         for (i = 0; i < ids[0]; i++) if (ids[1 + i] == id) break;
@@ -3915,21 +3915,25 @@ static int find_substring( const struct sortguid *sortid, DWORD flags, const WCH
 
     for (start = 0; start < srclen; start++)
     {
+        pos = start;
         for (len = start + 1; len <= srclen; len++)
         {
-            pos = start;
             while (pos < len && s.primary_pos <= val.key_primary.len)
             {
                 while (pos < len && !s.key_primary.len)
                     pos += append_weights( sortid, flags, src, srclen, pos,
                                            case_mask, except, compr_tables, &s, TRUE );
 
-                if (s.primary_pos + s.key_primary.len > val.key_primary.len) goto next;
-                if (memcmp( primary, val.key_primary.buf + s.primary_pos, s.key_primary.len )) goto next;
+                if (s.primary_pos + s.key_primary.len > val.key_primary.len ||
+                    memcmp( primary, val.key_primary.buf + s.primary_pos, s.key_primary.len ))
+                {
+                    len = srclen + 1;
+                    goto next;
+                }
                 s.primary_pos += s.key_primary.len;
                 s.key_primary.len = 0;
             }
-            if (s.primary_pos < val.key_primary.len) goto next;
+            if (s.primary_pos < val.key_primary.len) continue;
 
             have_extra = remove_unneeded_weights( sortid, &s );
             if (compare_sortkeys( &s.key_diacritic, &val.key_diacritic, FALSE )) goto next;
@@ -3953,6 +3957,7 @@ static int find_substring( const struct sortguid *sortid, DWORD flags, const WCH
             s.key_primary.len = s.key_diacritic.len = s.key_case.len = s.key_special.len = 0;
             s.key_extra[0].len = s.key_extra[1].len = s.key_extra[2].len = s.key_extra[3].len = 0;
             s.primary_pos = 0;
+            pos = start;
         }
         if (flags & FIND_STARTSWITH) break;
         if (flags & FIND_FROMSTART && found != -1) break;
@@ -7247,7 +7252,19 @@ BOOL WINAPI SetUserGeoName(PWSTR geo_name)
 
 static void grouping_to_string( UINT grouping, WCHAR *buffer )
 {
+    UINT last_digit = grouping % 10;
     WCHAR tmp[10], *p = tmp;
+
+    /* The string is confusingly different when it comes to repetitions (trailing zeros). For a string,
+     * a 0 signals that the format needs to be repeated, which is the opposite of the grouping integer. */
+    if (last_digit == 0)
+    {
+        grouping /= 10;
+
+        /* Special case: two or more trailing zeros result in zero-sided groupings, with no repeats */
+        if (grouping % 10 == 0)
+            last_digit = ~0;
+    }
 
     while (grouping)
     {
@@ -7258,6 +7275,17 @@ static void grouping_to_string( UINT grouping, WCHAR *buffer )
     {
         *buffer++ = *(--p);
         if (p > tmp) *buffer++ = ';';
+    }
+    if (last_digit != 0)
+    {
+        *buffer++ = ';';
+        *buffer++ = '0';
+        if (last_digit == ~0)
+        {
+            /* Add another trailing zero due to the weird way trailing zeros work in grouping string */
+            *buffer++ = ';';
+            *buffer++ = '0';
+        }
     }
     *buffer = 0;
 }
@@ -7274,9 +7302,9 @@ static WCHAR *prepend_str( WCHAR *end, const WCHAR *str )
 static WCHAR *format_number( WCHAR *end, const WCHAR *value, const WCHAR *decimal_sep,
                              const WCHAR *thousand_sep, const WCHAR *grouping, UINT digits, BOOL lzero )
 {
+    BOOL round = FALSE, repeat = FALSE;
+    UINT i, len = 0, prev = ~0;
     const WCHAR *frac = NULL;
-    BOOL round = FALSE;
-    UINT i, len = 0;
 
     *(--end) = 0;
 
@@ -7329,9 +7357,43 @@ static WCHAR *format_number( WCHAR *end, const WCHAR *value, const WCHAR *decima
     }
     if (len) lzero = FALSE;
 
+    /* leading 0s are ignored */
+    while (grouping[0] == '0' && grouping[1] == ';')
+        grouping += 2;
+
     while (len)
     {
-        UINT limit = *grouping == '0' ? ~0u : *grouping - '0';
+        UINT limit = prev;
+
+        if (!repeat)
+        {
+            limit = *grouping - '0';
+            if (grouping[1] == ';')
+            {
+                grouping += 2;
+                if (limit)
+                    prev = limit;
+                else
+                {
+                    /* Trailing 0;0 is a special case */
+                    prev = ~0;
+                    if (grouping[0] == '0' && grouping[1] != ';')
+                    {
+                        repeat = TRUE;
+                        limit = prev;
+                    }
+                }
+            }
+            else
+            {
+                repeat = TRUE;
+                if (!limit)
+                    limit = prev;
+                else
+                    prev = ~0;
+            }
+        }
+
         while (len && limit--)
         {
             WCHAR ch = value[--len];
@@ -7347,7 +7409,6 @@ static WCHAR *format_number( WCHAR *end, const WCHAR *value, const WCHAR *decima
             *(--end) = ch;
         }
         if (len) end = prepend_str( end, thousand_sep );
-        if (grouping[1] == ';') grouping += 2;
     }
     if (round) *(--end) = '1';
     else if (lzero) *(--end) = '0';
@@ -7358,7 +7419,7 @@ static WCHAR *format_number( WCHAR *end, const WCHAR *value, const WCHAR *decima
 static int get_number_format( const NLS_LOCALE_DATA *locale, DWORD flags, const WCHAR *value,
                               const NUMBERFMTW *format, WCHAR *buffer, int len )
 {
-    WCHAR *num, fmt_decimal[4], fmt_thousand[4], fmt_neg[5], grouping[20], output[256];
+    WCHAR *num, fmt_decimal[4], fmt_thousand[4], fmt_neg[5], grouping[24], output[256];
     const WCHAR *decimal_sep = fmt_decimal, *thousand_sep = fmt_thousand;
     DWORD digits, lzero, order;
     int ret = 0;
@@ -7712,7 +7773,7 @@ static int get_date_format( const NLS_LOCALE_DATA *locale, DWORD flags, const SY
             val = (count == 3 ? LOCALE_SABBREVMONTHNAME1 : LOCALE_SMONTHNAME1) + time.wMonth - 1;
             if (!genitive)
             {
-                for (i = count; format[i]; i += get_pattern_len( format, L"yMd" ))
+                for (i = count; format[i]; i += get_pattern_len( format + i, L"yMd" ))
                 {
                     if (format[i] != 'd') continue;
                     if (format[i + 1] != 'd' || format[i + 2] != 'd')

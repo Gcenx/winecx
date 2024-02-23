@@ -28,8 +28,6 @@
 #include <string.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -728,7 +726,7 @@ HRESULT WINAPI SHGetRealIDL(LPSHELLFOLDER lpsf, LPCITEMIDLIST pidlSimple, LPITEM
         if (SUCCEEDED(hr))
         {
             /*assert(pida->cidl==1);*/
-            LPIDA pida = GlobalLock(medium.u.hGlobal);
+            LPIDA pida = GlobalLock(medium.hGlobal);
 
             LPCITEMIDLIST pidl_folder = (LPCITEMIDLIST) ((LPBYTE)pida+pida->aoffset[0]);
             LPCITEMIDLIST pidl_child = (LPCITEMIDLIST) ((LPBYTE)pida+pida->aoffset[1]);
@@ -738,8 +736,8 @@ HRESULT WINAPI SHGetRealIDL(LPSHELLFOLDER lpsf, LPCITEMIDLIST pidlSimple, LPITEM
             if (!*pidlReal)
                 hr = E_OUTOFMEMORY;
 
-            GlobalUnlock(medium.u.hGlobal);
-            GlobalFree(medium.u.hGlobal);
+            GlobalUnlock(medium.hGlobal);
+            GlobalFree(medium.hGlobal);
         }
     }
 
@@ -1059,13 +1057,13 @@ LPITEMIDLIST SHSimpleIDListFromPathA(LPCSTR lpszPath)
     if (lpszPath)
     {
         len = MultiByteToWideChar(CP_ACP, 0, lpszPath, -1, NULL, 0);
-        wPath = heap_alloc(len * sizeof(WCHAR));
+        wPath = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, lpszPath, -1, wPath, len);
     }
 
     _ILParsePathW(wPath, NULL, TRUE, &pidl, NULL);
 
-    heap_free(wPath);
+    free(wPath);
     TRACE("%s %p\n", debugstr_a(lpszPath), pidl);
     return pidl;
 }
@@ -1290,42 +1288,56 @@ BOOL WINAPI SHGetPathFromIDListEx(LPCITEMIDLIST pidl, WCHAR *path, DWORD path_si
  */
 HRESULT WINAPI SHBindToParent(LPCITEMIDLIST pidl, REFIID riid, LPVOID *ppv, LPCITEMIDLIST *ppidlLast)
 {
-    IShellFolder    * psfDesktop;
-    HRESULT         hr=E_FAIL;
+    return SHBindToFolderIDListParent(NULL, pidl, riid, ppv, ppidlLast);
+}
 
-    TRACE_(shell)("pidl=%p\n", pidl);
+/*************************************************************************
+ * SHBindToFolderIDListParent             [SHELL32.@]
+ */
+HRESULT WINAPI SHBindToFolderIDListParent(IShellFolder *psf, LPCITEMIDLIST pidl, REFIID riid, LPVOID *ppv, LPCITEMIDLIST *ppidlLast)
+{
+    IShellFolder *psfDesktop = NULL;
+    HRESULT hr;
+
+    TRACE_(shell)("%p,%p,%s\n", psf, pidl, debugstr_guid(riid));
     pdump(pidl);
-    
-    if (!pidl || !ppv)
-        return E_INVALIDARG;
-    
-    *ppv = NULL;
+
     if (ppidlLast)
         *ppidlLast = NULL;
 
-    hr = SHGetDesktopFolder(&psfDesktop);
-    if (FAILED(hr))
-        return hr;
+    if (!pidl || !ppv)
+        return E_INVALIDARG;
+
+    *ppv = NULL;
+
+    if (!psf)
+    {
+        hr = SHGetDesktopFolder(&psfDesktop);
+        if (FAILED(hr))
+            return hr;
+        psf = psfDesktop;
+    }
 
     if (_ILIsPidlSimple(pidl))
     {
         /* we are on desktop level */
-        hr = IShellFolder_QueryInterface(psfDesktop, riid, ppv);
+        hr = IShellFolder_QueryInterface(psf, riid, ppv);
     }
     else
     {
         LPITEMIDLIST pidlParent = ILClone(pidl);
         ILRemoveLastID(pidlParent);
-        hr = IShellFolder_BindToObject(psfDesktop, pidlParent, NULL, riid, ppv);
-        SHFree (pidlParent);
+        hr = IShellFolder_BindToObject(psf, pidlParent, NULL, riid, ppv);
+        ILFree(pidlParent);
     }
 
-    IShellFolder_Release(psfDesktop);
+    if (psfDesktop)
+        IShellFolder_Release(psfDesktop);
 
     if (SUCCEEDED(hr) && ppidlLast)
         *ppidlLast = ILFindLastID(pidl);
 
-    TRACE_(shell)("-- psf=%p pidl=%p ret=0x%08lx\n", *ppv, (ppidlLast)?*ppidlLast:NULL, hr);
+    TRACE_(shell)("-- ppv=%p pidl=%p ret=0x%08lx\n", *ppv, (ppidlLast)?*ppidlLast:NULL, hr);
     return hr;
 }
 

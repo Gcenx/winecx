@@ -25,9 +25,11 @@
 #endif
 
 #include <pthread.h>
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "win32u_private.h"
 #include "ntuser_private.h"
-#include "ddk/imm.h"
+#include "immdev.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(imm);
@@ -277,12 +279,11 @@ BOOL register_imm_window( HWND hwnd )
     /* Create default IME window */
     if (!thread_data->window_cnt++)
     {
-        UNICODE_STRING class_name, name;
         static const WCHAR imeW[] = {'I','M','E',0};
         static const WCHAR default_imeW[] = {'D','e','f','a','u','l','t',' ','I','M','E',0};
+        UNICODE_STRING class_name = RTL_CONSTANT_STRING( imeW );
+        UNICODE_STRING name = RTL_CONSTANT_STRING( default_imeW );
 
-        RtlInitUnicodeString( &class_name, imeW );
-        RtlInitUnicodeString( &name, default_imeW );
         thread_data->default_hwnd = NtUserCreateWindowEx( 0, &class_name, &class_name, &name,
                                                           WS_POPUP | WS_DISABLED | WS_CLIPSIBLINGS,
                                                           0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, FALSE );
@@ -392,6 +393,55 @@ void cleanup_imm_thread(void)
     }
 
     NtUserDestroyInputContext( UlongToHandle( thread_info->client_info.default_imc ));
+}
+
+/*****************************************************************************
+ *           NtUserBuildHimcList (win32u.@)
+ */
+NTSTATUS WINAPI NtUserBuildHimcList( UINT thread_id, UINT count, HIMC *buffer, UINT *size )
+{
+    HANDLE handle = 0;
+    struct imc *imc;
+
+    TRACE( "thread_id %#x, count %u, buffer %p, size %p\n", thread_id, count, buffer, size );
+
+    if (!buffer) return STATUS_UNSUCCESSFUL;
+    if (!thread_id) thread_id = GetCurrentThreadId();
+
+    *size = 0;
+    user_lock();
+    while (count && (imc = next_process_user_handle_ptr( &handle, NTUSER_OBJ_IMC )))
+    {
+        if (thread_id != -1 && imc->thread_id != thread_id) continue;
+        buffer[(*size)++] = handle;
+        count--;
+    }
+    user_unlock();
+
+    return STATUS_SUCCESS;
+}
+
+LRESULT ime_driver_call( HWND hwnd, enum wine_ime_call call, WPARAM wparam, LPARAM lparam,
+                         struct ime_driver_call_params *params )
+{
+    switch (call)
+    {
+    case WINE_IME_PROCESS_KEY:
+        return user_driver->pImeProcessKey( params->himc, wparam, lparam, params->state );
+    case WINE_IME_TO_ASCII_EX:
+        return user_driver->pImeToAsciiEx( wparam, lparam, params->state, params->compstr, params->himc );
+    default:
+        ERR( "Unknown IME driver call %#x\n", call );
+        return 0;
+    }
+}
+
+/*****************************************************************************
+ *           NtUserNotifyIMEStatus (win32u.@)
+ */
+void WINAPI NtUserNotifyIMEStatus( HWND hwnd, UINT status )
+{
+    user_driver->pNotifyIMEStatus( hwnd, status );
 }
 
 BOOL WINAPI ImmProcessKey( HWND hwnd, HKL hkl, UINT vkey, LPARAM key_data, DWORD unknown )

@@ -61,7 +61,7 @@ static void Range_Destructor(Range *This)
 {
     TRACE("destroying %p\n", This);
     ITfContext_Release(This->context);
-    HeapFree(GetProcessHeap(),0,This);
+    free(This);
 }
 
 static HRESULT WINAPI Range_QueryInterface(ITfRangeACP *iface, REFIID iid, LPVOID *ppvOut)
@@ -329,7 +329,7 @@ HRESULT Range_Constructor(ITfContext *context, DWORD anchorStart, DWORD anchorEn
 {
     Range *This;
 
-    This = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(Range));
+    This = calloc(1, sizeof(Range));
     if (This == NULL)
         return E_OUTOFMEMORY;
 
@@ -362,7 +362,7 @@ HRESULT TF_SELECTION_to_TS_SELECTION_ACP(const TF_SELECTION *tf, TS_SELECTION_AC
 
     tsAcp->acpStart = This->anchorStart;
     tsAcp->acpEnd = This->anchorEnd;
-    tsAcp->style.ase = tf->style.ase;
+    tsAcp->style.ase = (TsActiveSelEnd)tf->style.ase;
     tsAcp->style.fInterimChar = tf->style.fInterimChar;
     return S_OK;
 }

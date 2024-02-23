@@ -239,7 +239,7 @@ static HRESULT Number_toString(script_ctx_t *ctx, jsval_t vthis, WORD flags, uns
     if(FAILED(hres))
         return hres;
 
-    if(argc) {
+    if(argc && (ctx->version < SCRIPTLANGUAGEVERSION_ES5 || !is_undefined(argv[0]))) {
         hres = to_int32(ctx, argv[0], &radix);
         if(FAILED(hres))
             return hres;
@@ -525,7 +525,7 @@ static HRESULT Number_toPrecision(script_ctx_t *ctx, jsval_t vthis, WORD flags, 
     if(FAILED(hres))
         return hres;
 
-    if(argc) {
+    if(argc && (ctx->version < 2 || !is_undefined(argv[0]))) {
         hres = to_int32(ctx, argv[0], &prec);
         if(FAILED(hres))
             return hres;

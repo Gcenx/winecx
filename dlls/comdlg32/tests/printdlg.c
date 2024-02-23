@@ -59,7 +59,7 @@ static void test_PageSetupDlgA(void)
     LPPAGESETUPDLGA pDlg;
     DWORD res;
 
-    pDlg = HeapAlloc(GetProcessHeap(), 0, (sizeof(PAGESETUPDLGA)) * 2);
+    pDlg = malloc((sizeof(PAGESETUPDLGA)) * 2);
     if (!pDlg) return;
 
     SetLastError(0xdeadbeef);
@@ -97,7 +97,7 @@ static void test_PageSetupDlgA(void)
 
     if (!res && (CommDlgExtendedError() == PDERR_NODEFAULTPRN)) {
         skip("No printer configured.\n");
-        HeapFree(GetProcessHeap(), 0, pDlg);
+        free(pDlg);
         return;
     }
 
@@ -108,8 +108,7 @@ static void test_PageSetupDlgA(void)
     GlobalFree(pDlg->hDevMode);
     GlobalFree(pDlg->hDevNames);
 
-    HeapFree(GetProcessHeap(), 0, pDlg);
-
+    free(pDlg);
 }
 
 /* ########################### */
@@ -138,7 +137,7 @@ static void test_PrintDlgA(void)
     LPSTR  ptr;
     DEVMODEA *dm;
 
-    pDlg = HeapAlloc(GetProcessHeap(), 0, (sizeof(PRINTDLGA)) * 2);
+    pDlg = malloc((sizeof(PRINTDLGA)) * 2);
     if (!pDlg) return;
 
 
@@ -178,7 +177,7 @@ static void test_PrintDlgA(void)
 
     if (!res && (CommDlgExtendedError() == PDERR_NODEFAULTPRN)) {
         skip("No printer configured.\n");
-        HeapFree(GetProcessHeap(), 0, pDlg);
+        free(pDlg);
         return;
     }
 
@@ -248,8 +247,8 @@ static void test_PrintDlgA(void)
         ok(pDlg->hDevMode != 0, "hDevMode should not be 0\n");
         dm = GlobalLock(pDlg->hDevMode);
         /* some broken drivers use always PD_USEDEVMODECOPIES */
-        ok((S1(U1(*dm)).dmCopies == 1) || broken(S1(U1(*dm)).dmCopies == 123),
-            "expected dm->dmCopies 1, got %d\n", S1(U1(*dm)).dmCopies);
+        ok((dm->dmCopies == 1) || broken(dm->dmCopies == 123),
+            "expected dm->dmCopies 1, got %d\n", dm->dmCopies);
         GlobalUnlock(pDlg->hDevMode);
         GlobalFree(pDlg->hDevMode);
         GlobalFree(pDlg->hDevNames);
@@ -263,13 +262,13 @@ static void test_PrintDlgA(void)
         ok(pDlg->nCopies == 1, "expected nCopies 1, got %d\n", pDlg->nCopies);
         ok(pDlg->hDevMode != 0, "hDevMode should not be 0\n");
         dm = GlobalLock(pDlg->hDevMode);
-        ok(S1(U1(*dm)).dmCopies == 123, "expected dm->dmCopies 123, got %d\n", S1(U1(*dm)).dmCopies);
+        ok(dm->dmCopies == 123, "expected dm->dmCopies 123, got %d\n", dm->dmCopies);
         GlobalUnlock(pDlg->hDevMode);
         GlobalFree(pDlg->hDevMode);
         GlobalFree(pDlg->hDevNames);
     }
 
-    HeapFree(GetProcessHeap(), 0, pDlg);
+    free(pDlg);
 }
 
 /* ########################### */
@@ -390,7 +389,7 @@ static void test_PrintDlgExW(void)
             res, GetLastError(), CommDlgExtendedError() );
     }
 
-    pDlg = HeapAlloc(GetProcessHeap(), 0, (sizeof(PRINTDLGEXW)) + 8);
+    pDlg = malloc(sizeof(PRINTDLGEXW) + 8);
     if (!pDlg) return;
 
     /* lStructSize must be exact */
@@ -471,7 +470,7 @@ static void test_PrintDlgExW(void)
     if (res == E_FAIL)
     {
         skip("No printer configured.\n");
-        HeapFree(GetProcessHeap(), 0, pDlg);
+        free(pDlg);
         return;
     }
 
@@ -533,7 +532,7 @@ static void test_PrintDlgExW(void)
     if (!winetest_interactive)
     {
         skip("interactive PrintDlgEx tests (set WINETEST_INTERACTIVE=1)\n");
-        HeapFree(GetProcessHeap(), 0, pDlg);
+        free(pDlg);
         return;
     }
 
@@ -552,7 +551,7 @@ static void test_PrintDlgExW(void)
     GlobalFree(pDlg->hDevNames);
     DeleteDC(pDlg->hDC);
 
-    HeapFree(GetProcessHeap(), 0, pDlg);
+    free(pDlg);
 }
 
 static BOOL abort_proc_called = FALSE;

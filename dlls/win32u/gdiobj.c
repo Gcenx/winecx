@@ -1027,7 +1027,6 @@ BOOL WINAPI NtGdiSetColorAdjustment( HDC hdc, const COLORADJUSTMENT *ca )
     return FALSE;
 }
 
-
 void gdi_init(void)
 {
     pthread_mutexattr_t attr;

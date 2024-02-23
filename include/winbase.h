@@ -46,6 +46,7 @@ extern "C" {
 #include <synchapi.h>
 #include <threadpoolapiset.h>
 #include <memoryapi.h>
+#include <realtimeapiset.h>
 
   /* Windows Exit Procedure flag values */
 #define	WEP_FREE_DLL        0
@@ -251,13 +252,8 @@ typedef struct _SECURITY_ATTRIBUTES
 /* 64 bit number of 100 nanoseconds intervals since January 1, 1601 */
 typedef struct _FILETIME
 {
-#ifdef WORDS_BIGENDIAN
-  DWORD  dwHighDateTime;
-  DWORD  dwLowDateTime;
-#else
   DWORD  dwLowDateTime;
   DWORD  dwHighDateTime;
-#endif
 } FILETIME, *PFILETIME, *LPFILETIME;
 #endif /* _FILETIME_ */
 
@@ -555,22 +551,12 @@ typedef struct _SYSTEMTIME{
 /* The 'overlapped' data structure used by async I/O functions.
  */
 typedef struct _OVERLAPPED {
-#ifdef WORDS_BIGENDIAN
-        ULONG_PTR InternalHigh;
-        ULONG_PTR Internal;
-#else
         ULONG_PTR Internal;
         ULONG_PTR InternalHigh;
-#endif
         union {
             struct {
-#ifdef WORDS_BIGENDIAN
-                DWORD OffsetHigh;
-                DWORD Offset;
-#else
                 DWORD Offset;
                 DWORD OffsetHigh;
-#endif
             } DUMMYSTRUCTNAME;
             PVOID Pointer;
         } DUMMYUNIONNAME;
@@ -875,7 +861,10 @@ typedef struct _FILE_END_OF_FILE_INFO {
 } FILE_END_OF_FILE_INFO, *PFILE_END_OF_FILE_INFO;
 
 typedef struct _FILE_RENAME_INFO {
-    BOOLEAN ReplaceIfExists;
+    union {
+        BOOLEAN ReplaceIfExists;
+        DWORD Flags;
+    } DUMMYUNIONNAME;
     HANDLE RootDirectory;
     DWORD FileNameLength;
     WCHAR FileName[1];
@@ -1706,6 +1695,11 @@ typedef enum _PROC_THREAD_ATTRIBUTE_NUM
     ProcThreadAttributeSafeOpenPromptOriginClaim = 17,
     ProcThreadAttributeDesktopAppPolicy = 18,
     ProcThreadAttributePseudoConsole = 22,
+    ProcThreadAttributeMitigationAuditPolicy = 24,
+    ProcThreadAttributeMachineType = 25,
+    ProcThreadAttributeComponentFilter = 26,
+    ProcThreadAttributeEnableOptionalXStateFeatures = 27,
+    ProcThreadAttributeTrustedApp = 29,
 } PROC_THREAD_ATTRIBUTE_NUM;
 
 #define PROC_THREAD_ATTRIBUTE_PARENT_PROCESS (ProcThreadAttributeParentProcess | PROC_THREAD_ATTRIBUTE_INPUT)
@@ -1723,6 +1717,10 @@ typedef enum _PROC_THREAD_ATTRIBUTE_NUM
 #define PROC_THREAD_ATTRIBUTE_WIN32K_FILTER (ProcThreadAttributeWin32kFilter | PROC_THREAD_ATTRIBUTE_INPUT)
 #define PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY (ProcThreadAttributeDesktopAppPolicy | PROC_THREAD_ATTRIBUTE_INPUT)
 #define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE (ProcThreadAttributePseudoConsole | PROC_THREAD_ATTRIBUTE_INPUT)
+#define PROC_THREAD_ATTRIBUTE_MITIGATION_AUDIT_POLICY (ProcThreadAttributeMitigationAuditPolicy | PROC_THREAD_ATTRIBUTE_INPUT)
+#define PROC_THREAD_ATTRIBUTE_MACHINE_TYPE (ProcThreadAttributeMachineType | PROC_THREAD_ATTRIBUTE_INPUT)
+#define PROC_THREAD_ATTRIBUTE_COMPONENT_FILTER (ProcThreadAttributeComponentFilter | PROC_THREAD_ATTRIBUTE_INPUT)
+#define PROC_THREAD_ATTRIBUTE_ENABLE_OPTIONAL_XSTATE_FEATURES (ProcThreadAttributeEnableOptionalXStateFeatures | PROC_THREAD_ATTRIBUTE_THREAD | PROC_THREAD_ATTRIBUTE_INPUT)
 
 #define SYMBOLIC_LINK_FLAG_DIRECTORY (0x1)
 #define VALID_SYMBOLIC_LINK_FLAGS SYMBOLIC_LINK_FLAG_DIRECTORY
@@ -1772,6 +1770,20 @@ typedef struct _WIN32_MEMORY_RANGE_ENTRY
     PVOID  VirtualAddress;
     SIZE_T NumberOfBytes;
 } WIN32_MEMORY_RANGE_ENTRY, *PWIN32_MEMORY_RANGE_ENTRY;
+
+typedef enum _MACHINE_ATTRIBUTES
+{
+    UserEnabled    = 0x00000001,
+    KernelEnabled  = 0x00000002,
+    Wow64Container = 0x00000004,
+} MACHINE_ATTRIBUTES;
+
+typedef struct _PROCESS_MACHINE_INFORMATION
+{
+    USHORT ProcessMachine;
+    USHORT Res0;
+    MACHINE_ATTRIBUTES MachineAttributes;
+} PROCESS_MACHINE_INFORMATION;
 
 typedef enum _PROCESS_INFORMATION_CLASS
 {
@@ -2106,9 +2118,11 @@ WINBASEAPI BOOL        WINAPI FlushFileBuffers(HANDLE);
 WINBASEAPI BOOL        WINAPI FlushInstructionCache(HANDLE,LPCVOID,SIZE_T);
 WINBASEAPI VOID        WINAPI FlushProcessWriteBuffers(void);
 WINBASEAPI BOOL        WINAPI FlushViewOfFile(LPCVOID,SIZE_T);
+#ifdef __ms_va_list
 WINBASEAPI DWORD       WINAPI FormatMessageA(DWORD,LPCVOID,DWORD,DWORD,LPSTR,DWORD,__ms_va_list*);
 WINBASEAPI DWORD       WINAPI FormatMessageW(DWORD,LPCVOID,DWORD,DWORD,LPWSTR,DWORD,__ms_va_list*);
 #define                       FormatMessage WINELIB_NAME_AW(FormatMessage)
+#endif
 WINBASEAPI BOOL        WINAPI FreeEnvironmentStringsA(LPSTR);
 WINBASEAPI BOOL        WINAPI FreeEnvironmentStringsW(LPWSTR);
 #define                       FreeEnvironmentStrings WINELIB_NAME_AW(FreeEnvironmentStrings)
@@ -2202,6 +2216,7 @@ WINBASEAPI DWORD       WINAPI GetFileSize(HANDLE,LPDWORD);
 WINBASEAPI BOOL        WINAPI GetFileSizeEx(HANDLE,PLARGE_INTEGER);
 WINBASEAPI BOOL        WINAPI GetFileTime(HANDLE,LPFILETIME,LPFILETIME,LPFILETIME);
 WINBASEAPI DWORD       WINAPI GetFileType(HANDLE);
+WINBASEAPI BOOL        WINAPI GetFirmwareType(PFIRMWARE_TYPE);
 #define                       GetFreeSpace(w) (__MSABI_LONG(0x100000))
 WINBASEAPI DWORD       WINAPI GetFullPathNameA(LPCSTR,DWORD,LPSTR,LPSTR*);
 WINBASEAPI DWORD       WINAPI GetFullPathNameW(LPCWSTR,DWORD,LPWSTR,LPWSTR*);
@@ -2273,6 +2288,7 @@ WINBASEAPI BOOL        WINAPI GetLogicalProcessorInformationEx(LOGICAL_PROCESSOR
 WINBASEAPI DWORD       WINAPI GetProcessHeaps(DWORD,PHANDLE);
 WINBASEAPI DWORD       WINAPI GetProcessId(HANDLE);
 WINBASEAPI DWORD       WINAPI GetProcessIdOfThread(HANDLE);
+WINBASEAPI BOOL        WINAPI GetProcessInformation(HANDLE,PROCESS_INFORMATION_CLASS,void*,DWORD);
 WINBASEAPI BOOL        WINAPI GetProcessIoCounters(HANDLE,PIO_COUNTERS);
 WINBASEAPI BOOL        WINAPI GetProcessPriorityBoost(HANDLE,PBOOL);
 WINBASEAPI BOOL        WINAPI GetProcessShutdownParameters(LPDWORD,LPDWORD);
@@ -2605,7 +2621,6 @@ WINBASEAPI BOOL        WINAPI QueryInformationJobObject(HANDLE,JOBOBJECTINFOCLAS
 WINBASEAPI BOOL        WINAPI QueryMemoryResourceNotification(HANDLE,PBOOL);
 WINBASEAPI BOOL        WINAPI QueryPerformanceCounter(LARGE_INTEGER*);
 WINBASEAPI BOOL        WINAPI QueryPerformanceFrequency(LARGE_INTEGER*);
-WINBASEAPI BOOL        WINAPI QueryThreadCycleTime(HANDLE,PULONG64);
 WINBASEAPI BOOL        WINAPI QueryUmsThreadInformation(PUMS_CONTEXT,UMS_THREAD_INFO_CLASS,PVOID,ULONG,PULONG);
 WINBASEAPI DWORD       WINAPI QueueUserAPC(PAPCFUNC,HANDLE,ULONG_PTR);
 WINBASEAPI BOOL        WINAPI QueueUserWorkItem(LPTHREAD_START_ROUTINE,PVOID,ULONG);
@@ -2805,6 +2820,7 @@ WINBASEAPI BOOL        WINAPI VirtualUnlock(LPVOID,SIZE_T);
 WINBASEAPI DWORD       WINAPI WTSGetActiveConsoleSessionId(void);
 WINBASEAPI BOOL        WINAPI WaitCommEvent(HANDLE,LPDWORD,LPOVERLAPPED);
 WINBASEAPI BOOL        WINAPI WaitForDebugEvent(LPDEBUG_EVENT,DWORD);
+WINBASEAPI BOOL        WINAPI WaitForDebugEventEx(LPDEBUG_EVENT,DWORD);
 WINBASEAPI DWORD       WINAPI WaitForMultipleObjects(DWORD,const HANDLE*,BOOL,DWORD);
 WINBASEAPI DWORD       WINAPI WaitForMultipleObjectsEx(DWORD,const HANDLE*,BOOL,DWORD,BOOL);
 WINBASEAPI DWORD       WINAPI WaitForSingleObject(HANDLE,DWORD);
@@ -3047,7 +3063,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int);
 
 #ifdef __WINESRC__
 /* shouldn't be here, but is nice for type checking */
-BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved ) DECLSPEC_HIDDEN;
+BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved );
 #endif
 
 #ifdef __cplusplus

@@ -36,6 +36,13 @@ coclass AviSplitter {}
 coclass CMpegAudioCodec {}
 
 [
+    helpstring("MPEG Video Decoder"),
+    threading(both),
+    uuid(feb50740-7bef-11ce-9bd9-0000e202599c)
+]
+coclass CMpegVideoCodec {}
+
+[
     helpstring("MPEG Layer-3 Decoder"),
     threading(both),
     uuid(38be3000-dbf4-11d0-860e-00a024cfef6d)
@@ -111,3 +118,16 @@ coclass CResamplerMediaObject {}
     uuid(98230571-0087-4204-b020-3282538e57d3)
 ]
 coclass CColorConvertDMO {}
+
+[
+    threading(both),
+    uuid(11275a82-5e5a-47fd-a01c-3683c12fb196)
+]
+coclass MFMP3SinkClassFactory {}
+
+[
+    helpstring("MF MPEG4 Sink Class Factory"),
+    threading(both),
+    uuid(a22c4fc7-6e91-4e1d-89e9-53b2667b72ba)
+]
+coclass MFMPEG4SinkClassFactory {}

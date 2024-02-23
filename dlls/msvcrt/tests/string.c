@@ -264,6 +264,7 @@ static void test_mbcp(void)
     unsigned char *mbstring2 = (unsigned char *)"\xb0\xb1\xb2\xb3Q\xb4\xb5"; /* correct string */
     unsigned char *mbsonlylead = (unsigned char *)"\xb0\0\xb1\xb2 \xb3";
     unsigned char buf[16];
+    unsigned char *ret;
     int step;
     CPINFO cp_info;
 
@@ -335,6 +336,7 @@ static void test_mbcp(void)
     expect_eq(_ismbstrail(mbsonlylead, &mbsonlylead[5]), FALSE, int, "%d");
 
     /* _mbsbtype */
+    expect_eq(_mbsbtype(NULL, 0), _MBC_ILLEGAL, int, "%d");
     expect_eq(_mbsbtype(mbstring, 0), _MBC_LEAD, int, "%d");
     expect_eq(_mbsbtype(mbstring, 1), _MBC_TRAIL, int, "%d");
     expect_eq(_mbsbtype(mbstring, 2), _MBC_LEAD, int, "%d");
@@ -460,6 +462,53 @@ static void test_mbcp(void)
         ok(copied == 1, "copied = %d\n", copied);
         expect_bin(buf, "\x00\xff", 2);
     }
+
+    errno = 0xdeadbeef;
+    ret = _mbsncpy(NULL, mbstring, 1);
+    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
+    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
+
+    memset(buf, 0xff, sizeof(buf));
+    errno = 0xdeadbeef;
+    ret = _mbsncpy(buf, NULL, 1);
+    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
+    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
+    expect_bin(buf, "\xff\xff\xff", 3);
+
+    errno = 0xdeadbeef;
+    ret = _mbsncpy(NULL, mbstring, 0);
+    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
+    ok(errno == 0xdeadbeef, "_mbsncpy should not change errno\n");
+
+    memset(buf, 0xff, sizeof(buf));
+    errno = 0xdeadbeef;
+    ret = _mbsncpy(buf, NULL, 0);
+    ok(ret == buf, "_mbsncpy returned %p, expected %sp\n", ret, buf);
+    ok(errno == 0xdeadbeef, "_mbsncpy should not change errno\n");
+
+    memset(buf, 0xff, sizeof(buf));
+    errno = 0xdeadbeef;
+    ret = _mbsncpy(NULL, mbstring, 1);
+    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
+    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
+
+    memset(buf, 0xff, sizeof(buf));
+    errno = 0xdeadbeef;
+    ret = _mbsncpy(buf, NULL, 1);
+    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
+    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
+
+    memset(buf, 0xff, sizeof(buf));
+    ret = _mbsncpy(NULL, mbstring, 0);
+    ok(ret == NULL, "_mbsncpy returned %p, expected %p\n", ret, buf);
+
+    memset(buf, 0xff, sizeof(buf));
+    ret = _mbsncpy(buf, NULL, 0);
+    ok(ret == buf, "_mbsncpy returned %p, expected %sp\n", ret, buf);
+
+    memset(buf, 0xff, sizeof(buf));
+    ret = _mbsncpy(buf, mbstring, 0);
+    ok(ret == buf, "_mbsncpy returned %p, expected %p\n", ret, buf);
 
     memset(buf, 0xff, sizeof(buf));
     _mbsncpy(buf, mbstring, 1);
@@ -642,10 +691,20 @@ static void test_mbsspnp( void)
 
 static void test_strdup(void)
 {
-   char *str;
-   str = _strdup( 0 );
-   ok( str == 0, "strdup returns %s should be 0\n", str);
-   free( str );
+    char *str;
+    errno = 0xdeadbeef;
+    str = strdup(0);
+    ok(str == 0, "strdup returned %s, expected NULL\n", wine_dbgstr_a(str));
+    ok(errno == 0xdeadbeef, "errno is %d, expected 0xdeadbeef\n", errno);
+}
+
+static void test_wcsdup(void)
+{
+    WCHAR *str;
+    errno = 0xdeadbeef;
+    str = wcsdup(0);
+    ok(str == 0, "wcsdup returned %s, expected NULL\n", wine_dbgstr_w(str));
+    ok(errno == 0xdeadbeef, "errno is %d, expected 0xdeadbeef\n", errno);
 }
 
 static void test_strcmp(void)
@@ -4612,6 +4671,27 @@ static void test_wcsncpy(void)
             wine_dbgstr_wn(dst, ARRAY_SIZE(dst)));
 }
 
+static void test_mbsrev(void)
+{
+    unsigned char buf[64], *ret;
+    int cp = _getmbcp();
+
+    _setmbcp(932);
+
+    strcpy((char *)buf, "\x36\x8c\x8e");
+    ret = _mbsrev(buf);
+    ok(ret == buf, "ret = %p, expected %p\n", ret, buf);
+    ok(!memcmp(buf, "\x8c\x8e\x36", 4), "buf = %s\n", wine_dbgstr_a((char *)buf));
+
+    /* test string that ends with leading byte */
+    strcpy((char *)buf, "\x36\x8c");
+    ret = _mbsrev(buf);
+    ok(ret == buf, "ret = %p, expected %p\n", ret, buf);
+    ok(!memcmp(buf, "\x36", 2), "buf = %s\n", wine_dbgstr_a((char *)buf));
+
+    _setmbcp(cp);
+}
+
 START_TEST(string)
 {
     char mem[100];
@@ -4704,6 +4784,7 @@ START_TEST(string)
     test_mbsspn();
     test_mbsspnp();
     test_strdup();
+    test_wcsdup();
     test_strcmp();
     test_strcpy_s();
     test_memcpy_s();
@@ -4771,4 +4852,5 @@ START_TEST(string)
     test_SpecialCasing();
     test__mbbtype();
     test_wcsncpy();
+    test_mbsrev();
 }

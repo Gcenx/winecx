@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "ntgdi.h"
+#include "ddk/d3dkmthk.h"
 #include "wow64win_private.h"
 
 typedef struct
@@ -141,7 +142,7 @@ NTSTATUS WINAPI wow64_NtGdiAlphaBlend( UINT *args )
     int y_src = get_ulong( &args );
     int width_src = get_ulong( &args );
     int height_src = get_ulong( &args );
-    BLENDFUNCTION blend_function = *(*(BLENDFUNCTION **)&args)++;
+    DWORD blend_function = get_ulong( &args );
     HANDLE xform = get_handle( &args );
 
     return NtGdiAlphaBlend( hdc_dst, x_dst, y_dst, width_dst, height_dst, hdc_src,
@@ -154,8 +155,8 @@ NTSTATUS WINAPI wow64_NtGdiAngleArc( UINT *args )
     INT x = get_ulong( &args );
     INT y = get_ulong( &args );
     DWORD radius = get_ulong( &args );
-    FLOAT start_angle = get_float( &args );
-    FLOAT sweep_angle = get_float( &args );
+    DWORD start_angle = get_ulong( &args );
+    DWORD sweep_angle = get_ulong( &args );
 
     return NtGdiAngleArc( hdc, x, y, radius, start_angle, sweep_angle );
 }
@@ -195,7 +196,7 @@ NTSTATUS WINAPI wow64_NtGdiBitBlt( UINT *args )
     INT y_src = get_ulong( &args );
     DWORD rop = get_ulong( &args );
     DWORD bk_color = get_ulong( &args );
-    FLONG fl = get_float( &args );
+    FLONG fl = get_ulong( &args );
 
     return NtGdiBitBlt( hdc_dst, x_dst, y_dst, width, height, hdc_src,
                         x_src, y_src, rop, bk_color, fl );
@@ -583,6 +584,27 @@ NTSTATUS WINAPI wow64_NtGdiDdDDIOpenAdapterFromLuid( UINT *args )
     D3DKMT_OPENADAPTERFROMLUID *desc = get_ptr( &args );
 
     return NtGdiDdDDIOpenAdapterFromLuid( desc );
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDIQueryAdapterInfo( UINT *args )
+{
+    struct _D3DKMT_QUERYADAPTERINFO
+    {
+        D3DKMT_HANDLE           hAdapter;
+        KMTQUERYADAPTERINFOTYPE Type;
+        ULONG                   pPrivateDriverData;
+        UINT                    PrivateDriverDataSize;
+    } *desc32 = get_ptr( &args );
+    D3DKMT_QUERYADAPTERINFO desc;
+
+    if (!desc32) return STATUS_INVALID_PARAMETER;
+
+    desc.hAdapter = desc32->hAdapter;
+    desc.Type = desc32->Type;
+    desc.pPrivateDriverData = UlongToPtr( desc32->pPrivateDriverData );
+    desc.PrivateDriverDataSize = desc32->PrivateDriverDataSize;
+
+    return NtGdiDdDDIQueryAdapterInfo( &desc );
 }
 
 NTSTATUS WINAPI wow64_NtGdiDdDDIQueryStatistics( UINT *args )
@@ -1136,7 +1158,7 @@ NTSTATUS WINAPI wow64_NtGdiGetFontFileData( UINT *args )
     DWORD file_index = get_ulong( &args );
     UINT64 *offset = get_ptr( &args );
     void *buff = get_ptr( &args );
-    DWORD buff_size = get_ulong( &args );
+    SIZE_T buff_size = get_ulong( &args );
 
     return NtGdiGetFontFileData( instance_id, file_index, offset, buff, buff_size );
 }
@@ -1375,6 +1397,20 @@ NTSTATUS WINAPI wow64_NtGdiGradientFill( UINT *args )
     ULONG mode = get_ulong( &args );
 
     return NtGdiGradientFill( hdc, vert_array, nvert, grad_array, ngrad, mode );
+}
+
+NTSTATUS WINAPI wow64_NtGdiIcmBrushInfo( UINT *args )
+{
+    HDC hdc = get_handle( &args );
+    HBRUSH handle = get_handle( &args );
+    BITMAPINFO *info = get_ptr( &args );
+    void *bits = get_ptr( &args );
+    ULONG *bits_size = get_ptr( &args );
+    UINT *usage = get_ptr( &args );
+    BOOL *unk = get_ptr( &args );
+    UINT mode = get_ulong( &args );
+
+    return NtGdiIcmBrushInfo( hdc, handle, info, bits, bits_size, usage, unk, mode );
 }
 
 NTSTATUS WINAPI wow64_NtGdiInvertRgn( UINT *args )
@@ -2068,19 +2104,6 @@ NTSTATUS WINAPI wow64_NtGdiWidenPath( UINT *args )
     return NtGdiWidenPath( hdc );
 }
 
-NTSTATUS WINAPI wow64_NtGdiSetDIBits( UINT *args )
-{
-    HDC hdc = get_handle( &args );
-    HBITMAP hbitmap = get_handle( &args );
-    UINT startscan = get_ulong( &args );
-    UINT lines = get_ulong( &args );
-    const void *bits = get_ptr( &args );
-    const BITMAPINFO *info = get_ptr( &args );
-    UINT coloruse = get_ulong( &args );
-
-    return NtGdiSetDIBits( hdc, hbitmap, startscan, lines, bits, info, coloruse );
-}
-
 NTSTATUS WINAPI wow64___wine_get_icm_profile( UINT *args )
 {
     HDC hdc = get_handle( &args );
@@ -2089,16 +2112,6 @@ NTSTATUS WINAPI wow64___wine_get_icm_profile( UINT *args )
     WCHAR *filename = get_ptr( &args );
 
     return __wine_get_icm_profile( hdc, allow_default, size, filename );
-}
-
-NTSTATUS WINAPI wow64___wine_get_brush_bitmap_info( UINT *args )
-{
-    HBRUSH handle = get_handle( &args );
-    BITMAPINFO *info = get_ptr( &args );
-    void *bits = get_ptr( &args );
-    UINT *usage = get_ptr( &args );
-
-    return __wine_get_brush_bitmap_info( handle, info, bits, usage );
 }
 
 NTSTATUS WINAPI wow64___wine_get_file_outline_text_metric( UINT *args )

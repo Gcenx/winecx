@@ -176,6 +176,15 @@ del foo
 echo foo> foo
 echo foo7 7>> foo || (echo not supported & del foo)
 if exist foo (type foo) else echo not supported
+echo --- redirect at beginning of line
+>foo (echo foo)
+type foo
+1>foo (echo foo1)
+type foo
+2>foo (echo foo2 >&2)
+type foo
+>>foo (echo fooA)
+type foo
 echo --- redirections within IF statements
 if 1==1 echo foo1>bar
 type bar & del bar
@@ -1138,9 +1147,9 @@ if exist subdir (
    echo ERROR exist subdir not working
 )
 if exist subdir\. (
-   echo exist subdir with . ok
+   echo exist subdir with \. ok
 ) else (
-   echo ERROR exist subdir with . not working
+   echo ERROR exist subdir with \. not working
 )
 if exist subdir\ (
    echo exist subdir with \ ok
@@ -1151,6 +1160,26 @@ if exist "subdir\" (
    echo exist subdir with \ and quotes ok
 ) else (
    echo ERROR exist subdir with \ and quotes not working
+)
+if exist subdir/. (
+   echo exist subdir with /. ok
+) else (
+   echo ERROR exist subdir with /. not working
+)
+if exist subdir/ (
+   echo exist subdir with / ok
+) else (
+   echo ERROR exist subdir with / not working
+)
+if exist "subdir/" (
+   echo exist subdir with / and quotes ok
+) else (
+   echo ERROR exist subdir with / and quotes not working
+)
+if not exist "" (
+    echo exist empty string works
+) else (
+    echo exist empty string broken
 )
 del foo subdir\bar
 rd subdir
@@ -1247,9 +1276,32 @@ if ""=="" for %%i in (A) DO (echo %%i)
 if not ""=="" for %%i in (B) DO (echo %%i)
 
 echo ------------ Testing if/set ------------
+rem a left parenthesis is part of the value, not the start of an 'if' block
 set x=C:\Program Files (x86)
 if ""=="" set y=%x%\dummy
 echo %y%
+if 1 == 1 set z= (
+echo '%z%'
+rem 'set' in one-line 'if' statement does not interfere with other 'if' blocks
+setlocal enableDelayedExpansion
+if 1 == 1 (
+    if 1 == 1 set z=zeta
+    if 1 == 1 (
+         echo !z!
+    )
+)
+endlocal
+
+echo --- Testing if + var subst in delayed expansion mode
+setlocal enableDelayedExpansion
+for %%i in (abc 10.0 11.0) do (
+    set result=%%i
+    echo [DEBUG] checking {!result!}
+    if "!result:~0,3!"=="10." (
+        echo SDKVER=!result!
+    )
+)
+endlocal
 
 echo ------------ Testing for ------------
 echo --- plain FOR
@@ -3294,6 +3346,29 @@ path try2
 path
 path=try3
 path
+
+echo ------------ Testing PATH Evaluate ------------
+mkdir folder
+echo echo I'm here! > folder\sub1.bat
+
+echo Test normal PATH usage
+set path=%cd%\folder
+call sub1.bat
+
+echo Test PATH usage with leading semicolon
+set path=;%cd%\folder
+call sub1.bat
+
+echo Test PATH usage with fallback path
+set path=%cd%;%cd%\folder
+call sub1.bat
+
+echo Test PATH usage with double semicolon
+set path=%cd%;;%cd%\folder
+call sub1.bat
+
+del folder\sub1.bat
+rmdir folder
 set path=%WINE_backup_path%
 set WINE_backup_path=
 

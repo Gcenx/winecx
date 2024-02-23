@@ -26,12 +26,8 @@
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
-#include <signal.h>
 #include <limits.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_SYSCTL_H
-# include <sys/sysctl.h>
-#endif
 
 #include "../tools.h"
 #include "wrc.h"
@@ -133,9 +129,9 @@ int check_utf8 = 1;  /* whether to check for valid utf8 */
 
 static char *output_name;	/* The name given by the -o option */
 const char *input_name = NULL;	/* The name given on the command-line */
-static char *temp_name = NULL;	/* Temporary file for preprocess pipe */
 static struct strarray input_files;
 const char *temp_dir = NULL;
+struct strarray temp_files = { 0 };
 
 static int stdinc = 1;
 static int po_mode;
@@ -236,7 +232,7 @@ static int load_file( const char *input_name, const char *output_name )
     if(!no_preprocess)
     {
         FILE *output;
-        int ret, fd;
+        int ret;
         char *name;
 
         /*
@@ -260,9 +256,8 @@ static int load_file( const char *input_name, const char *output_name )
             exit(0);
         }
 
-        fd = make_temp_file( output_name, "", &name );
-        temp_name = name;
-        if (!(output = fdopen(fd, "wt")))
+        name = make_temp_file( output_name, "" );
+        if (!(output = fopen(name, "wt")))
             error("Could not open fd %s for writing\n", name);
 
         ret = wpp_parse( input_name, output );
@@ -284,35 +279,17 @@ static int load_file( const char *input_name, const char *output_name )
     ret = parser_parse();
     fclose(parser_in);
     parser_lex_destroy();
-    if (temp_name)
-    {
-        unlink( temp_name );
-        temp_name = NULL;
-    }
     return ret;
 }
 
 static void init_argv0_dir( const char *argv0 )
 {
-#ifndef _WIN32
-    char *dir = NULL;
+    char *dir = get_argv0_dir( argv0 );
 
-#if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
-    dir = realpath( "/proc/self/exe", NULL );
-#elif defined (__FreeBSD__) || defined(__DragonFly__)
-    static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
-    size_t path_size = PATH_MAX;
-    char *path = xmalloc( path_size );
-    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
-        dir = realpath( path, NULL );
-    free( path );
-#endif
-    if (!dir && !(dir = realpath( argv0, NULL ))) return;
-    dir = get_dirname( dir );
+    if (!dir) return;
     includedir = strmake( "%s/%s", dir, BIN_TO_INCLUDEDIR );
     if (strendswith( dir, "/tools/wrc" )) nlsdirs[0] = strmake( "%s/../../nls", dir );
     else nlsdirs[0] = strmake( "%s/%s", dir, BIN_TO_NLSDIR );
-#endif
 }
 
 static void option_callback( int optc, char *optarg )
@@ -418,11 +395,7 @@ int main(int argc,char *argv[])
 {
 	int i;
 
-        signal( SIGTERM, exit_on_signal );
-        signal( SIGINT, exit_on_signal );
-#ifdef SIGHUP
-        signal( SIGHUP, exit_on_signal );
-#endif
+        init_signals( exit_on_signal );
 	init_argv0_dir( argv[0] );
 
 	/* Set the default defined stuff */
@@ -517,6 +490,5 @@ int main(int argc,char *argv[])
 static void cleanup_files(void)
 {
 	if (output_name) unlink(output_name);
-	if (temp_name) unlink(temp_name);
-        if (temp_dir) rmdir(temp_dir);
+        remove_temp_files();
 }

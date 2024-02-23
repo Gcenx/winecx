@@ -19,6 +19,8 @@
  */
 
 #include "wined3d_private.h"
+#include "wined3d_gl.h"
+#include "wined3d_vk.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
@@ -387,7 +389,7 @@ static HRESULT wined3d_fence_init(struct wined3d_fence *fence, const struct wine
 
 HRESULT wined3d_fence_create(struct wined3d_device *device, struct wined3d_fence **fence)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
     struct wined3d_fence *object;
     HRESULT hr;
 
@@ -1037,7 +1039,7 @@ static HRESULT wined3d_event_query_create(struct wined3d_device *device,
         enum wined3d_query_type type, void *parent, const struct wined3d_parent_ops *parent_ops,
         struct wined3d_query **query)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
     struct wined3d_event_query *object;
     HRESULT hr;
 
@@ -1083,7 +1085,7 @@ static HRESULT wined3d_occlusion_query_create(struct wined3d_device *device,
         enum wined3d_query_type type, void *parent, const struct wined3d_parent_ops *parent_ops,
         struct wined3d_query **query)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
     struct wined3d_occlusion_query *object;
 
     TRACE("device %p, type %#x, parent %p, parent_ops %p, query %p.\n",
@@ -1127,7 +1129,7 @@ static HRESULT wined3d_timestamp_query_create(struct wined3d_device *device,
         enum wined3d_query_type type, void *parent, const struct wined3d_parent_ops *parent_ops,
         struct wined3d_query **query)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
     struct wined3d_timestamp_query *object;
 
     TRACE("device %p, type %#x, parent %p, parent_ops %p, query %p.\n",
@@ -1167,7 +1169,7 @@ static HRESULT wined3d_timestamp_disjoint_query_create(struct wined3d_device *de
         enum wined3d_query_type type, void *parent, const struct wined3d_parent_ops *parent_ops,
         struct wined3d_query **query)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
     struct wined3d_query *object;
 
     TRACE("device %p, type %#x, parent %p, parent_ops %p, query %p.\n",
@@ -1223,7 +1225,7 @@ static HRESULT wined3d_so_statistics_query_create(struct wined3d_device *device,
         enum wined3d_query_type type, void *parent, const struct wined3d_parent_ops *parent_ops,
         struct wined3d_query **query)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
     struct wined3d_so_statistics_query *object;
     unsigned int stream_idx;
 
@@ -1280,7 +1282,7 @@ static HRESULT wined3d_pipeline_query_create(struct wined3d_device *device,
         enum wined3d_query_type type, void *parent, const struct wined3d_parent_ops *parent_ops,
         struct wined3d_query **query)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
     struct wined3d_pipeline_statistics_query *object;
 
     TRACE("device %p, type %#x, parent %p, parent_ops %p, query %p.\n",

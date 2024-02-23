@@ -524,8 +524,6 @@ static NTSTATUS set_shell_folder( void *args )
     char *homelink = NULL;
     NTSTATUS status = STATUS_SUCCESS;
 
-    FIXME("folder=%s link=%s\n", debugstr_a(folder), debugstr_a(link));
-
     if (link && (!strcmp( link, "$HOME" ) || !strncmp( link, "$HOME/", 6 )) && (home = getenv( "HOME" )))
     {
 #ifdef __ANDROID__
@@ -610,6 +608,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     delete_credential,
     enumerate_credentials,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
 
 #ifdef _WIN64
 
@@ -966,5 +966,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_delete_credential,
     wow64_enumerate_credentials,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
 
 #endif  /* _WIN64 */

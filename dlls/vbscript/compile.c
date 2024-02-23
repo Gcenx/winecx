@@ -425,6 +425,30 @@ static expression_t *lookup_const_decls(compile_ctx_t *ctx, const WCHAR *name, B
     return NULL;
 }
 
+static BOOL lookup_args_name(compile_ctx_t *ctx, const WCHAR *name)
+{
+    unsigned i;
+
+    for(i = 0; i < ctx->func->arg_cnt; i++) {
+        if(!wcsicmp(ctx->func->args[i].name, name))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static BOOL lookup_dim_decls(compile_ctx_t *ctx, const WCHAR *name)
+{
+    dim_decl_t *dim_decl;
+
+    for(dim_decl = ctx->dim_decls; dim_decl; dim_decl = dim_decl->next) {
+        if(!wcsicmp(dim_decl->name, name))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static HRESULT compile_args(compile_ctx_t *ctx, expression_t *args, unsigned *ret)
 {
     unsigned arg_cnt = 0;
@@ -479,10 +503,11 @@ static HRESULT compile_member_expression(compile_ctx_t *ctx, member_expression_t
     if (expr->obj_expr) /* FIXME: we should probably have a dedicated opcode as well */
         return compile_member_call_expression(ctx, expr, 0, TRUE);
 
-    const_expr = lookup_const_decls(ctx, expr->identifier, TRUE);
-    if(const_expr)
-        return compile_expression(ctx, const_expr);
-
+    if (!lookup_dim_decls(ctx, expr->identifier) && !lookup_args_name(ctx, expr->identifier)) {
+        const_expr = lookup_const_decls(ctx, expr->identifier, TRUE);
+        if(const_expr)
+            return compile_expression(ctx, const_expr);
+    }
     return push_instr_bstr(ctx, OP_ident, expr->identifier);
 }
 
@@ -850,6 +875,8 @@ static HRESULT compile_forto_statement(compile_ctx_t *ctx, forto_statement_t *st
     hres = compile_expression(ctx, stat->from_expr);
     if(FAILED(hres))
         return hres;
+    if(!push_instr(ctx, OP_numval))
+        return E_OUTOFMEMORY;
 
     /* FIXME: Assign should happen after both expressions evaluation. */
     instr = push_instr(ctx, OP_assign_ident);
@@ -862,7 +889,7 @@ static HRESULT compile_forto_statement(compile_ctx_t *ctx, forto_statement_t *st
     if(FAILED(hres))
         return hres;
 
-    if(!push_instr(ctx, OP_val))
+    if(!push_instr(ctx, OP_numval))
         return E_OUTOFMEMORY;
 
     if(stat->step_expr) {
@@ -870,7 +897,7 @@ static HRESULT compile_forto_statement(compile_ctx_t *ctx, forto_statement_t *st
         if(FAILED(hres))
             return hres;
 
-        if(!push_instr(ctx, OP_val))
+        if(!push_instr(ctx, OP_numval))
             return E_OUTOFMEMORY;
     }else {
         hres = push_instr_int(ctx, OP_int, 1);
@@ -1102,30 +1129,6 @@ static HRESULT compile_call_statement(compile_ctx_t *ctx, call_statement_t *stat
         return E_OUTOFMEMORY;
 
     return S_OK;
-}
-
-static BOOL lookup_dim_decls(compile_ctx_t *ctx, const WCHAR *name)
-{
-    dim_decl_t *dim_decl;
-
-    for(dim_decl = ctx->dim_decls; dim_decl; dim_decl = dim_decl->next) {
-        if(!wcsicmp(dim_decl->name, name))
-            return TRUE;
-    }
-
-    return FALSE;
-}
-
-static BOOL lookup_args_name(compile_ctx_t *ctx, const WCHAR *name)
-{
-    unsigned i;
-
-    for(i = 0; i < ctx->func->arg_cnt; i++) {
-        if(!wcsicmp(ctx->func->args[i].name, name))
-            return TRUE;
-    }
-
-    return FALSE;
 }
 
 static HRESULT compile_dim_statement(compile_ctx_t *ctx, dim_statement_t *stat)
@@ -1951,6 +1954,7 @@ static vbscode_t *alloc_vbscode(compile_ctx_t *ctx, const WCHAR *source, DWORD_P
         memcpy(ret->source, source, len * sizeof(WCHAR));
     ret->source[len] = 0;
 
+    ret->ref = 1;
     ret->cookie = cookie;
     ret->start_line = start_line;
 
@@ -1966,7 +1970,6 @@ static vbscode_t *alloc_vbscode(compile_ctx_t *ctx, const WCHAR *source, DWORD_P
 
     ret->main_code.type = FUNC_GLOBAL;
     ret->main_code.code_ctx = ret;
-    ret->ref = 1;
 
     list_init(&ret->entry);
     return ret;

@@ -21,13 +21,23 @@
 #ifndef _INC_VADEFS
 #define _INC_VADEFS
 
+#include <corecrt.h>
+
 #ifdef __cplusplus
 #define _ADDRESSOF(v) (&reinterpret_cast<const char &>(v))
 #else
 #define _ADDRESSOF(v) (&(v))
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
+#if defined (__GNUC__) && (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi)))
+
+typedef __builtin_ms_va_list va_list;
+#define _crt_va_start(v,l)  __builtin_ms_va_start(v,l)
+#define _crt_va_arg(v,l)    __builtin_va_arg(v,l)
+#define _crt_va_end(v)      __builtin_ms_va_end(v)
+#define _crt_va_copy(d,s)   __builtin_ms_va_copy(d,s)
+
+#elif defined(__GNUC__) || defined(__clang__)
 
 typedef __builtin_va_list va_list;
 #define _crt_va_start(v,l)  __builtin_va_start(v,l)

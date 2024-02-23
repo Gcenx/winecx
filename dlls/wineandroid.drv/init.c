@@ -22,8 +22,6 @@
 #pragma makedep unix
 #endif
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include "config.h"
 
 #include <stdarg.h>
@@ -223,8 +221,7 @@ static ANDROID_PDEVICE *create_android_physdev(void)
 /**********************************************************************
  *           ANDROID_CreateDC
  */
-static BOOL CDECL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output,
-                                    const DEVMODEW *initData )
+static BOOL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output, const DEVMODEW *initData )
 {
     ANDROID_PDEVICE *physdev = create_android_physdev();
 
@@ -238,7 +235,7 @@ static BOOL CDECL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR outpu
 /**********************************************************************
  *           ANDROID_CreateCompatibleDC
  */
-static BOOL CDECL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
+static BOOL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 {
     ANDROID_PDEVICE *physdev = create_android_physdev();
 
@@ -252,7 +249,7 @@ static BOOL CDECL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 /**********************************************************************
  *           ANDROID_DeleteDC
  */
-static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
+static BOOL ANDROID_DeleteDC( PHYSDEV dev )
 {
     free( dev );
     return TRUE;
@@ -289,13 +286,14 @@ BOOL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
         };
         const DEVMODEW mode =
         {
-            .dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY,
+            .dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL |
+                        DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION,
             .dmBitsPerPel = screen_bpp, .dmPelsWidth = screen_width, .dmPelsHeight = screen_height, .dmDisplayFrequency = 60,
         };
         device_manager->add_gpu( &gpu, param );
         device_manager->add_adapter( &adapter, param );
         device_manager->add_monitor( &gdi_monitor, param );
-        device_manager->add_mode( &mode, param );
+        device_manager->add_mode( &mode, TRUE, param );
         force_display_devices_refresh = FALSE;
     }
 
@@ -308,11 +306,11 @@ BOOL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
  */
 BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode )
 {
-    devmode->u2.dmDisplayFlags = 0;
-    devmode->u1.s2.dmPosition.x = 0;
-    devmode->u1.s2.dmPosition.y = 0;
-    devmode->u1.s2.dmDisplayOrientation = 0;
-    devmode->u1.s2.dmDisplayFixedOutput = 0;
+    devmode->dmDisplayFlags = 0;
+    devmode->dmPosition.x = 0;
+    devmode->dmPosition.y = 0;
+    devmode->dmDisplayOrientation = 0;
+    devmode->dmDisplayFixedOutput = 0;
     devmode->dmPelsWidth = screen_width;
     devmode->dmPelsHeight = screen_height;
     devmode->dmBitsPerPel = screen_bpp;
@@ -349,10 +347,11 @@ static const struct user_driver_funcs android_drv_funcs =
     .pChangeDisplaySettings = ANDROID_ChangeDisplaySettings,
     .pGetCurrentDisplaySettings = ANDROID_GetCurrentDisplaySettings,
     .pUpdateDisplayDevices = ANDROID_UpdateDisplayDevices,
+    .pCreateDesktop = ANDROID_CreateDesktop,
     .pCreateWindow = ANDROID_CreateWindow,
     .pDesktopWindowProc = ANDROID_DesktopWindowProc,
     .pDestroyWindow = ANDROID_DestroyWindow,
-    .pMsgWaitForMultipleObjectsEx = ANDROID_MsgWaitForMultipleObjectsEx,
+    .pProcessEvents = ANDROID_ProcessEvents,
     .pSetCapture = ANDROID_SetCapture,
     .pSetLayeredWindowAttributes = ANDROID_SetLayeredWindowAttributes,
     .pSetParent = ANDROID_SetParent,
@@ -609,7 +608,6 @@ static HRESULT android_init( void *arg )
 
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
-    android_create_desktop,
     android_dispatch_ioctl,
     android_init,
     android_java_init,

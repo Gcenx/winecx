@@ -19,8 +19,6 @@
 #ifndef _ADSLDP_PRIVATE_H
 #define _ADSLDP_PRIVATE_H
 
-#include "wine/heap.h"
-
 static inline LPWSTR strnUtoW( LPCSTR str, DWORD inlen, DWORD *outlen )
 {
     LPWSTR ret = NULL;
@@ -28,7 +26,7 @@ static inline LPWSTR strnUtoW( LPCSTR str, DWORD inlen, DWORD *outlen )
     if (str)
     {
         DWORD len = MultiByteToWideChar( CP_UTF8, 0, str, inlen, NULL, 0 );
-        if ((ret = heap_alloc( (len + 1) * sizeof(WCHAR) )))
+        if ((ret = malloc( (len + 1) * sizeof(WCHAR) )))
         {
             MultiByteToWideChar( CP_UTF8, 0, str, inlen, ret, len );
             ret[len] = 0;
@@ -47,9 +45,9 @@ struct attribute_type
     int single_value;
 };
 
-DWORD map_ldap_error(DWORD) DECLSPEC_HIDDEN;
-struct attribute_type *load_schema(LDAP *ld, ULONG *, ULONG *) DECLSPEC_HIDDEN;
-ADSTYPEENUM get_schema_type(const WCHAR *, const struct attribute_type *, ULONG, ULONG) DECLSPEC_HIDDEN;
-void free_attribute_types(struct attribute_type *, ULONG) DECLSPEC_HIDDEN;
+DWORD map_ldap_error(DWORD);
+struct attribute_type *load_schema(LDAP *ld, ULONG *, ULONG *);
+ADSTYPEENUM get_schema_type(const WCHAR *, const struct attribute_type *, ULONG, ULONG);
+void free_attribute_types(struct attribute_type *, ULONG);
 
 #endif

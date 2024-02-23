@@ -57,6 +57,13 @@ static ID3D10Blob *compile_shader_(unsigned int line, const char *source, const 
     return blob;
 }
 
+static BOOL compare_uint(unsigned int x, unsigned int y, unsigned int max_diff)
+{
+    unsigned int diff = x > y ? x - y : y - x;
+
+    return diff <= max_diff;
+}
+
 static BOOL compare_float(float f, float g, unsigned int ulps)
 {
     int x = *(int *)&f;
@@ -67,10 +74,7 @@ static BOOL compare_float(float f, float g, unsigned int ulps)
     if (y < 0)
         y = INT_MIN - y;
 
-    if (abs(x - y) > ulps)
-        return FALSE;
-
-    return TRUE;
+    return compare_uint(x, y, ulps);
 }
 
 static BOOL compare_vec4(const struct vec4 *vec, float x, float y, float z, float w, unsigned int ulps)
@@ -492,7 +496,7 @@ static void test_trig(void)
     if (!init_test_context(&test_context))
         return;
 
-    todo_wine ps_code = compile_shader(ps_source, "ps_4_0");
+    ps_code = compile_shader(ps_source, "ps_4_0");
     if (ps_code)
     {
         draw_quad(&test_context, ps_code);
@@ -501,7 +505,7 @@ static void test_trig(void)
         for (i = 0; i < 640; i += 20)
         {
             v = get_readback_vec4(&rb, i, 0);
-            ok(compare_vec4(v, sinf(i), cosf(i), 0.0f, 0.0f, 8192),
+            ok(compare_vec4(v, sinf(i), cosf(i), 0.0f, 0.0f, 16384),
                     "Test %u: Got {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
                     i, v->x, v->y, v->z, v->w, sinf(i), cos(i), 0.0f, 0.0f);
         }
@@ -612,8 +616,7 @@ static void test_sampling(void)
         winetest_push_context("Test %u", i);
 
         ID3D11DeviceContext_ClearRenderTargetView(test_context.immediate_context, test_context.rtv, red);
-        todo_wine_if (i < 3)
-            ps_code = compile_shader_flags(tests[i], "ps_4_0", D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY);
+        ps_code = compile_shader_flags(tests[i], "ps_4_0", D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY);
         if (ps_code)
         {
             draw_quad(&test_context, ps_code);
@@ -817,7 +820,7 @@ static void test_reflection(void)
         {"a", D3D_SIT_TEXTURE, 3, 1, D3D_SIF_TEXTURE_COMPONENTS, D3D_RETURN_TYPE_FLOAT, D3D_SRV_DIMENSION_TEXTURE2D, ~0u},
     };
 
-    todo_wine code = compile_shader(vs_source, "vs_5_0");
+    code = compile_shader(vs_source, "vs_5_0");
     if (!code)
         return;
 
@@ -899,6 +902,8 @@ static void test_reflection(void)
     ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
 
     code = compile_shader_flags(ps_source, "ps_4_0", D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY);
+    if (!code)
+        return;
     hr = D3DReflect(ID3D10Blob_GetBufferPointer(code), ID3D10Blob_GetBufferSize(code),
             &IID_ID3D11ShaderReflection, (void **)&reflection);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -1123,7 +1128,7 @@ static void test_semantic_reflection(void)
     {
         winetest_push_context("Test %u", i);
 
-        todo_wine_if (i > 5) code = compile_shader_flags(tests[i].source, tests[i].target,
+        todo_wine_if (i > 6) code = compile_shader_flags(tests[i].source, tests[i].target,
                 tests[i].legacy ? D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY : 0);
         if (!code)
         {

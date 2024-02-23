@@ -28,21 +28,21 @@
 #include "wine/list.h"
 #include "dinput_private.h"
 
-typedef struct
-{
-    unsigned int offset;
-    UINT_PTR uAppData;
-} ActionMap;
+struct dinput_device;
+struct hid_value_caps;
+
+typedef BOOL (*enum_object_callback)( struct dinput_device *impl, UINT index, struct hid_value_caps *caps,
+                                      const DIDEVICEOBJECTINSTANCEW *instance, void *data );
 
 struct dinput_device_vtbl
 {
-    void (*release)( IDirectInputDevice8W *iface );
+    void (*destroy)( IDirectInputDevice8W *iface );
     HRESULT (*poll)( IDirectInputDevice8W *iface );
     HRESULT (*read)( IDirectInputDevice8W *iface );
     HRESULT (*acquire)( IDirectInputDevice8W *iface );
     HRESULT (*unacquire)( IDirectInputDevice8W *iface );
     HRESULT (*enum_objects)( IDirectInputDevice8W *iface, const DIPROPHEADER *filter, DWORD flags,
-                             LPDIENUMDEVICEOBJECTSCALLBACKW callback, void *context );
+                             enum_object_callback callback, void *context );
     HRESULT (*get_property)( IDirectInputDevice8W *iface, DWORD property, DIPROPHEADER *header,
                              const DIDEVICEOBJECTINSTANCEW *instance );
     HRESULT (*get_effect_info)( IDirectInputDevice8W *iface, DIEFFECTINFOW *info, const GUID *guid );
@@ -66,6 +66,7 @@ struct object_properties
     LONG range_max;
     LONG deadzone;
     LONG saturation;
+    UINT_PTR app_data;
     DWORD calibration_mode;
     DWORD granularity;
 };
@@ -77,12 +78,13 @@ enum device_status
     STATUS_UNPLUGGED,
 };
 
-/* Device implementation */
 struct dinput_device
 {
     IDirectInputDevice8W        IDirectInputDevice8W_iface;
     IDirectInputDevice8A        IDirectInputDevice8A_iface;
+    LONG                        internal_ref;
     LONG                        ref;
+
     GUID                        guid;
     CRITICAL_SECTION            crit;
     struct dinput              *dinput;
@@ -93,9 +95,8 @@ struct dinput_device
     DWORD                       dwCoopLevel;
     HWND                        win;
     enum device_status          status;
-
     BOOL                        use_raw_input; /* use raw input instead of low-level messages */
-    RAWINPUTDEVICE              raw_device;    /* raw device to (un)register */
+    HHOOK                       cbt_hook;    /* CBT hook to track foreground changes */
 
     LPDIDEVICEOBJECTDATA        data_queue;  /* buffer for 'GetDeviceData'.                 */
     int                         queue_len;   /* valid size of the queue                     */
@@ -106,10 +107,6 @@ struct dinput_device
 
     DIDATAFORMAT device_format;
     DIDATAFORMAT user_format;
-
-    /* Action mapping */
-    int                         num_actions; /* number of actions mapped */
-    ActionMap                  *action_map;  /* array of mappings */
 
     /* internal device callbacks */
     HANDLE read_event;
@@ -126,16 +123,19 @@ struct dinput_device
 
 extern void dinput_device_init( struct dinput_device *device, const struct dinput_device_vtbl *vtbl,
                                 const GUID *guid, struct dinput *dinput );
+extern void dinput_device_internal_addref( struct dinput_device *device );
+extern void dinput_device_internal_release( struct dinput_device *device );
+
 extern HRESULT dinput_device_init_device_format( IDirectInputDevice8W *iface );
-extern void dinput_device_destroy( IDirectInputDevice8W *iface );
+extern int dinput_device_object_index_from_id( IDirectInputDevice8W *iface, DWORD id );
+extern BOOL device_object_matches_semantic( const DIDEVICEINSTANCEW *instance, const DIOBJECTDATAFORMAT *object,
+                                            DWORD semantic, BOOL exact );
 
-extern BOOL get_app_key(HKEY*, HKEY*) DECLSPEC_HIDDEN;
-extern DWORD get_config_key( HKEY, HKEY, const WCHAR *, WCHAR *, DWORD ) DECLSPEC_HIDDEN;
-extern BOOL device_instance_is_disabled( DIDEVICEINSTANCEW *instance, BOOL *override ) DECLSPEC_HIDDEN;
+extern BOOL get_app_key(HKEY*, HKEY*);
+extern DWORD get_config_key( HKEY, HKEY, const WCHAR *, WCHAR *, DWORD );
+extern BOOL device_instance_is_disabled( DIDEVICEINSTANCEW *instance, BOOL *override );
+extern void queue_event( IDirectInputDevice8W *iface, int index, DWORD data, DWORD time, DWORD seq );
 
-/* Routines to do DataFormat / WineFormat conversions */
-extern void queue_event( IDirectInputDevice8W *iface, int inst_id, DWORD data, DWORD time, DWORD seq ) DECLSPEC_HIDDEN;
-
-extern const GUID dinput_pidvid_guid DECLSPEC_HIDDEN;
+extern const GUID dinput_pidvid_guid;
 
 #endif /* __WINE_DLLS_DINPUT_DINPUTDEVICE_PRIVATE_H */

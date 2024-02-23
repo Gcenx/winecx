@@ -658,62 +658,62 @@ static void *get_context_reg( CONTEXT *context, ULONG_PTR dw_reg )
     case 14: return &context->R14;
     case 15: return &context->R15;
     case 16: return &context->Rip;
-    case 17: return &context->u.s.Xmm0;
-    case 18: return &context->u.s.Xmm1;
-    case 19: return &context->u.s.Xmm2;
-    case 20: return &context->u.s.Xmm3;
-    case 21: return &context->u.s.Xmm4;
-    case 22: return &context->u.s.Xmm5;
-    case 23: return &context->u.s.Xmm6;
-    case 24: return &context->u.s.Xmm7;
-    case 25: return &context->u.s.Xmm8;
-    case 26: return &context->u.s.Xmm9;
-    case 27: return &context->u.s.Xmm10;
-    case 28: return &context->u.s.Xmm11;
-    case 29: return &context->u.s.Xmm12;
-    case 30: return &context->u.s.Xmm13;
-    case 31: return &context->u.s.Xmm14;
-    case 32: return &context->u.s.Xmm15;
-    case 33: return &context->u.s.Legacy[0];
-    case 34: return &context->u.s.Legacy[1];
-    case 35: return &context->u.s.Legacy[2];
-    case 36: return &context->u.s.Legacy[3];
-    case 37: return &context->u.s.Legacy[4];
-    case 38: return &context->u.s.Legacy[5];
-    case 39: return &context->u.s.Legacy[6];
-    case 40: return &context->u.s.Legacy[7];
+    case 17: return &context->Xmm0;
+    case 18: return &context->Xmm1;
+    case 19: return &context->Xmm2;
+    case 20: return &context->Xmm3;
+    case 21: return &context->Xmm4;
+    case 22: return &context->Xmm5;
+    case 23: return &context->Xmm6;
+    case 24: return &context->Xmm7;
+    case 25: return &context->Xmm8;
+    case 26: return &context->Xmm9;
+    case 27: return &context->Xmm10;
+    case 28: return &context->Xmm11;
+    case 29: return &context->Xmm12;
+    case 30: return &context->Xmm13;
+    case 31: return &context->Xmm14;
+    case 32: return &context->Xmm15;
+    case 33: return &context->Legacy[0];
+    case 34: return &context->Legacy[1];
+    case 35: return &context->Legacy[2];
+    case 36: return &context->Legacy[3];
+    case 37: return &context->Legacy[4];
+    case 38: return &context->Legacy[5];
+    case 39: return &context->Legacy[6];
+    case 40: return &context->Legacy[7];
 #elif defined(__aarch64__)
-    case 0:  return &context->u.s.X0;
-    case 1:  return &context->u.s.X1;
-    case 2:  return &context->u.s.X2;
-    case 3:  return &context->u.s.X3;
-    case 4:  return &context->u.s.X4;
-    case 5:  return &context->u.s.X5;
-    case 6:  return &context->u.s.X6;
-    case 7:  return &context->u.s.X7;
-    case 8:  return &context->u.s.X8;
-    case 9:  return &context->u.s.X9;
-    case 10: return &context->u.s.X10;
-    case 11: return &context->u.s.X11;
-    case 12: return &context->u.s.X12;
-    case 13: return &context->u.s.X13;
-    case 14: return &context->u.s.X14;
-    case 15: return &context->u.s.X15;
-    case 16: return &context->u.s.X16;
-    case 17: return &context->u.s.X17;
-    case 18: return &context->u.s.X18;
-    case 19: return &context->u.s.X19;
-    case 20: return &context->u.s.X20;
-    case 21: return &context->u.s.X21;
-    case 22: return &context->u.s.X22;
-    case 23: return &context->u.s.X23;
-    case 24: return &context->u.s.X24;
-    case 25: return &context->u.s.X25;
-    case 26: return &context->u.s.X26;
-    case 27: return &context->u.s.X27;
-    case 28: return &context->u.s.X28;
-    case 29: return &context->u.s.Fp;
-    case 30: return &context->u.s.Lr;
+    case 0:  return &context->X0;
+    case 1:  return &context->X1;
+    case 2:  return &context->X2;
+    case 3:  return &context->X3;
+    case 4:  return &context->X4;
+    case 5:  return &context->X5;
+    case 6:  return &context->X6;
+    case 7:  return &context->X7;
+    case 8:  return &context->X8;
+    case 9:  return &context->X9;
+    case 10: return &context->X10;
+    case 11: return &context->X11;
+    case 12: return &context->X12;
+    case 13: return &context->X13;
+    case 14: return &context->X14;
+    case 15: return &context->X15;
+    case 16: return &context->X16;
+    case 17: return &context->X17;
+    case 18: return &context->X18;
+    case 19: return &context->X19;
+    case 20: return &context->X20;
+    case 21: return &context->X21;
+    case 22: return &context->X22;
+    case 23: return &context->X23;
+    case 24: return &context->X24;
+    case 25: return &context->X25;
+    case 26: return &context->X26;
+    case 27: return &context->X27;
+    case 28: return &context->X28;
+    case 29: return &context->Fp;
+    case 30: return &context->Lr;
     case 31: return &context->Sp;
     case 32: return &context->Pc;
     case 64:
@@ -777,64 +777,64 @@ static void set_context_reg( CONTEXT *context, ULONG_PTR dw_reg, void *val )
     case 14: context->R14 = *(ULONG64 *)val; break;
     case 15: context->R15 = *(ULONG64 *)val; break;
     case 16: context->Rip = *(ULONG64 *)val; break;
-    case 17: memcpy( &context->u.s.Xmm0, val, sizeof(M128A) ); break;
-    case 18: memcpy( &context->u.s.Xmm1, val, sizeof(M128A) ); break;
-    case 19: memcpy( &context->u.s.Xmm2, val, sizeof(M128A) ); break;
-    case 20: memcpy( &context->u.s.Xmm3, val, sizeof(M128A) ); break;
-    case 21: memcpy( &context->u.s.Xmm4, val, sizeof(M128A) ); break;
-    case 22: memcpy( &context->u.s.Xmm5, val, sizeof(M128A) ); break;
-    case 23: memcpy( &context->u.s.Xmm6, val, sizeof(M128A) ); break;
-    case 24: memcpy( &context->u.s.Xmm7, val, sizeof(M128A) ); break;
-    case 25: memcpy( &context->u.s.Xmm8, val, sizeof(M128A) ); break;
-    case 26: memcpy( &context->u.s.Xmm9, val, sizeof(M128A) ); break;
-    case 27: memcpy( &context->u.s.Xmm10, val, sizeof(M128A) ); break;
-    case 28: memcpy( &context->u.s.Xmm11, val, sizeof(M128A) ); break;
-    case 29: memcpy( &context->u.s.Xmm12, val, sizeof(M128A) ); break;
-    case 30: memcpy( &context->u.s.Xmm13, val, sizeof(M128A) ); break;
-    case 31: memcpy( &context->u.s.Xmm14, val, sizeof(M128A) ); break;
-    case 32: memcpy( &context->u.s.Xmm15, val, sizeof(M128A) ); break;
-    case 33: memcpy( &context->u.s.Legacy[0], val, sizeof(M128A) ); break;
-    case 34: memcpy( &context->u.s.Legacy[1], val, sizeof(M128A) ); break;
-    case 35: memcpy( &context->u.s.Legacy[2], val, sizeof(M128A) ); break;
-    case 36: memcpy( &context->u.s.Legacy[3], val, sizeof(M128A) ); break;
-    case 37: memcpy( &context->u.s.Legacy[4], val, sizeof(M128A) ); break;
-    case 38: memcpy( &context->u.s.Legacy[5], val, sizeof(M128A) ); break;
-    case 39: memcpy( &context->u.s.Legacy[6], val, sizeof(M128A) ); break;
-    case 40: memcpy( &context->u.s.Legacy[7], val, sizeof(M128A) ); break;
+    case 17: memcpy( &context->Xmm0, val, sizeof(M128A) ); break;
+    case 18: memcpy( &context->Xmm1, val, sizeof(M128A) ); break;
+    case 19: memcpy( &context->Xmm2, val, sizeof(M128A) ); break;
+    case 20: memcpy( &context->Xmm3, val, sizeof(M128A) ); break;
+    case 21: memcpy( &context->Xmm4, val, sizeof(M128A) ); break;
+    case 22: memcpy( &context->Xmm5, val, sizeof(M128A) ); break;
+    case 23: memcpy( &context->Xmm6, val, sizeof(M128A) ); break;
+    case 24: memcpy( &context->Xmm7, val, sizeof(M128A) ); break;
+    case 25: memcpy( &context->Xmm8, val, sizeof(M128A) ); break;
+    case 26: memcpy( &context->Xmm9, val, sizeof(M128A) ); break;
+    case 27: memcpy( &context->Xmm10, val, sizeof(M128A) ); break;
+    case 28: memcpy( &context->Xmm11, val, sizeof(M128A) ); break;
+    case 29: memcpy( &context->Xmm12, val, sizeof(M128A) ); break;
+    case 30: memcpy( &context->Xmm13, val, sizeof(M128A) ); break;
+    case 31: memcpy( &context->Xmm14, val, sizeof(M128A) ); break;
+    case 32: memcpy( &context->Xmm15, val, sizeof(M128A) ); break;
+    case 33: memcpy( &context->Legacy[0], val, sizeof(M128A) ); break;
+    case 34: memcpy( &context->Legacy[1], val, sizeof(M128A) ); break;
+    case 35: memcpy( &context->Legacy[2], val, sizeof(M128A) ); break;
+    case 36: memcpy( &context->Legacy[3], val, sizeof(M128A) ); break;
+    case 37: memcpy( &context->Legacy[4], val, sizeof(M128A) ); break;
+    case 38: memcpy( &context->Legacy[5], val, sizeof(M128A) ); break;
+    case 39: memcpy( &context->Legacy[6], val, sizeof(M128A) ); break;
+    case 40: memcpy( &context->Legacy[7], val, sizeof(M128A) ); break;
 #elif defined(__aarch64__)
-    case 0:  context->u.s.X0 = *(DWORD64 *)val; break;
-    case 1:  context->u.s.X1 = *(DWORD64 *)val; break;
-    case 2:  context->u.s.X2 = *(DWORD64 *)val; break;
-    case 3:  context->u.s.X3 = *(DWORD64 *)val; break;
-    case 4:  context->u.s.X4 = *(DWORD64 *)val; break;
-    case 5:  context->u.s.X5 = *(DWORD64 *)val; break;
-    case 6:  context->u.s.X6 = *(DWORD64 *)val; break;
-    case 7:  context->u.s.X7 = *(DWORD64 *)val; break;
-    case 8:  context->u.s.X8 = *(DWORD64 *)val; break;
-    case 9:  context->u.s.X9 = *(DWORD64 *)val; break;
-    case 10: context->u.s.X10 = *(DWORD64 *)val; break;
-    case 11: context->u.s.X11 = *(DWORD64 *)val; break;
-    case 12: context->u.s.X12 = *(DWORD64 *)val; break;
-    case 13: context->u.s.X13 = *(DWORD64 *)val; break;
-    case 14: context->u.s.X14 = *(DWORD64 *)val; break;
-    case 15: context->u.s.X15 = *(DWORD64 *)val; break;
-    case 16: context->u.s.X16 = *(DWORD64 *)val; break;
-    case 17: context->u.s.X17 = *(DWORD64 *)val; break;
-    case 18: context->u.s.X18 = *(DWORD64 *)val; break;
-    case 19: context->u.s.X19 = *(DWORD64 *)val; break;
-    case 20: context->u.s.X20 = *(DWORD64 *)val; break;
-    case 21: context->u.s.X21 = *(DWORD64 *)val; break;
-    case 22: context->u.s.X22 = *(DWORD64 *)val; break;
-    case 23: context->u.s.X23 = *(DWORD64 *)val; break;
-    case 24: context->u.s.X24 = *(DWORD64 *)val; break;
-    case 25: context->u.s.X25 = *(DWORD64 *)val; break;
-    case 26: context->u.s.X26 = *(DWORD64 *)val; break;
-    case 27: context->u.s.X27 = *(DWORD64 *)val; break;
-    case 28: context->u.s.X28 = *(DWORD64 *)val; break;
-    case 29: context->u.s.Fp = *(DWORD64 *)val; break;
-    case 30: context->u.s.Lr = *(DWORD64 *)val; break;
-    case 31: context->Sp = *(DWORD64 *)val; break;
-    case 32: context->Pc = *(DWORD64 *)val; break;
+    case 0:  context->X0  = *(DWORD64 *)val; break;
+    case 1:  context->X1  = *(DWORD64 *)val; break;
+    case 2:  context->X2  = *(DWORD64 *)val; break;
+    case 3:  context->X3  = *(DWORD64 *)val; break;
+    case 4:  context->X4  = *(DWORD64 *)val; break;
+    case 5:  context->X5  = *(DWORD64 *)val; break;
+    case 6:  context->X6  = *(DWORD64 *)val; break;
+    case 7:  context->X7  = *(DWORD64 *)val; break;
+    case 8:  context->X8  = *(DWORD64 *)val; break;
+    case 9:  context->X9  = *(DWORD64 *)val; break;
+    case 10: context->X10 = *(DWORD64 *)val; break;
+    case 11: context->X11 = *(DWORD64 *)val; break;
+    case 12: context->X12 = *(DWORD64 *)val; break;
+    case 13: context->X13 = *(DWORD64 *)val; break;
+    case 14: context->X14 = *(DWORD64 *)val; break;
+    case 15: context->X15 = *(DWORD64 *)val; break;
+    case 16: context->X16 = *(DWORD64 *)val; break;
+    case 17: context->X17 = *(DWORD64 *)val; break;
+    case 18: context->X18 = *(DWORD64 *)val; break;
+    case 19: context->X19 = *(DWORD64 *)val; break;
+    case 20: context->X20 = *(DWORD64 *)val; break;
+    case 21: context->X21 = *(DWORD64 *)val; break;
+    case 22: context->X22 = *(DWORD64 *)val; break;
+    case 23: context->X23 = *(DWORD64 *)val; break;
+    case 24: context->X24 = *(DWORD64 *)val; break;
+    case 25: context->X25 = *(DWORD64 *)val; break;
+    case 26: context->X26 = *(DWORD64 *)val; break;
+    case 27: context->X27 = *(DWORD64 *)val; break;
+    case 28: context->X28 = *(DWORD64 *)val; break;
+    case 29: context->Fp  = *(DWORD64 *)val; break;
+    case 30: context->Lr  = *(DWORD64 *)val; break;
+    case 31: context->Sp  = *(DWORD64 *)val; break;
+    case 32: context->Pc  = *(DWORD64 *)val; break;
     case 64:
     case 65:
     case 66:
@@ -934,7 +934,7 @@ static ULONG_PTR eval_expression( const unsigned char *p, CONTEXT *context,
         case DW_OP_eq:          stack[sp-1] = (stack[sp-1] == stack[sp]); sp--; break;
         case DW_OP_ne:          stack[sp-1] = (stack[sp-1] != stack[sp]); sp--; break;
         case DW_OP_skip:        tmp = (short)dwarf_get_u2(&p); p += tmp; break;
-        case DW_OP_bra:         tmp = (short)dwarf_get_u2(&p); if (!stack[sp--]) p += tmp; break;
+        case DW_OP_bra:         tmp = (short)dwarf_get_u2(&p); if (!stack[sp--]) { p += tmp; } break;
         case DW_OP_GNU_encoded_addr: tmp = *p++; stack[++sp] = dwarf_get_ptr( &p, tmp, bases ); break;
         case DW_OP_regx:        stack[++sp] = *(ULONG_PTR *)get_context_reg( context, dwarf_get_uleb128(&p) ); break;
         case DW_OP_bregx:
@@ -980,6 +980,12 @@ static void apply_frame_state( CONTEXT *context, struct frame_state *state,
     }
     if (!cfa) return;
 
+#ifdef __x86_64__
+    new_context.Rsp = cfa;
+#elif defined(__aarch64__)
+    new_context.Sp = cfa;
+#endif
+
     for (i = 0; i < NB_FRAME_REGS; i++)
     {
         switch (state->rules[i])
@@ -1004,11 +1010,6 @@ static void apply_frame_state( CONTEXT *context, struct frame_state *state,
             break;
         }
     }
-#ifdef __x86_64__
-    new_context.Rsp = cfa;
-#elif defined(__aarch64__)
-    new_context.Sp = cfa;
-#endif
     *context = new_context;
 }
 
@@ -1048,7 +1049,81 @@ static void apply_frame_state( CONTEXT *context, struct frame_state *state,
 #define DW_REG_r15 0x0f
 #define DW_REG_rip 0x10
 
-#endif /* defined(__x86_64__) */
+#elif defined(__arm__)
+
+#define DW_OP_r0  DW_OP_breg0
+#define DW_OP_r1  DW_OP_breg1
+#define DW_OP_r2  DW_OP_breg2
+#define DW_OP_r3  DW_OP_breg3
+#define DW_OP_r4  DW_OP_breg4
+#define DW_OP_r5  DW_OP_breg5
+#define DW_OP_r6  DW_OP_breg6
+#define DW_OP_r7  DW_OP_breg7
+#define DW_OP_r8  DW_OP_breg8
+#define DW_OP_r9  DW_OP_breg9
+#define DW_OP_r10 DW_OP_breg10
+#define DW_OP_r11 DW_OP_breg11
+#define DW_OP_r12 DW_OP_breg12
+#define DW_OP_sp  DW_OP_breg13
+#define DW_OP_lr  DW_OP_breg14
+#define DW_OP_pc  DW_OP_breg15
+
+#define DW_REG_r0  0
+#define DW_REG_r1  1
+#define DW_REG_r2  2
+#define DW_REG_r3  3
+#define DW_REG_r4  4
+#define DW_REG_r5  5
+#define DW_REG_r6  6
+#define DW_REG_r7  7
+#define DW_REG_r8  8
+#define DW_REG_r9  9
+#define DW_REG_r10 10
+#define DW_REG_r11 11
+#define DW_REG_r12 12
+#define DW_REG_sp  13
+#define DW_REG_lr  14
+#define DW_REG_pc  15
+
+#elif defined(__aarch64__)
+
+#define DW_OP_x19 DW_OP_breg19
+#define DW_OP_x20 DW_OP_breg20
+#define DW_OP_x21 DW_OP_breg21
+#define DW_OP_x22 DW_OP_breg22
+#define DW_OP_x23 DW_OP_breg23
+#define DW_OP_x24 DW_OP_breg24
+#define DW_OP_x25 DW_OP_breg25
+#define DW_OP_x26 DW_OP_breg26
+#define DW_OP_x27 DW_OP_breg27
+#define DW_OP_x28 DW_OP_breg28
+#define DW_OP_x29 DW_OP_breg29
+#define DW_OP_x30 DW_OP_breg30
+#define DW_OP_sp  DW_OP_breg31
+
+#define DW_REG_x19 19
+#define DW_REG_x20 20
+#define DW_REG_x21 21
+#define DW_REG_x22 22
+#define DW_REG_x23 23
+#define DW_REG_x24 24
+#define DW_REG_x25 25
+#define DW_REG_x26 26
+#define DW_REG_x27 27
+#define DW_REG_x28 28
+#define DW_REG_x29 29
+#define DW_REG_x30 30
+#define DW_REG_sp 31
+#define DW_REG_v8 72
+#define DW_REG_v9 73
+#define DW_REG_v10 74
+#define DW_REG_v11 75
+#define DW_REG_v12 76
+#define DW_REG_v13 77
+#define DW_REG_v14 78
+#define DW_REG_v15 79
+
+#endif /* defined(__aarch64__) */
 
 #define __ASM_CFI_STR(...) #__VA_ARGS__
 #define __ASM_CFI_ESC(...) \

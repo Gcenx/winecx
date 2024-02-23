@@ -236,7 +236,7 @@ static BOOL CALLBACK enum_devices( const DIDEVICEINSTANCEW *instance, void *cont
     if (!(entry = calloc( 1, sizeof(*entry) ))) return DIENUM_STOP;
 
     IDirectInput8_CreateDevice( dinput, &instance->guidInstance, &entry->device, NULL );
-    IDirectInputDevice8_SetDataFormat( entry->device, &c_dfDIJoystick );
+    IDirectInputDevice8_SetDataFormat( entry->device, &c_dfDIJoystick2 );
     IDirectInputDevice8_GetCapabilities( entry->device, &caps );
 
     list_add_tail( &devices, &entry->entry );
@@ -266,7 +266,7 @@ static DWORD WINAPI input_thread( void *param )
     while (WaitForMultipleObjects( 2, events, FALSE, INFINITE ) != 0)
     {
         IDirectInputEffect *effect;
-        DIJOYSTATE state = {0};
+        DIJOYSTATE2 state = {0};
         unsigned int i;
 
         SendMessageW( dialog_hwnd, WM_USER, 0, 0 );
@@ -417,7 +417,8 @@ static void draw_button_view( HDC hdc, RECT rect, BOOL set, const WCHAR *name )
     SelectObject( hdc, GetStockObject( DC_BRUSH ) );
     SelectObject( hdc, GetStockObject( DC_PEN ) );
 
-    Ellipse( hdc, rect.left, rect.top, rect.right, rect.bottom );
+    if (rect.right - rect.left < 16) Rectangle( hdc, rect.left, rect.top, rect.right, rect.bottom );
+    else Ellipse( hdc, rect.left, rect.top, rect.right, rect.bottom );
 
     color = SetTextColor( hdc, GetSysColor( set ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT ) );
     font = SelectObject( hdc, GetStockObject( ANSI_VAR_FONT ) );
@@ -436,7 +437,7 @@ LRESULT CALLBACK test_di_axes_window_proc( HWND hwnd, UINT msg, WPARAM wparam, L
     {
         DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
         IDirectInputDevice8W *device;
-        DIJOYSTATE state = {0};
+        DIJOYSTATE2 state = {0};
         RECT rect, tmp_rect;
         PAINTSTRUCT paint;
         HDC hdc;
@@ -502,7 +503,7 @@ LRESULT CALLBACK test_di_povs_window_proc( HWND hwnd, UINT msg, WPARAM wparam, L
     {
         DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
         IDirectInputDevice8W *device;
-        DIJOYSTATE state = {0};
+        DIJOYSTATE2 state = {0};
         PAINTSTRUCT paint;
         RECT rect;
         HDC hdc;
@@ -546,7 +547,7 @@ LRESULT CALLBACK test_di_buttons_window_proc( HWND hwnd, UINT msg, WPARAM wparam
         DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
         UINT i, j, offs, size, step, space = 2;
         IDirectInputDevice8W *device;
-        DIJOYSTATE state = {0};
+        DIJOYSTATE2 state = {0};
         PAINTSTRUCT paint;
         RECT rect;
         HDC hdc;
@@ -559,11 +560,12 @@ LRESULT CALLBACK test_di_buttons_window_proc( HWND hwnd, UINT msg, WPARAM wparam
         }
 
         if (caps.dwButtons <= 48) step = 16;
-        else step = 32;
+        else step = 24;
 
         hdc = BeginPaint( hwnd, &paint );
 
         GetClientRect( hwnd, &rect );
+        FillRect( hdc, &rect, (HBRUSH)(COLOR_WINDOW + 1) );
 
         size = (rect.right - rect.left - space) / step;
         offs = (rect.right - rect.left - step * size - space) / 2;
@@ -578,7 +580,8 @@ LRESULT CALLBACK test_di_buttons_window_proc( HWND hwnd, UINT msg, WPARAM wparam
             for (j = 0; j < step && i < caps.dwButtons; j++, i++)
             {
                 WCHAR buffer[3];
-                swprintf( buffer, ARRAY_SIZE(buffer), L"%d", i );
+                if (step == 24) swprintf( buffer, ARRAY_SIZE(buffer), L"%02x", i );
+                else swprintf( buffer, ARRAY_SIZE(buffer), L"%d", i );
                 draw_button_view( hdc, rect, state.rgbButtons[i], buffer );
                 OffsetRect( &rect, size, 0 );
             }
@@ -674,7 +677,7 @@ static void create_device_views( HWND hwnd )
     GetClientRect( parent, &rect );
     rect.top += 10;
 
-    margin = (rect.bottom - rect.top) * 10 / 100;
+    margin = (rect.bottom - rect.top) * 5 / 100;
     InflateRect( &rect, -margin, -margin );
 
     CreateWindowW( L"JoyCplDInputButtons", NULL, WS_CHILD | WS_VISIBLE, rect.left, rect.top,
@@ -762,6 +765,8 @@ INT_PTR CALLBACK test_di_dialog_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM
 
             SendDlgItemMessageW( hwnd, IDC_DI_EFFECTS, LB_SETCURSEL, 0, 0 );
             handle_di_effects_change( hwnd );
+
+            update_device_views( hwnd );
             break;
 
         case MAKEWPARAM( IDC_DI_EFFECTS, LBN_SELCHANGE ):
@@ -792,7 +797,16 @@ INT_PTR CALLBACK test_di_dialog_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM
         case PSN_RESET:
         case PSN_KILLACTIVE:
             SetEvent( thread_stop );
-            MsgWaitForMultipleObjects( 1, &thread, FALSE, INFINITE, 0 );
+            /* wait for the input thread to stop, processing any WM_USER message from it */
+            while (MsgWaitForMultipleObjects( 1, &thread, FALSE, INFINITE, QS_ALLINPUT ) == 1)
+            {
+                MSG msg;
+                while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ))
+                {
+                    TranslateMessage( &msg );
+                    DispatchMessageW( &msg );
+                }
+            }
             CloseHandle( state_event );
             CloseHandle( thread_stop );
             CloseHandle( thread );

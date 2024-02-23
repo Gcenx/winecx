@@ -25,6 +25,34 @@
 
 struct _DISPATCHER_CONTEXT;
 
+struct wine_dbg_write_params
+{
+    const char  *str;
+    unsigned int len;
+};
+
+struct wine_server_fd_to_handle_params
+{
+    int          fd;
+    unsigned int access;
+    unsigned int attributes;
+    HANDLE      *handle;
+};
+
+struct wine_server_handle_to_fd_params
+{
+    HANDLE        handle;
+    unsigned int  access;
+    int          *unix_fd;
+    unsigned int *options;
+};
+
+struct wine_spawnvp_params
+{
+    char       **argv;
+    int          wait;
+};
+
 struct load_so_dll_params
 {
     UNICODE_STRING              nt_name;
@@ -48,14 +76,17 @@ enum ntdll_unix_funcs
 {
     unix_load_so_dll,
     unix_unwind_builtin_dll,
+    unix_wine_dbg_write,
+    unix_wine_server_call,
+    unix_wine_server_fd_to_handle,
+    unix_wine_server_handle_to_fd,
+    unix_wine_spawnvp,
     unix_system_time_precise,
 #if defined(__x86_64__)
     unix_pe_module_loaded,
 #endif
 };
 
-extern unixlib_handle_t ntdll_unix_handle;
-
-#define NTDLL_UNIX_CALL( func, params ) __wine_unix_call_dispatcher( ntdll_unix_handle, unix_ ## func, params )
+extern unixlib_handle_t __wine_unixlib_handle;
 
 #endif /* __NTDLL_UNIXLIB_H */

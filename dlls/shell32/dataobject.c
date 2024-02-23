@@ -22,8 +22,6 @@
 #include <string.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "wingdi.h"
 #include "pidl.h"
@@ -98,7 +96,7 @@ static ULONG WINAPI IEnumFORMATETC_fnRelease(LPENUMFORMATETC iface)
 	{
 	  TRACE(" destroying IEnumFORMATETC(%p)\n",This);
 	  SHFree (This->pFmt);
-	  heap_free(This);
+	  free(This);
 	}
 	return refCount;
 }
@@ -171,7 +169,7 @@ LPENUMFORMATETC IEnumFORMATETC_Constructor(UINT cfmt, const FORMATETC afmt[])
     IEnumFORMATETCImpl* ef;
     DWORD size=cfmt * sizeof(FORMATETC);
 
-    ef = heap_alloc_zero(sizeof(*ef));
+    ef = calloc(1, sizeof(*ef));
 
     if(ef)
     {
@@ -274,7 +272,7 @@ static ULONG WINAPI IDataObject_fnRelease(IDataObject *iface)
 	  TRACE(" destroying IDataObject(%p)\n",This);
 	  _ILFreeaPidl(This->apidl, This->cidl);
           ILFree(This->pidl);
-	  heap_free(This);
+	  free(This);
 	}
 	return refCount;
 }
@@ -295,29 +293,29 @@ static HRESULT WINAPI IDataObject_fnGetData(IDataObject *iface, LPFORMATETC pfor
 	if (pformatetcIn->cfFormat == This->cfShellIDList)
 	{
 	  if (This->cidl < 1) return(E_UNEXPECTED);
-	  pmedium->u.hGlobal = RenderSHELLIDLIST(This->pidl, This->apidl, This->cidl);
+	  pmedium->hGlobal = RenderSHELLIDLIST(This->pidl, This->apidl, This->cidl);
 	}
 	else if	(pformatetcIn->cfFormat == CF_HDROP)
 	{
 	  if (This->cidl < 1) return(E_UNEXPECTED);
-	  pmedium->u.hGlobal = RenderHDROP(This->pidl, This->apidl, This->cidl);
+	  pmedium->hGlobal = RenderHDROP(This->pidl, This->apidl, This->cidl);
 	}
 	else if	(pformatetcIn->cfFormat == This->cfFileNameA)
 	{
 	  if (This->cidl < 1) return(E_UNEXPECTED);
-	  pmedium->u.hGlobal = RenderFILENAMEA(This->pidl, This->apidl, This->cidl);
+	  pmedium->hGlobal = RenderFILENAMEA(This->pidl, This->apidl, This->cidl);
 	}
 	else if	(pformatetcIn->cfFormat == This->cfFileNameW)
 	{
 	  if (This->cidl < 1) return(E_UNEXPECTED);
-	  pmedium->u.hGlobal = RenderFILENAMEW(This->pidl, This->apidl, This->cidl);
+	  pmedium->hGlobal = RenderFILENAMEW(This->pidl, This->apidl, This->cidl);
 	}
 	else
 	{
 	  FIXME("-- expected clipformat not implemented\n");
 	  return (E_INVALIDARG);
 	}
-	if (pmedium->u.hGlobal)
+	if (pmedium->hGlobal)
 	{
 	  pmedium->tymed = TYMED_HGLOBAL;
 	  pmedium->pUnkForRelease = NULL;
@@ -430,7 +428,7 @@ IDataObject* IDataObject_Constructor(HWND hwndOwner,
 {
     IDataObjectImpl* dto;
 
-    dto = heap_alloc_zero(sizeof(*dto));
+    dto = calloc(1, sizeof(*dto));
 
     if (dto)
     {

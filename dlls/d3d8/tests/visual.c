@@ -85,10 +85,7 @@ static BOOL compare_float(float f, float g, unsigned int ulps)
     if (y < 0)
         y = INT_MIN - y;
 
-    if (abs(x - y) > ulps)
-        return FALSE;
-
-    return TRUE;
+    return compare_uint(x, y, ulps);
 }
 
 static BOOL compare_vec4(const struct vec4 *vec, float x, float y, float z, float w, unsigned int ulps)
@@ -248,10 +245,12 @@ static void check_rect(struct surface_readback *rb, RECT r, const char *message)
     }
 }
 
-#define check_rt_color(a, b) check_rt_color_(__LINE__, a, b, false)
-#define check_rt_color_todo(a, b) check_rt_color_(__LINE__, a, b, true)
-#define check_rt_color_todo_if(a, b, c) check_rt_color_(__LINE__, a, b, c)
-static void check_rt_color_(unsigned int line, IDirect3DSurface8 *rt, D3DCOLOR expected_color, bool todo)
+#define check_rt_color(a, b) check_rt_color_(__LINE__, a, b, false, 0, false)
+#define check_rt_color_broken(a, b, c, d) check_rt_color_(__LINE__, a, b, false, c, d)
+#define check_rt_color_todo(a, b) check_rt_color_(__LINE__, a, b, true, 0, false)
+#define check_rt_color_todo_if(a, b, c) check_rt_color_(__LINE__, a, b, c, 0, false)
+static void check_rt_color_(unsigned int line, IDirect3DSurface8 *rt, D3DCOLOR expected_color, bool todo,
+    D3DCOLOR broken_color, bool is_broken)
 {
     unsigned int color = 0xdeadbeef;
     struct surface_readback rb;
@@ -276,7 +275,8 @@ static void check_rt_color_(unsigned int line, IDirect3DSurface8 *rt, D3DCOLOR e
     }
     release_surface_readback(&rb);
     todo_wine_if (todo)
-        ok_(__FILE__, line)(color == expected_color, "Got unexpected color 0x%08x.\n", color);
+        ok_(__FILE__, line)(color == expected_color || broken(is_broken && color == broken_color),
+                "Got unexpected color 0x%08x.\n", color);
 }
 
 static IDirect3DDevice8 *create_device(IDirect3D8 *d3d, HWND device_window, HWND focus_window, BOOL windowed)
@@ -941,8 +941,8 @@ static void test_specular_lighting(void)
     } *quad;
     WORD *indices;
 
-    quad = HeapAlloc(GetProcessHeap(), 0, vertices_side * vertices_side * sizeof(*quad));
-    indices = HeapAlloc(GetProcessHeap(), 0, indices_count * sizeof(*indices));
+    quad = malloc(vertices_side * vertices_side * sizeof(*quad));
+    indices = malloc(indices_count * sizeof(*indices));
     for (i = 0, y = 0; y < vertices_side; ++y)
     {
         for (x = 0; x < vertices_side; ++x)
@@ -1044,8 +1044,8 @@ static void test_specular_lighting(void)
 done:
     IDirect3D8_Release(d3d);
     DestroyWindow(window);
-    HeapFree(GetProcessHeap(), 0, indices);
-    HeapFree(GetProcessHeap(), 0, quad);
+    free(indices);
+    free(quad);
 }
 
 static void clear_test(void)
@@ -5828,7 +5828,9 @@ static void add_dirty_rect_test(void)
     ok(hr == S_OK, "Failed to set texture, hr %#lx.\n", hr);
     add_dirty_rect_test_draw(device);
     color = getPixelColor(device, 320, 240);
-    ok(color_match(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+    /* Radeon GPUs read zero from sysmem textures. */
+    ok(color_match(color, 0x000000ff, 1) || broken(color_match(color, 0x00000000, 1)),
+            "Got unexpected color 0x%08x.\n", color);
 
     /* Blitting to the sysmem texture adds a dirty rect. */
     fill_surface(surface_src_red, 0x00000000, D3DLOCK_NO_DIRTY_UPDATE);
@@ -7734,8 +7736,8 @@ static void test_pointsize(void)
     ok(color == 0x00ffff00, "pSprite: Pixel (64 + 4),(64 - 4) has color 0x%08x, expected 0x00ffff00\n", color);
     IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
 
-    U(matrix).m[0][0] =  1.0f / 64.0f;
-    U(matrix).m[1][1] = -1.0f / 64.0f;
+    matrix.m[0][0] =  1.0f / 64.0f;
+    matrix.m[1][1] = -1.0f / 64.0f;
     hr = IDirect3DDevice8_SetTransform(device, D3DTS_PROJECTION, &matrix);
     ok(SUCCEEDED(hr), "Failed to set projection matrix, hr %#lx.\n", hr);
 
@@ -7754,7 +7756,7 @@ static void test_pointsize(void)
     ok(SUCCEEDED(hr), "Failed setting point scale attenuation coefficient, hr %#lx.\n", hr);
     hr = IDirect3DDevice8_SetRenderState(device, D3DRS_POINTSCALE_C, *(DWORD *)&c);
     ok(SUCCEEDED(hr), "Failed setting point scale attenuation coefficient, hr %#lx.\n", hr);
-    hr = IDirect3DDevice8_SetVertexShaderConstant(device, 0, &S(U(matrix))._11, 4);
+    hr = IDirect3DDevice8_SetVertexShaderConstant(device, 0, &matrix._11, 4);
     ok(SUCCEEDED(hr), "Failed to set vertex shader constants, hr %#lx.\n", hr);
 
     if (caps.MaxPointSize < 63.0f)
@@ -12127,11 +12129,11 @@ static void test_managed_reset(void)
     release_test_context(&context);
 }
 
-/* Some applications lock a mipmapped texture at level 0, write every level at
- * once, and expect it to be uploaded. */
+/* Some applications (Vivisector, Cryostasis) lock a mipmapped managed texture
+ * at level 0, write every level at once, and expect it to be uploaded. */
 static void test_mipmap_upload(void)
 {
-    unsigned int i, j, width, level_count;
+    unsigned int j, width, level_count;
     struct d3d8_test_context context;
     IDirect3DTexture8 *texture;
     D3DLOCKED_RECT locked_rect;
@@ -12139,63 +12141,50 @@ static void test_mipmap_upload(void)
     unsigned int *mem;
     HRESULT hr;
 
-    static const D3DPOOL pools[] =
-    {
-        D3DPOOL_MANAGED,
-        D3DPOOL_SYSTEMMEM,
-    };
-
     if (!init_test_context(&context))
         return;
     device = context.device;
 
-    for (i = 0; i < ARRAY_SIZE(pools); ++i)
+    hr = IDirect3DDevice8_CreateTexture(device, 32, 32, 0, 0,
+            D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    level_count = IDirect3DBaseTexture8_GetLevelCount(texture);
+
+    hr = IDirect3DTexture8_LockRect(texture, 0, &locked_rect, NULL, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    mem = locked_rect.pBits;
+
+    for (j = 0; j < level_count; ++j)
     {
-        winetest_push_context("pool %#x", pools[i]);
+        width = 32 >> j;
+        memset(mem, 0x11 * (j + 1), width * width * 4);
+        mem += width * width;
+    }
 
-        hr = IDirect3DDevice8_CreateTexture(device, 32, 32, 0, 0,
-                D3DFMT_A8R8G8B8, pools[i], &texture);
+    hr = IDirect3DTexture8_UnlockRect(texture, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    for (j = 0; j < level_count; ++j)
+    {
+        winetest_push_context("level %u", j);
+
+        hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-        level_count = IDirect3DBaseTexture8_GetLevelCount(texture);
-
-        hr = IDirect3DTexture8_LockRect(texture, 0, &locked_rect, NULL, 0);
+        hr = IDirect3DDevice8_SetTextureStageState(device, 0, D3DTSS_MIPFILTER, D3DTEXF_POINT);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        hr = IDirect3DDevice8_SetTextureStageState(device, 0, D3DTSS_MAXMIPLEVEL, j);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-        mem = locked_rect.pBits;
-
-        for (j = 0; j < level_count; ++j)
-        {
-            width = 32 >> j;
-            memset(mem, 0x11 * (j + 1), width * width * 4);
-            mem += width * width;
-        }
-
-        hr = IDirect3DTexture8_UnlockRect(texture, 0);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        for (j = 0; j < level_count; ++j)
-        {
-            winetest_push_context("level %u", j);
-
-            hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
-            ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-            hr = IDirect3DDevice8_SetTextureStageState(device, 0, D3DTSS_MIPFILTER, D3DTEXF_POINT);
-            ok(hr == S_OK, "Got hr %#lx.\n", hr);
-            hr = IDirect3DDevice8_SetTextureStageState(device, 0, D3DTSS_MAXMIPLEVEL, j);
-            ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-            draw_textured_quad(&context, texture);
-            check_rt_color(context.backbuffer, 0x00111111 * (j + 1));
-
-            winetest_pop_context();
-        }
-
-        IDirect3DTexture8_Release(texture);
+        draw_textured_quad(&context, texture);
+        check_rt_color(context.backbuffer, 0x00111111 * (j + 1));
 
         winetest_pop_context();
     }
+
+    IDirect3DTexture8_Release(texture);
     release_test_context(&context);
 }
 
@@ -12219,8 +12208,8 @@ START_TEST(visual)
     /* Only Windows XP's default VGA driver should have an empty description */
     ok(identifier.Description[0] || broken(!strcmp(identifier.Driver, "vga.dll")), "Empty driver description.\n");
     trace("Driver version %d.%d.%d.%d\n",
-            HIWORD(U(identifier.DriverVersion).HighPart), LOWORD(U(identifier.DriverVersion).HighPart),
-            HIWORD(U(identifier.DriverVersion).LowPart), LOWORD(U(identifier.DriverVersion).LowPart));
+            HIWORD(identifier.DriverVersion.HighPart), LOWORD(identifier.DriverVersion.HighPart),
+            HIWORD(identifier.DriverVersion.LowPart), LOWORD(identifier.DriverVersion.LowPart));
 
     IDirect3D8_Release(d3d);
 

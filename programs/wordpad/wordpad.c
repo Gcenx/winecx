@@ -37,16 +37,6 @@
 
 #include "wordpad.h"
 
-#ifdef NONAMELESSUNION
-# define U(x)  (x).u
-# define U2(x) (x).u2
-# define U3(x) (x).u3
-#else
-# define U(x)  (x)
-# define U2(x) (x)
-# define U3(x) (x)
-#endif
-
 /* use LoadString */
 static const WCHAR wszAppTitle[] = {'W','i','n','e',' ','W','o','r','d','p','a','d',0};
 
@@ -637,8 +627,7 @@ static void add_font(struct font_array *fonts, LPCWSTR fontName, DWORD fontType,
         fontHeight = ntmc->ntmTm.tmHeight - ntmc->ntmTm.tmInternalLeading;
 
     idx = fonts->count;
-    fonts->fonts[idx].name = malloc((lstrlenW(fontName) + 1)*sizeof(WCHAR) );
-    lstrcpyW( fonts->fonts[idx].name, fontName );
+    fonts->fonts[idx].name = wcsdup(fontName);
     fonts->fonts[idx].lParam = MAKELONG(fontType, fontHeight);
 
     fonts->count++;
@@ -1180,7 +1169,7 @@ static void dialog_viewproperties(void)
 
     psp[0].dwSize = sizeof(PROPSHEETPAGEW);
     psp[0].dwFlags = PSP_USETITLE;
-    U(psp[0]).pszTemplate = MAKEINTRESOURCEW(IDD_FORMATOPTS);
+    psp[0].pszTemplate = MAKEINTRESOURCEW(IDD_FORMATOPTS);
     psp[0].pfnDlgProc = formatopts_proc;
     psp[0].hInstance = hInstance;
     psp[0].lParam = reg_formatindex(SF_TEXT);
@@ -1190,7 +1179,7 @@ static void dialog_viewproperties(void)
     {
         psp[i].dwSize = psp[0].dwSize;
         psp[i].dwFlags = psp[0].dwFlags;
-        U(psp[i]).pszTemplate = U(psp[0]).pszTemplate;
+        psp[i].pszTemplate = psp[0].pszTemplate;
         psp[i].pfnDlgProc = psp[0].pfnDlgProc;
         psp[i].hInstance = psp[0].hInstance;
         psp[i].lParam = reg_formatindex(SF_RTF);
@@ -1204,13 +1193,13 @@ static void dialog_viewproperties(void)
     psh.hInstance = hInstance;
     psh.pszCaption = MAKEINTRESOURCEW(STRING_VIEWPROPS_TITLE);
     psh.nPages = ARRAY_SIZE(psp);
-    U3(psh).ppsp = ppsp;
-    U(psh).pszIcon = MAKEINTRESOURCEW(IDI_WORDPAD);
+    psh.ppsp = ppsp;
+    psh.pszIcon = MAKEINTRESOURCEW(IDI_WORDPAD);
 
     if(fileFormat & SF_RTF)
-        U2(psh).nStartPage = 1;
+        psh.nStartPage = 1;
     else
-        U2(psh).nStartPage = 0;
+        psh.nStartPage = 0;
     PropertySheetW(&psh);
     set_bar_states();
     target_device(hMainWnd, wordWrap[reg_formatindex(fileFormat)]);
@@ -1937,6 +1926,8 @@ static LRESULT OnCreate( HWND hWnd )
     GetWindowRect(hFontListWnd, &rect);
     height = max(height, rect.bottom - rect.top);
 
+    SendMessageW(hToolBarWnd, TB_SETBUTTONSIZE, 0, MAKELPARAM(height, height));
+
     rbb.cbSize = REBARBANDINFOW_V6_SIZE;
     rbb.fMask = RBBIM_SIZE | RBBIM_CHILDSIZE | RBBIM_CHILD | RBBIM_STYLE | RBBIM_ID;
     rbb.fStyle = RBBS_CHILDEDGE | RBBS_BREAK | RBBS_NOGRIPPER;
@@ -1977,6 +1968,7 @@ static LRESULT OnCreate( HWND hWnd )
          IDC_FORMATBAR, 8, hInstance, IDB_FORMATBAR, NULL, 0, 16, 16, 16, 16, sizeof(TBBUTTON));
 
     SendMessageW(hFormatBarWnd, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_DRAWDDARROWS);
+    SendMessageW(hFormatBarWnd, TB_SETBUTTONSIZE, 0, MAKELPARAM(height, height));
 
     AddButton(hFormatBarWnd, 0, ID_FORMAT_BOLD);
     AddButton(hFormatBarWnd, 1, ID_FORMAT_ITALIC);
@@ -2019,12 +2011,7 @@ static LRESULT OnCreate( HWND hWnd )
       |ES_WANTRETURN|WS_VSCROLL|ES_NOHIDESEL|WS_HSCROLL,
       0, 0, 1000, 100, hWnd, (HMENU)IDC_EDITOR, hInstance, NULL);
 
-    if (!hEditorWnd)
-    {
-        fprintf(stderr, "Error code %lu\n", GetLastError());
-        return -1;
-    }
-    assert(hEditorWnd);
+    if (!hEditorWnd) return -1;
 
     setup_richedit_olecallback(hEditorWnd);
     SetFocus(hEditorWnd);

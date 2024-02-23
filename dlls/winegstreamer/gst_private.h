@@ -35,6 +35,7 @@
 #include "mfidl.h"
 #include "wine/debug.h"
 #include "wine/strmbase.h"
+#include "wine/mfinternal.h"
 
 #include "unixlib.h"
 
@@ -69,7 +70,7 @@ HRESULT wg_sample_queue_create(struct wg_sample_queue **out);
 void wg_sample_queue_destroy(struct wg_sample_queue *queue);
 void wg_sample_queue_flush(struct wg_sample_queue *queue, bool all);
 
-wg_parser_t wg_parser_create(enum wg_parser_type type);
+wg_parser_t wg_parser_create(enum wg_parser_type type, bool output_compressed, bool unlimited_buffering);
 void wg_parser_destroy(wg_parser_t parser);
 
 HRESULT wg_parser_connect(wg_parser_t parser, uint64_t file_size);
@@ -108,12 +109,24 @@ bool wg_transform_set_output_format(wg_transform_t transform, struct wg_format *
 bool wg_transform_get_status(wg_transform_t transform, bool *accepts_input);
 HRESULT wg_transform_drain(wg_transform_t transform);
 HRESULT wg_transform_flush(wg_transform_t transform);
+void wg_transform_notify_qos(wg_transform_t transform,
+        bool underflow, double proportion, int64_t diff, uint64_t timestamp);
 
+HRESULT wg_muxer_create(const char *format, wg_muxer_t *muxer);
+void wg_muxer_destroy(wg_muxer_t muxer);
+HRESULT wg_muxer_add_stream(wg_muxer_t muxer, UINT32 stream_id, const struct wg_format *format);
+HRESULT wg_muxer_start(wg_muxer_t muxer);
+HRESULT wg_muxer_push_sample(wg_muxer_t muxer, struct wg_sample *sample, UINT32 stream_id);
+HRESULT wg_muxer_read_data(wg_muxer_t muxer, void *buffer, UINT32 *size, UINT64 *offset);
+HRESULT wg_muxer_finalize(wg_muxer_t muxer);
+
+unsigned int wg_format_get_bytes_for_uncompressed(wg_video_format format, unsigned int width, unsigned int height);
 unsigned int wg_format_get_max_size(const struct wg_format *format);
 
 HRESULT avi_splitter_create(IUnknown *outer, IUnknown **out);
 HRESULT decodebin_parser_create(IUnknown *outer, IUnknown **out);
 HRESULT mpeg_audio_codec_create(IUnknown *outer, IUnknown **out);
+HRESULT mpeg_video_codec_create(IUnknown *outer, IUnknown **out);
 HRESULT mpeg_layer3_decoder_create(IUnknown *outer, IUnknown **out);
 HRESULT mpeg_splitter_create(IUnknown *outer, IUnknown **out);
 HRESULT wave_parser_create(IUnknown *outer, IUnknown **out);
@@ -121,6 +134,8 @@ HRESULT wma_decoder_create(IUnknown *outer, IUnknown **out);
 HRESULT wmv_decoder_create(IUnknown *outer, IUnknown **out);
 HRESULT resampler_create(IUnknown *outer, IUnknown **out);
 HRESULT color_convert_create(IUnknown *outer, IUnknown **out);
+HRESULT mp3_sink_class_factory_create(IUnknown *outer, IUnknown **out);
+HRESULT mpeg4_sink_class_factory_create(IUnknown *outer, IUnknown **out);
 
 bool amt_from_wg_format(AM_MEDIA_TYPE *mt, const struct wg_format *format, bool wm);
 bool amt_to_wg_format(const AM_MEDIA_TYPE *mt, struct wg_format *format);

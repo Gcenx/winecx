@@ -30,8 +30,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "winver.h"
@@ -156,7 +154,7 @@ static const struct
     },
     /* Windows 10 */
     {
-        { 10, 0, 18362 },
+        { 10, 0, 19043 },
         {0x8e0f7a12,0xbfb3,0x4fe8,{0xb9,0xa5,0x48,0xfd,0x50,0xa1,0x5a,0x9a}}
     }
 };
@@ -286,13 +284,13 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_id( const IMAGE_RESOURCE_DI
     while (min <= max)
     {
         pos = (min + max) / 2;
-        if (entry[pos].u.Id == id)
+        if (entry[pos].Id == id)
         {
-            DWORD offset = entry[pos].u2.s2.OffsetToDirectory;
+            DWORD offset = entry[pos].OffsetToDirectory;
             if (offset > root_size - sizeof(*dir)) return NULL;
             return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + offset);
         }
-        if (entry[pos].u.Id > id) max = pos - 1;
+        if (entry[pos].Id > id) max = pos - 1;
         else min = pos + 1;
     }
     return NULL;
@@ -311,7 +309,7 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_default( const IMAGE_RESOURCE_
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry;
 
     entry = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(dir + 1);
-    return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry->u2.s2.OffsetToDirectory);
+    return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry->OffsetToDirectory);
 }
 
 
@@ -1443,96 +1441,6 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
     return retval;
 }
 
-/* Begin CX HACK 21549 */
-static void *get_version_info_from_hmodule(HMODULE hmod)
-{
-    /* The equivalent of GetFileVersionInfo, just for an already
-       loaded module. */
-
-    HGLOBAL loaded_rsrc;
-    HRSRC hrsrc = FindResourceW(hmod, (LPCWSTR)MAKEINTRESOURCEW(VS_VERSION_INFO), (LPCWSTR)RT_VERSION);
-    if (!hrsrc) return NULL;
-
-    loaded_rsrc = LoadResource(hmod, hrsrc);
-    if (!loaded_rsrc) return NULL;
-
-    return LockResource(loaded_rsrc);
-}
-
-struct lang_and_codepage
-{
-    LANGID lang;
-    WORD codepage;
-};
-
-static BOOL get_ver_translation(void *ver_buffer, LANGID lang, struct lang_and_codepage *translation)
-{
-    struct lang_and_codepage *translations;
-    UINT len;
-    int i;
-
-    BOOL res = VerQueryValueW(ver_buffer, L"\\VarFileInfo\\Translation", (void**)&translations, &len);
-    if (!res || !len) return FALSE;
-
-    for (i = 0; i < len / sizeof(struct lang_and_codepage); i++)
-    {
-        if (translations[i].lang == lang)
-        {
-            *translation = translations[i];
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-static WCHAR *get_translated_ver_string(void *ver_buffer, struct lang_and_codepage *translation, const WCHAR *property)
-{
-    WCHAR *value, subblock[256];
-    UINT len = 0;
-    BOOL res;
-
-    swprintf(subblock, ARRAY_SIZE(subblock), L"\\StringFileInfo\\%04x%04x\\%s", translation->lang, translation->codepage, property);
-    res = VerQueryValueW(ver_buffer, subblock, (void **)&value, &len);
-    return (res && len) ? value : NULL;
-}
-
-static BOOL is_vc_2010_redist(void)
-{
-    static int ret = -1;
-    WCHAR *str;
-    HMODULE hmod;
-    void *rsrc_buf;
-    LANGID english = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
-    struct lang_and_codepage translation;
-
-    if (ret != -1) return ret;
-    ret = 0;
-
-    hmod = GetModuleHandleW(NULL);
-    rsrc_buf = get_version_info_from_hmodule(hmod);
-    if (!rsrc_buf) goto done;
-
-    if (!get_ver_translation(rsrc_buf, english, &translation)) goto done;
-
-    str = get_translated_ver_string(rsrc_buf, &translation, L"ProductName");
-    if (!str || wcscmp(str, L"Microsoft® .NET Framework")) goto done;
-
-    str = get_translated_ver_string(rsrc_buf, &translation, L"InternalName");
-    if (!str || wcscmp(str, L"Setup.exe")) goto done;
-
-    str = get_translated_ver_string(rsrc_buf, &translation, L"ProductVersion");
-    if (!str || wcsncmp(str, L"10.0.", 5)) goto done;
-
-    ret = 1;
-
-done:
-    if (ret) FIXME("hacking product type for VC 2010 redist\n");
-    return ret;
-}
-
-/* End CX HACK 21549 */
-
 
 /***********************************************************************
  *         GetProductInfo   (kernelbase.@)
@@ -1540,13 +1448,6 @@ done:
 BOOL WINAPI DECLSPEC_HOTPATCH GetProductInfo( DWORD os_major, DWORD os_minor,
                                               DWORD sp_major, DWORD sp_minor, DWORD *type )
 {
-    if (is_vc_2010_redist())
-    {
-        /* CX HACK 21549 */
-        *type = PRODUCT_ULTIMATE;
-        return TRUE;
-    }
-
     return RtlGetProductInfo( os_major, os_minor, sp_major, sp_minor, type );
 }
 
@@ -1701,6 +1602,34 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetPackageFamilyName( HANDLE process, UINT32
     return APPMODEL_ERROR_NO_PACKAGE;
 }
 
+/***********************************************************************
+ *         GetPackagesByPackageFamily   (kernelbase.@)
+ */
+LONG WINAPI DECLSPEC_HOTPATCH GetPackagesByPackageFamily(const WCHAR *family_name, UINT32 *count,
+                                                         WCHAR *full_names, UINT32 *buffer_len, WCHAR *buffer)
+{
+    FIXME( "(%s %p %p %p %p): stub\n", debugstr_w(family_name), count, full_names, buffer_len, buffer );
+
+    if (!count || !buffer_len)
+        return ERROR_INVALID_PARAMETER;
+
+    *count = 0;
+    *buffer_len = 0;
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *         GetPackagePathByFullName   (kernelbase.@)
+ */
+LONG WINAPI GetPackagePathByFullName(const WCHAR *name, UINT32 *len, WCHAR *path)
+{
+    if (!len || !name)
+        return ERROR_INVALID_PARAMETER;
+
+    FIXME( "(%s %p %p): stub\n", debugstr_w(name), len, path );
+
+    return APPMODEL_ERROR_NO_PACKAGE;
+}
 
 static const struct
 {
@@ -1780,19 +1709,19 @@ LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *
     }
     buffer += sizeof(*id);
 
-    id->version.u.s.Major = wcstol(version_str, NULL, 10);
+    id->version.Major = wcstol(version_str, NULL, 10);
     if (!(s = wcschr(version_str, L'.')))
         return ERROR_INVALID_PARAMETER;
     ++s;
-    id->version.u.s.Minor = wcstol(s, NULL, 10);
+    id->version.Minor = wcstol(s, NULL, 10);
     if (!(s = wcschr(s, L'.')))
         return ERROR_INVALID_PARAMETER;
     ++s;
-    id->version.u.s.Build = wcstol(s, NULL, 10);
+    id->version.Build = wcstol(s, NULL, 10);
     if (!(s = wcschr(s, L'.')))
         return ERROR_INVALID_PARAMETER;
     ++s;
-    id->version.u.s.Revision = wcstol(s, NULL, 10);
+    id->version.Revision = wcstol(s, NULL, 10);
 
     id->name = (WCHAR *)buffer;
     len = version_str - name - 1;

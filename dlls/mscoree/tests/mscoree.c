@@ -148,7 +148,7 @@ static BOOL runtime_is_usable(void)
     si.cb = sizeof(si);
 
     ret = CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcessA failed\n");
+    ok(ret, "Could not create process: %lu\n", GetLastError());
     if (!ret)
         return FALSE;
 
@@ -157,9 +157,8 @@ static BOOL runtime_is_usable(void)
     WaitForSingleObject(pi.hProcess, INFINITE);
 
     ret = GetExitCodeProcess(pi.hProcess, &exitcode);
+    ok(ret, "GetExitCodeProcess failed: %lu\n", GetLastError());
     CloseHandle(pi.hProcess);
-
-    ok(ret, "GetExitCodeProcess failed\n");
 
     if (!ret || exitcode != 0)
     {
@@ -424,7 +423,7 @@ static void create_xml_file(LPCWSTR filename)
     DWORD dwNumberOfBytesWritten;
     HANDLE hfile = CreateFileW(filename, GENERIC_WRITE, 0, NULL,
                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    ok(hfile != INVALID_HANDLE_VALUE, "File creation failed\n");
+    ok(hfile != INVALID_HANDLE_VALUE, "Could not open %s for writing: %lu\n", wine_dbgstr_w(filename), GetLastError());
     WriteFile(hfile, xmldata, sizeof(xmldata) - 1, &dwNumberOfBytesWritten, NULL);
     CloseHandle(hfile);
 }
@@ -593,25 +592,50 @@ static BOOL compile_cs(const WCHAR *source, const WCHAR *target, const WCHAR *ty
     return ret;
 }
 
+static BOOL create_new_dir(WCHAR newdir[MAX_PATH], const WCHAR* prefix)
+{
+    WCHAR path[MAX_PATH];
+    BOOL try_tmpdir = TRUE;
+    static unsigned i = 0;
+
+    GetCurrentDirectoryW(ARRAY_SIZE(path), path);
+
+    while (1)
+    {
+        swprintf(newdir, MAX_PATH, L"%s\\%s%04d", path, prefix, i);
+        if (CreateDirectoryW(newdir, NULL))
+            return TRUE;
+        switch (GetLastError())
+        {
+        case ERROR_ACCESS_DENIED:
+            if (!try_tmpdir)
+                return FALSE;
+            try_tmpdir = FALSE;
+            GetTempPathW(ARRAY_SIZE(path), path);
+            path[wcslen(path) - 1] = 0; /* redundant trailing backslash */
+            break;
+        case ERROR_ALREADY_EXISTS:
+            i++;
+            break;
+        default:
+            return FALSE;
+        }
+    }
+}
+
 static void test_loadpaths_execute(const WCHAR *exe_name, const WCHAR *dll_name, const WCHAR *cfg_name,
                                    const WCHAR *dll_dest, BOOL expect_failure, BOOL todo)
 {
-    WCHAR tmp[MAX_PATH], tmpdir[MAX_PATH], tmpexe[MAX_PATH], tmpcfg[MAX_PATH], tmpdll[MAX_PATH];
+    WCHAR tmpdir[MAX_PATH], tmpexe[MAX_PATH], tmpcfg[MAX_PATH], tmpdll[MAX_PATH];
     PROCESS_INFORMATION pi;
     STARTUPINFOW si = { 0 };
     WCHAR *ptr, *end;
-    DWORD exit_code = 0xdeadbeef;
-    LUID id;
+    DWORD exit_code = 0xdeadbeef, err;
     BOOL ret;
 
-    GetTempPathW(MAX_PATH, tmp);
-    ret = AllocateLocallyUniqueId(&id);
-    ok(ret, "AllocateLocallyUniqueId failed: %lu\n", GetLastError());
-    ret = GetTempFileNameW(tmp, L"loadpaths", id.LowPart, tmpdir);
-    ok(ret, "GetTempFileNameW failed: %lu\n", GetLastError());
-
-    ret = CreateDirectoryW(tmpdir, NULL);
-    ok(ret, "CreateDirectoryW(%s) failed: %lu\n", debugstr_w(tmpdir), GetLastError());
+    ret = create_new_dir(tmpdir, L"loadpaths");
+    ok(ret, "failed to create a new dir %lu\n", GetLastError());
+    end = tmpdir + wcslen(tmpdir);
 
     wcscpy(tmpexe, tmpdir);
     PathAppendW(tmpexe, exe_name);
@@ -674,12 +698,35 @@ static void test_loadpaths_execute(const WCHAR *exe_name, const WCHAR *dll_name,
     ret = DeleteFileW(tmpexe);
     ok(ret, "DeleteFileW(%s) failed: %lu\n", debugstr_w(tmpexe), GetLastError());
 
-    end = tmpdir + wcslen(tmp);
-    ptr = tmpdir + wcslen(tmpdir) - 1;
-    while (ptr > end && (ptr = wcsrchr(tmpdir, '\\')))
+    ptr = end;
+    while (ptr >= end && (ptr = wcsrchr(tmpdir, '\\')))
     {
         ret = RemoveDirectoryW(tmpdir);
-        ok(ret, "RemoveDirectoryW(%s) failed: %lu\n", debugstr_w(tmpdir), GetLastError());
+        err = GetLastError();
+        ok(ret, "RemoveDirectoryW(%s) failed: %lu\n", debugstr_w(tmpdir), err);
+
+        if (!ret && err == ERROR_DIR_NOT_EMPTY)
+        {
+            WIN32_FIND_DATAW fd;
+            HANDLE hfind;
+
+            wcscat(tmpdir, L"\\*");
+            hfind = FindFirstFileW(tmpdir, &fd);
+            while (hfind != INVALID_HANDLE_VALUE && (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")))
+            {
+                if (!FindNextFileW(hfind, &fd))
+                {
+                    FindClose(hfind);
+                    hfind = INVALID_HANDLE_VALUE;
+                }
+            }
+            if (hfind != INVALID_HANDLE_VALUE)
+            {
+                trace("file %s still present in tmpdir\n", debugstr_w(fd.cFileName));
+                FindClose(hfind);
+            }
+        }
+
         *ptr = '\0';
     }
 }

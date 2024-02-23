@@ -20,8 +20,6 @@
 #include "ocidl.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
-#include "wine/rbtree.h"
 #include "initguid.h"
 #include "wine/iaccessible2.h"
 
@@ -29,45 +27,48 @@ WINE_DEFAULT_DEBUG_CHANNEL(uiautomation);
 
 DEFINE_GUID(SID_AccFromDAWrapper, 0x33f139ee, 0xe509, 0x47f7, 0xbf,0x39, 0x83,0x76,0x44,0xf7,0x45,0x76);
 
-static void variant_init_i4(VARIANT *v, int val)
-{
-    V_VT(v) = VT_I4;
-    V_I4(v) = val;
-}
-
-static void variant_init_bool(VARIANT *v, BOOL val)
-{
-    V_VT(v) = VT_BOOL;
-    V_BOOL(v) = val ? VARIANT_TRUE : VARIANT_FALSE;
-}
-
-static BOOL msaa_check_acc_state(IAccessible *acc, VARIANT cid, ULONG flag)
+/* Returns S_OK if flag is set, S_FALSE if it is not. */
+static HRESULT msaa_check_acc_state_hres(IAccessible *acc, VARIANT cid, ULONG flag)
 {
     HRESULT hr;
     VARIANT v;
 
     VariantInit(&v);
     hr = IAccessible_get_accState(acc, cid, &v);
-    if (SUCCEEDED(hr) && V_VT(&v) == VT_I4 && (V_I4(&v) & flag))
-        return TRUE;
+    if (SUCCEEDED(hr))
+        hr = ((V_VT(&v) == VT_I4) && (V_I4(&v) & flag)) ? S_OK : S_FALSE;
 
-    return FALSE;
+    return hr;
+}
+
+static BOOL msaa_check_acc_state(IAccessible *acc, VARIANT cid, ULONG flag)
+{
+    return msaa_check_acc_state_hres(acc, cid, flag) == S_OK;
+}
+
+static HRESULT msaa_acc_get_service(IAccessible *acc, REFGUID sid, REFIID riid, void **service)
+{
+    IServiceProvider *sp;
+    HRESULT hr;
+
+    *service = NULL;
+    hr = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void **)&sp);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IServiceProvider_QueryService(sp, sid, riid, (void **)service);
+    IServiceProvider_Release(sp);
+    return hr;
 }
 
 static IAccessible2 *msaa_acc_get_ia2(IAccessible *acc)
 {
-    IServiceProvider *serv_prov;
     IAccessible2 *ia2 = NULL;
     HRESULT hr;
 
-    hr = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void **)&serv_prov);
-    if (SUCCEEDED(hr))
-    {
-        hr = IServiceProvider_QueryService(serv_prov, &IID_IAccessible2, &IID_IAccessible2, (void **)&ia2);
-        IServiceProvider_Release(serv_prov);
-        if (SUCCEEDED(hr) && ia2)
-            return ia2;
-    }
+    hr = msaa_acc_get_service(acc, &IID_IAccessible2, &IID_IAccessible2, (void **)&ia2);
+    if (SUCCEEDED(hr) && ia2)
+        return ia2;
 
     hr = IAccessible_QueryInterface(acc, &IID_IAccessible2, (void **)&ia2);
     if (SUCCEEDED(hr) && ia2)
@@ -78,22 +79,30 @@ static IAccessible2 *msaa_acc_get_ia2(IAccessible *acc)
 
 static IAccessible *msaa_acc_da_unwrap(IAccessible *acc)
 {
-    IServiceProvider *sp;
     IAccessible *acc2;
     HRESULT hr;
 
-    hr = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void**)&sp);
-    if (SUCCEEDED(hr))
-    {
-        hr = IServiceProvider_QueryService(sp, &SID_AccFromDAWrapper, &IID_IAccessible, (void**)&acc2);
-        IServiceProvider_Release(sp);
-    }
-
+    hr = msaa_acc_get_service(acc, &SID_AccFromDAWrapper, &IID_IAccessible, (void **)&acc2);
     if (SUCCEEDED(hr) && acc2)
         return acc2;
 
     IAccessible_AddRef(acc);
     return acc;
+}
+
+static BOOL msaa_acc_is_oleacc_proxy(IAccessible *acc)
+{
+    IUnknown *unk;
+    HRESULT hr;
+
+    hr = msaa_acc_get_service(acc, &IIS_IsOleaccProxy, &IID_IUnknown, (void **)&unk);
+    if (SUCCEEDED(hr) && unk)
+    {
+        IUnknown_Release(unk);
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 /*
@@ -167,6 +176,25 @@ static HRESULT msaa_acc_prop_match(IAccessible *acc, IAccessible *acc2)
         return S_OK;
 
     return S_FALSE;
+}
+
+static BOOL msaa_acc_iface_cmp(IAccessible *acc, IAccessible *acc2)
+{
+    IUnknown *unk, *unk2;
+    BOOL matched;
+
+    acc = msaa_acc_da_unwrap(acc);
+    acc2 = msaa_acc_da_unwrap(acc2);
+    IAccessible_QueryInterface(acc, &IID_IUnknown, (void**)&unk);
+    IAccessible_QueryInterface(acc2, &IID_IUnknown, (void**)&unk2);
+    matched = (unk == unk2);
+
+    IAccessible_Release(acc);
+    IUnknown_Release(unk);
+    IAccessible_Release(acc2);
+    IUnknown_Release(unk2);
+
+    return matched;
 }
 
 static BOOL msaa_acc_compare(IAccessible *acc, IAccessible *acc2)
@@ -356,7 +384,7 @@ static HRESULT msaa_acc_get_child_pos(IAccessible *acc, IAccessible **out_parent
         return hr;
     }
 
-    children = heap_alloc_zero(sizeof(*children) * child_count);
+    children = calloc(child_count, sizeof(*children));
     if (!children)
         return E_OUTOFMEMORY;
 
@@ -410,7 +438,7 @@ exit:
             IAccessible_Release(children[i]);
     }
 
-    heap_free(children);
+    free(children);
 
     return hr;
 }
@@ -500,7 +528,9 @@ static LONG msaa_role_to_uia_control_type(LONG role)
 struct msaa_provider {
     IRawElementProviderSimple IRawElementProviderSimple_iface;
     IRawElementProviderFragment IRawElementProviderFragment_iface;
+    IRawElementProviderFragmentRoot IRawElementProviderFragmentRoot_iface;
     ILegacyIAccessibleProvider ILegacyIAccessibleProvider_iface;
+    IProxyProviderWinEventHandler IProxyProviderWinEventHandler_iface;
     LONG refcount;
 
     IAccessible *acc;
@@ -553,8 +583,12 @@ HRESULT WINAPI msaa_provider_QueryInterface(IRawElementProviderSimple *iface, RE
         *ppv = iface;
     else if (IsEqualIID(riid, &IID_IRawElementProviderFragment))
         *ppv = &msaa_prov->IRawElementProviderFragment_iface;
+    else if (IsEqualIID(riid, &IID_IRawElementProviderFragmentRoot))
+        *ppv = &msaa_prov->IRawElementProviderFragmentRoot_iface;
     else if (IsEqualIID(riid, &IID_ILegacyIAccessibleProvider))
         *ppv = &msaa_prov->ILegacyIAccessibleProvider_iface;
+    else if (IsEqualIID(riid, &IID_IProxyProviderWinEventHandler))
+        *ppv = &msaa_prov->IProxyProviderWinEventHandler_iface;
     else
         return E_NOINTERFACE;
 
@@ -586,7 +620,7 @@ ULONG WINAPI msaa_provider_Release(IRawElementProviderSimple *iface)
             IAccessible_Release(msaa_prov->parent);
         if (msaa_prov->ia2)
             IAccessible2_Release(msaa_prov->ia2);
-        heap_free(msaa_prov);
+        free(msaa_prov);
     }
 
     return refcount;
@@ -651,24 +685,88 @@ HRESULT WINAPI msaa_provider_GetPropertyValue(IRawElementProviderSimple *iface,
         break;
 
     case UIA_HasKeyboardFocusPropertyId:
-        variant_init_bool(ret_val, msaa_check_acc_state(msaa_prov->acc, msaa_prov->cid,
-                    STATE_SYSTEM_FOCUSED));
+        hr = msaa_check_acc_state_hres(msaa_prov->acc, msaa_prov->cid, STATE_SYSTEM_FOCUSED);
+        if (FAILED(hr))
+            return hr;
+
+        variant_init_bool(ret_val, hr == S_OK);
         break;
 
     case UIA_IsKeyboardFocusablePropertyId:
-        variant_init_bool(ret_val, msaa_check_acc_state(msaa_prov->acc, msaa_prov->cid,
-                    STATE_SYSTEM_FOCUSABLE));
+        hr = msaa_check_acc_state_hres(msaa_prov->acc, msaa_prov->cid, STATE_SYSTEM_FOCUSABLE);
+        if (FAILED(hr))
+            return hr;
+
+        variant_init_bool(ret_val, hr == S_OK);
         break;
 
     case UIA_IsEnabledPropertyId:
-        variant_init_bool(ret_val, !msaa_check_acc_state(msaa_prov->acc, msaa_prov->cid,
-                    STATE_SYSTEM_UNAVAILABLE));
+        hr = msaa_check_acc_state_hres(msaa_prov->acc, msaa_prov->cid, STATE_SYSTEM_UNAVAILABLE);
+        if (FAILED(hr))
+            return hr;
+
+        variant_init_bool(ret_val, hr == S_FALSE);
         break;
 
     case UIA_IsPasswordPropertyId:
-        variant_init_bool(ret_val, msaa_check_acc_state(msaa_prov->acc, msaa_prov->cid,
-                    STATE_SYSTEM_PROTECTED));
+        hr = msaa_check_acc_state_hres(msaa_prov->acc, msaa_prov->cid, STATE_SYSTEM_PROTECTED);
+        if (FAILED(hr))
+            return hr;
+
+        variant_init_bool(ret_val, hr == S_OK);
         break;
+
+    case UIA_NamePropertyId:
+    {
+        BSTR name;
+
+        hr = IAccessible_get_accName(msaa_prov->acc, msaa_prov->cid, &name);
+        if (SUCCEEDED(hr) && name)
+        {
+            V_VT(ret_val) = VT_BSTR;
+            V_BSTR(ret_val) = name;
+        }
+        break;
+    }
+
+    case UIA_IsOffscreenPropertyId:
+    {
+        RECT rect[2] = { 0 };
+        RECT intersect_rect;
+        LONG width, height;
+
+        variant_init_bool(ret_val, FALSE);
+        if (msaa_check_acc_state(msaa_prov->acc, msaa_prov->cid, STATE_SYSTEM_OFFSCREEN))
+        {
+            variant_init_bool(ret_val, TRUE);
+            break;
+        }
+
+        hr = IAccessible_accLocation(msaa_prov->acc, &rect[0].left, &rect[0].top, &width, &height, msaa_prov->cid);
+        if (FAILED(hr))
+            break;
+
+        rect[0].right = rect[0].left + width;
+        rect[0].bottom = rect[0].top + height;
+        SetLastError(NOERROR);
+        if (!GetClientRect(msaa_prov->hwnd, &rect[1]))
+        {
+            if (GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+                variant_init_bool(ret_val, TRUE);
+            break;
+        }
+
+        SetLastError(NOERROR);
+        if (!MapWindowPoints(msaa_prov->hwnd, NULL, (POINT *)&rect[1], 2) && GetLastError())
+        {
+            if (GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+                variant_init_bool(ret_val, TRUE);
+            break;
+        }
+
+        variant_init_bool(ret_val, !IntersectRect(&intersect_rect, &rect[0], &rect[1]));
+        break;
+    }
 
     default:
         FIXME("Unimplemented propertyId %d\n", prop_id);
@@ -757,7 +855,7 @@ static HRESULT WINAPI msaa_fragment_Navigate(IRawElementProviderFragment *iface,
         else
             acc = msaa_prov->acc;
 
-        hr = UiaProviderFromIAccessible(acc, CHILDID_SELF, 0, &elprov);
+        hr = create_msaa_provider(acc, CHILDID_SELF, NULL, FALSE, FALSE, &elprov);
         if (SUCCEEDED(hr))
         {
             struct msaa_provider *prov = impl_from_msaa_provider(elprov);
@@ -788,7 +886,7 @@ static HRESULT WINAPI msaa_fragment_Navigate(IRawElementProviderFragment *iface,
         if (FAILED(hr) || !acc)
             break;
 
-        hr = UiaProviderFromIAccessible(acc, child_id, 0, &elprov);
+        hr = create_msaa_provider(acc, child_id, NULL, FALSE, FALSE, &elprov);
         if (SUCCEEDED(hr))
         {
             struct msaa_provider *prov = impl_from_msaa_provider(elprov);
@@ -838,7 +936,7 @@ static HRESULT WINAPI msaa_fragment_Navigate(IRawElementProviderFragment *iface,
         if (FAILED(hr) || !acc)
             break;
 
-        hr = UiaProviderFromIAccessible(acc, child_id, 0, &elprov);
+        hr = create_msaa_provider(acc, child_id, NULL, FALSE, FALSE, &elprov);
         if (SUCCEEDED(hr))
         {
             struct msaa_provider *prov = impl_from_msaa_provider(elprov);
@@ -874,16 +972,42 @@ static HRESULT WINAPI msaa_fragment_GetRuntimeId(IRawElementProviderFragment *if
 static HRESULT WINAPI msaa_fragment_get_BoundingRectangle(IRawElementProviderFragment *iface,
         struct UiaRect *ret_val)
 {
-    FIXME("%p, %p: stub!\n", iface, ret_val);
-    return E_NOTIMPL;
+    struct msaa_provider *msaa_prov = impl_from_msaa_fragment(iface);
+    LONG left, top, width, height;
+    HRESULT hr;
+
+    TRACE("%p, %p\n", iface, ret_val);
+
+    memset(ret_val, 0, sizeof(*ret_val));
+
+    /*
+     * If this IAccessible is at the root of its HWND, the BaseHwnd provider
+     * will supply the bounding rectangle.
+     */
+    if (msaa_check_root_acc(msaa_prov))
+        return S_OK;
+
+    if (msaa_check_acc_state(msaa_prov->acc, msaa_prov->cid, STATE_SYSTEM_OFFSCREEN))
+        return S_OK;
+
+    hr = IAccessible_accLocation(msaa_prov->acc, &left, &top, &width, &height, msaa_prov->cid);
+    if (FAILED(hr))
+        return hr;
+
+    ret_val->left = left;
+    ret_val->top = top;
+    ret_val->width = width;
+    ret_val->height = height;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI msaa_fragment_GetEmbeddedFragmentRoots(IRawElementProviderFragment *iface,
         SAFEARRAY **ret_val)
 {
-    FIXME("%p, %p: stub!\n", iface, ret_val);
+    TRACE("%p, %p\n", iface, ret_val);
     *ret_val = NULL;
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI msaa_fragment_SetFocus(IRawElementProviderFragment *iface)
@@ -895,9 +1019,27 @@ static HRESULT WINAPI msaa_fragment_SetFocus(IRawElementProviderFragment *iface)
 static HRESULT WINAPI msaa_fragment_get_FragmentRoot(IRawElementProviderFragment *iface,
         IRawElementProviderFragmentRoot **ret_val)
 {
-    FIXME("%p, %p: stub!\n", iface, ret_val);
+    struct msaa_provider *msaa_prov = impl_from_msaa_fragment(iface);
+    IRawElementProviderSimple *elprov;
+    IAccessible *acc;
+    HRESULT hr;
+
+    TRACE("%p, %p\n", iface, ret_val);
+
     *ret_val = NULL;
-    return E_NOTIMPL;
+    hr = AccessibleObjectFromWindow(msaa_prov->hwnd, OBJID_CLIENT, &IID_IAccessible, (void **)&acc);
+    if (FAILED(hr) || !acc)
+        return hr;
+
+    hr = create_msaa_provider(acc, CHILDID_SELF, msaa_prov->hwnd, TRUE, TRUE, &elprov);
+    IAccessible_Release(acc);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IRawElementProviderSimple_QueryInterface(elprov, &IID_IRawElementProviderFragmentRoot, (void **)ret_val);
+    IRawElementProviderSimple_Release(elprov);
+
+    return hr;
 }
 
 static const IRawElementProviderFragmentVtbl msaa_fragment_vtbl = {
@@ -910,6 +1052,166 @@ static const IRawElementProviderFragmentVtbl msaa_fragment_vtbl = {
     msaa_fragment_GetEmbeddedFragmentRoots,
     msaa_fragment_SetFocus,
     msaa_fragment_get_FragmentRoot,
+};
+
+/*
+ * IRawElementProviderFragmentRoot interface for UiaProviderFromIAccessible
+ * providers.
+ */
+static inline struct msaa_provider *impl_from_msaa_fragment_root(IRawElementProviderFragmentRoot *iface)
+{
+    return CONTAINING_RECORD(iface, struct msaa_provider, IRawElementProviderFragmentRoot_iface);
+}
+
+static HRESULT WINAPI msaa_fragment_root_QueryInterface(IRawElementProviderFragmentRoot *iface, REFIID riid,
+        void **ppv)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_fragment_root(iface);
+    return IRawElementProviderSimple_QueryInterface(&msaa_prov->IRawElementProviderSimple_iface, riid, ppv);
+}
+
+static ULONG WINAPI msaa_fragment_root_AddRef(IRawElementProviderFragmentRoot *iface)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_fragment_root(iface);
+    return IRawElementProviderSimple_AddRef(&msaa_prov->IRawElementProviderSimple_iface);
+}
+
+static ULONG WINAPI msaa_fragment_root_Release(IRawElementProviderFragmentRoot *iface)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_fragment_root(iface);
+    return IRawElementProviderSimple_Release(&msaa_prov->IRawElementProviderSimple_iface);
+}
+
+static HRESULT WINAPI msaa_fragment_root_ElementProviderFromPoint(IRawElementProviderFragmentRoot *iface,
+        double x, double y, IRawElementProviderFragment **ret_val)
+{
+    FIXME("%p, %f, %f, %p: stub!\n", iface, x, y, ret_val);
+    *ret_val = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT msaa_acc_get_focus(struct msaa_provider *prov, struct msaa_provider **out_prov)
+{
+    IRawElementProviderSimple *elprov;
+    IAccessible *focus_acc = NULL;
+    INT focus_cid = CHILDID_SELF;
+    HWND hwnd = NULL;
+    HRESULT hr;
+    VARIANT v;
+
+    *out_prov = NULL;
+
+    if (V_I4(&prov->cid) != CHILDID_SELF)
+        return S_OK;
+
+    VariantInit(&v);
+    hr = IAccessible_get_accFocus(prov->acc, &v);
+    if (FAILED(hr) || (V_VT(&v) != VT_I4 && V_VT(&v) != VT_DISPATCH))
+    {
+        VariantClear(&v);
+        return hr;
+    }
+
+    if (V_VT(&v) == VT_I4)
+    {
+        IDispatch *disp = NULL;
+
+        if (V_I4(&v) == CHILDID_SELF)
+            return S_OK;
+
+        hr = IAccessible_get_accChild(prov->acc, v, &disp);
+        if (FAILED(hr))
+            return hr;
+
+        if (hr == S_FALSE)
+        {
+            hwnd = prov->hwnd;
+            focus_acc = prov->acc;
+            IAccessible_AddRef(focus_acc);
+            focus_cid = V_I4(&v);
+        }
+        else if (disp)
+        {
+            V_VT(&v) = VT_DISPATCH;
+            V_DISPATCH(&v) = disp;
+        }
+        else
+            return E_FAIL;
+    }
+
+    if (V_VT(&v) == VT_DISPATCH)
+    {
+        hr = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IAccessible, (void **)&focus_acc);
+        VariantClear(&v);
+        if (FAILED(hr))
+            return hr;
+
+        hr = WindowFromAccessibleObject(focus_acc, &hwnd);
+        if (FAILED(hr) || !hwnd)
+        {
+            IAccessible_Release(focus_acc);
+            return hr;
+        }
+    }
+
+    hr = create_msaa_provider(focus_acc, focus_cid, hwnd, FALSE, FALSE, &elprov);
+    IAccessible_Release(focus_acc);
+    if (SUCCEEDED(hr))
+        *out_prov = impl_from_msaa_provider(elprov);
+
+    return hr;
+}
+
+static HRESULT WINAPI msaa_fragment_root_GetFocus(IRawElementProviderFragmentRoot *iface,
+        IRawElementProviderFragment **ret_val)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_fragment_root(iface);
+    struct msaa_provider *prov, *prov2;
+    IRawElementProviderSimple *elprov;
+    HRESULT hr;
+
+    TRACE("%p, %p\n", iface, ret_val);
+
+    *ret_val = NULL;
+    if (V_I4(&msaa_prov->cid) != CHILDID_SELF)
+        return S_OK;
+
+    hr = create_msaa_provider(msaa_prov->acc, CHILDID_SELF, msaa_prov->hwnd, FALSE, FALSE, &elprov);
+    if (FAILED(hr))
+        return hr;
+
+    prov = impl_from_msaa_provider(elprov);
+    while (SUCCEEDED(msaa_acc_get_focus(prov, &prov2)))
+    {
+        if (!prov2 || (msaa_check_acc_state_hres(prov2->acc, prov2->cid, STATE_SYSTEM_INVISIBLE) != S_FALSE) ||
+                ((V_I4(&prov2->cid) == CHILDID_SELF) && msaa_acc_iface_cmp(prov->acc, prov2->acc)))
+        {
+            if (prov2)
+                IRawElementProviderSimple_Release(&prov2->IRawElementProviderSimple_iface);
+
+            if (msaa_acc_iface_cmp(prov->acc, msaa_prov->acc) && V_I4(&prov->cid) == CHILDID_SELF)
+            {
+                IRawElementProviderSimple_Release(&prov->IRawElementProviderSimple_iface);
+                return S_OK;
+            }
+            break;
+        }
+
+        IRawElementProviderSimple_Release(&prov->IRawElementProviderSimple_iface);
+        prov = prov2;
+    }
+
+    hr = IRawElementProviderSimple_QueryInterface(&prov->IRawElementProviderSimple_iface, &IID_IRawElementProviderFragment, (void **)ret_val);
+    IRawElementProviderSimple_Release(&prov->IRawElementProviderSimple_iface);
+    return hr;
+}
+
+static const IRawElementProviderFragmentRootVtbl msaa_fragment_root_vtbl = {
+    msaa_fragment_root_QueryInterface,
+    msaa_fragment_root_AddRef,
+    msaa_fragment_root_Release,
+    msaa_fragment_root_ElementProviderFromPoint,
+    msaa_fragment_root_GetFocus,
 };
 
 /*
@@ -964,10 +1266,11 @@ static HRESULT WINAPI msaa_acc_provider_GetIAccessible(ILegacyIAccessibleProvide
 
     TRACE("%p, %p\n", iface, out_acc);
 
-    IAccessible_AddRef(msaa_prov->acc);
-    *out_acc = msaa_prov->acc;
+    *out_acc = NULL;
+    if (msaa_acc_is_oleacc_proxy(msaa_prov->acc))
+        return S_OK;
 
-    return S_OK;
+    return IAccessible_QueryInterface(msaa_prov->acc, &IID_IAccessible, (void **)out_acc);
 }
 
 static HRESULT WINAPI msaa_acc_provider_get_ChildId(ILegacyIAccessibleProvider *iface, int *out_cid)
@@ -1001,8 +1304,19 @@ static HRESULT WINAPI msaa_acc_provider_get_Description(ILegacyIAccessibleProvid
 
 static HRESULT WINAPI msaa_acc_provider_get_Role(ILegacyIAccessibleProvider *iface, DWORD *out_role)
 {
-    FIXME("%p, %p: stub!\n", iface, out_role);
-    return E_NOTIMPL;
+    struct msaa_provider *msaa_prov = impl_from_msaa_acc_provider(iface);
+    HRESULT hr;
+    VARIANT v;
+
+    TRACE("%p, %p\n", iface, out_role);
+
+    *out_role = 0;
+    VariantInit(&v);
+    hr = IAccessible_get_accRole(msaa_prov->acc, msaa_prov->cid, &v);
+    if (SUCCEEDED(hr) && V_VT(&v) == VT_I4)
+        *out_role = V_I4(&v);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI msaa_acc_provider_get_State(ILegacyIAccessibleProvider *iface, DWORD *out_state)
@@ -1058,14 +1372,121 @@ static const ILegacyIAccessibleProviderVtbl msaa_acc_provider_vtbl = {
     msaa_acc_provider_get_DefaultAction,
 };
 
+/*
+ * IProxyProviderWinEventHandler interface for UiaProviderFromIAccessible
+ * providers.
+ */
+static inline struct msaa_provider *impl_from_msaa_winevent_handler(IProxyProviderWinEventHandler *iface)
+{
+    return CONTAINING_RECORD(iface, struct msaa_provider, IProxyProviderWinEventHandler_iface);
+}
+
+static HRESULT WINAPI msaa_winevent_handler_QueryInterface(IProxyProviderWinEventHandler *iface, REFIID riid,
+        void **ppv)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_winevent_handler(iface);
+    return IRawElementProviderSimple_QueryInterface(&msaa_prov->IRawElementProviderSimple_iface, riid, ppv);
+}
+
+static ULONG WINAPI msaa_winevent_handler_AddRef(IProxyProviderWinEventHandler *iface)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_winevent_handler(iface);
+    return IRawElementProviderSimple_AddRef(&msaa_prov->IRawElementProviderSimple_iface);
+}
+
+static ULONG WINAPI msaa_winevent_handler_Release(IProxyProviderWinEventHandler *iface)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_winevent_handler(iface);
+    return IRawElementProviderSimple_Release(&msaa_prov->IRawElementProviderSimple_iface);
+}
+
+static HRESULT WINAPI msaa_winevent_handler_RespondToWinEvent(IProxyProviderWinEventHandler *iface, DWORD event_id,
+        HWND hwnd, LONG objid, LONG cid, IProxyProviderWinEventSink *event_sink)
+{
+    struct msaa_provider *msaa_prov = impl_from_msaa_winevent_handler(iface);
+    HRESULT hr;
+
+    TRACE("%p, %ld, %p, %ld, %ld, %p\n", iface, event_id, hwnd, objid, cid, event_sink);
+
+    switch (event_id)
+    {
+    case EVENT_SYSTEM_ALERT:
+        hr = IProxyProviderWinEventSink_AddAutomationEvent(event_sink, &msaa_prov->IRawElementProviderSimple_iface,
+                UIA_SystemAlertEventId);
+        if (FAILED(hr))
+            WARN("AddAutomationEvent failed with hr %#lx\n", hr);
+        break;
+
+    case EVENT_OBJECT_REORDER:
+    case EVENT_OBJECT_SELECTION:
+    case EVENT_OBJECT_NAMECHANGE:
+    case EVENT_OBJECT_VALUECHANGE:
+    case EVENT_OBJECT_HELPCHANGE:
+    case EVENT_OBJECT_INVOKED:
+        FIXME("WinEvent %ld currently unimplemented\n", event_id);
+        return E_NOTIMPL;
+
+    default:
+        break;
+    }
+
+    return S_OK;
+}
+
+static const IProxyProviderWinEventHandlerVtbl msaa_winevent_handler_vtbl = {
+    msaa_winevent_handler_QueryInterface,
+    msaa_winevent_handler_AddRef,
+    msaa_winevent_handler_Release,
+    msaa_winevent_handler_RespondToWinEvent,
+};
+
+HRESULT create_msaa_provider(IAccessible *acc, LONG child_id, HWND hwnd, BOOL root_acc_known,
+        BOOL is_root_acc, IRawElementProviderSimple **elprov)
+{
+    struct msaa_provider *msaa_prov = calloc(1, sizeof(*msaa_prov));
+
+    if (!msaa_prov)
+        return E_OUTOFMEMORY;
+
+    msaa_prov->IRawElementProviderSimple_iface.lpVtbl = &msaa_provider_vtbl;
+    msaa_prov->IRawElementProviderFragment_iface.lpVtbl = &msaa_fragment_vtbl;
+    msaa_prov->IRawElementProviderFragmentRoot_iface.lpVtbl = &msaa_fragment_root_vtbl;
+    msaa_prov->ILegacyIAccessibleProvider_iface.lpVtbl = &msaa_acc_provider_vtbl;
+    msaa_prov->IProxyProviderWinEventHandler_iface.lpVtbl = &msaa_winevent_handler_vtbl;
+    msaa_prov->refcount = 1;
+    variant_init_i4(&msaa_prov->cid, child_id);
+    msaa_prov->acc = acc;
+    IAccessible_AddRef(acc);
+    msaa_prov->ia2 = msaa_acc_get_ia2(acc);
+
+    if (!hwnd)
+    {
+        HRESULT hr;
+
+        hr = WindowFromAccessibleObject(acc, &msaa_prov->hwnd);
+        if (FAILED(hr))
+            WARN("WindowFromAccessibleObject failed with hr %#lx\n", hr);
+    }
+    else
+        msaa_prov->hwnd = hwnd;
+
+    if (root_acc_known)
+    {
+        msaa_prov->root_acc_check_ran = TRUE;
+        msaa_prov->is_root_acc = is_root_acc;
+    }
+
+    *elprov = &msaa_prov->IRawElementProviderSimple_iface;
+
+    return S_OK;
+}
+
 /***********************************************************************
  *          UiaProviderFromIAccessible (uiautomationcore.@)
  */
-HRESULT WINAPI UiaProviderFromIAccessible(IAccessible *acc, long child_id, DWORD flags,
+HRESULT WINAPI UiaProviderFromIAccessible(IAccessible *acc, LONG child_id, DWORD flags,
         IRawElementProviderSimple **elprov)
 {
-    struct msaa_provider *msaa_prov;
-    IServiceProvider *serv_prov;
     HWND hwnd = NULL;
     HRESULT hr;
 
@@ -1085,21 +1506,10 @@ HRESULT WINAPI UiaProviderFromIAccessible(IAccessible *acc, long child_id, DWORD
         return E_NOTIMPL;
     }
 
-    hr = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void **)&serv_prov);
-    if (SUCCEEDED(hr))
+    if (msaa_acc_is_oleacc_proxy(acc))
     {
-        IUnknown *unk;
-
-        hr = IServiceProvider_QueryService(serv_prov, &IIS_IsOleaccProxy, &IID_IUnknown, (void **)&unk);
-        if (SUCCEEDED(hr))
-        {
-            WARN("Cannot wrap an oleacc proxy IAccessible!\n");
-            IUnknown_Release(unk);
-            IServiceProvider_Release(serv_prov);
-            return E_INVALIDARG;
-        }
-
-        IServiceProvider_Release(serv_prov);
+        WARN("Cannot wrap an oleacc proxy IAccessible!\n");
+        return E_INVALIDARG;
     }
 
     hr = WindowFromAccessibleObject(acc, &hwnd);
@@ -1108,20 +1518,420 @@ HRESULT WINAPI UiaProviderFromIAccessible(IAccessible *acc, long child_id, DWORD
     if (!hwnd)
         return E_FAIL;
 
-    msaa_prov = heap_alloc_zero(sizeof(*msaa_prov));
-    if (!msaa_prov)
+    return create_msaa_provider(acc, child_id, hwnd, FALSE, FALSE, elprov);
+}
+
+static HRESULT uia_get_hr_for_last_error(void)
+{
+    DWORD last_err = GetLastError();
+
+    switch (last_err)
+    {
+    case ERROR_INVALID_WINDOW_HANDLE:
+        return UIA_E_ELEMENTNOTAVAILABLE;
+
+    case ERROR_TIMEOUT:
+        return UIA_E_TIMEOUT;
+
+    default:
+        return E_FAIL;
+    }
+}
+
+#define UIA_DEFAULT_MSG_TIMEOUT 10000
+static HRESULT uia_send_message_timeout(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT timeout, LRESULT *lres)
+{
+    *lres = 0;
+    if (!SendMessageTimeoutW(hwnd, msg, wparam, lparam, SMTO_NORMAL, timeout, (PDWORD_PTR)lres))
+        return uia_get_hr_for_last_error();
+
+    return S_OK;
+}
+
+static HRESULT get_uia_control_type_for_hwnd(HWND hwnd, int *control_type)
+{
+    LONG_PTR style, ex_style;
+
+    *control_type = 0;
+    if ((ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & WS_EX_APPWINDOW)
+    {
+        *control_type = UIA_WindowControlTypeId;
+        return S_OK;
+    }
+
+    SetLastError(NO_ERROR);
+    if (!(style = GetWindowLongPtrW(hwnd, GWL_STYLE)) && (GetLastError() != NO_ERROR))
+        return uia_get_hr_for_last_error();
+
+    /*
+     * Non-caption HWNDs that are popups or tool windows aren't considered full
+     * windows, only panes.
+     */
+    if (((style & WS_CAPTION) != WS_CAPTION) && ((ex_style & WS_EX_TOOLWINDOW) || (style & WS_POPUP)))
+    {
+        *control_type = UIA_PaneControlTypeId;
+        return S_OK;
+    }
+
+    /* Non top-level HWNDs are considered panes as well. */
+    if (!uia_is_top_level_hwnd(hwnd))
+        *control_type = UIA_PaneControlTypeId;
+    else
+        *control_type = UIA_WindowControlTypeId;
+
+    return S_OK;
+}
+
+/*
+ * Default ProviderType_BaseHwnd IRawElementProviderSimple interface.
+ */
+struct base_hwnd_provider {
+    IRawElementProviderSimple IRawElementProviderSimple_iface;
+    IRawElementProviderFragment IRawElementProviderFragment_iface;
+    LONG refcount;
+
+    HWND hwnd;
+};
+
+static inline struct base_hwnd_provider *impl_from_base_hwnd_provider(IRawElementProviderSimple *iface)
+{
+    return CONTAINING_RECORD(iface, struct base_hwnd_provider, IRawElementProviderSimple_iface);
+}
+
+static HRESULT WINAPI base_hwnd_provider_QueryInterface(IRawElementProviderSimple *iface, REFIID riid, void **ppv)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_provider(iface);
+
+    *ppv = NULL;
+    if (IsEqualIID(riid, &IID_IRawElementProviderSimple) || IsEqualIID(riid, &IID_IUnknown))
+        *ppv = iface;
+    else if (IsEqualIID(riid, &IID_IRawElementProviderFragment))
+        *ppv = &base_hwnd_prov->IRawElementProviderFragment_iface;
+    else
+        return E_NOINTERFACE;
+
+    IRawElementProviderSimple_AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI base_hwnd_provider_AddRef(IRawElementProviderSimple *iface)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_provider(iface);
+    ULONG refcount = InterlockedIncrement(&base_hwnd_prov->refcount);
+
+    TRACE("%p, refcount %ld\n", iface, refcount);
+
+    return refcount;
+}
+
+static ULONG WINAPI base_hwnd_provider_Release(IRawElementProviderSimple *iface)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_provider(iface);
+    ULONG refcount = InterlockedDecrement(&base_hwnd_prov->refcount);
+
+    TRACE("%p, refcount %ld\n", iface, refcount);
+
+    if (!refcount)
+        free(base_hwnd_prov);
+
+    return refcount;
+}
+
+static HRESULT WINAPI base_hwnd_provider_get_ProviderOptions(IRawElementProviderSimple *iface,
+        enum ProviderOptions *ret_val)
+{
+    TRACE("%p, %p\n", iface, ret_val);
+    *ret_val = ProviderOptions_ClientSideProvider;
+    return S_OK;
+}
+
+static HRESULT WINAPI base_hwnd_provider_GetPatternProvider(IRawElementProviderSimple *iface,
+        PATTERNID pattern_id, IUnknown **ret_val)
+{
+    FIXME("%p, %d, %p: stub\n", iface, pattern_id, ret_val);
+    *ret_val = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI base_hwnd_provider_GetPropertyValue(IRawElementProviderSimple *iface,
+        PROPERTYID prop_id, VARIANT *ret_val)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_provider(iface);
+    HRESULT hr = S_OK;
+
+    TRACE("%p, %d, %p\n", iface, prop_id, ret_val);
+
+    VariantInit(ret_val);
+    if (!IsWindow(base_hwnd_prov->hwnd))
+        return UIA_E_ELEMENTNOTAVAILABLE;
+
+    switch (prop_id)
+    {
+    case UIA_ProviderDescriptionPropertyId:
+        V_VT(ret_val) = VT_BSTR;
+        V_BSTR(ret_val) = SysAllocString(L"Wine: HWND Proxy");
+        break;
+
+    case UIA_NativeWindowHandlePropertyId:
+        V_VT(ret_val) = VT_I4;
+        V_I4(ret_val) = HandleToUlong(base_hwnd_prov->hwnd);
+        break;
+
+    case UIA_ProcessIdPropertyId:
+    {
+        DWORD pid;
+
+        if (!GetWindowThreadProcessId(base_hwnd_prov->hwnd, &pid))
+            return UIA_E_ELEMENTNOTAVAILABLE;
+
+        V_VT(ret_val) = VT_I4;
+        V_I4(ret_val) = pid;
+        break;
+    }
+
+    case UIA_ClassNamePropertyId:
+    {
+        WCHAR buf[256] = { 0 };
+
+        if (!GetClassNameW(base_hwnd_prov->hwnd, buf, ARRAY_SIZE(buf)))
+            hr = uia_get_hr_for_last_error();
+        else
+        {
+            V_VT(ret_val) = VT_BSTR;
+            V_BSTR(ret_val) = SysAllocString(buf);
+        }
+        break;
+    }
+
+    case UIA_NamePropertyId:
+    {
+        LRESULT lres;
+
+        V_VT(ret_val) = VT_BSTR;
+        V_BSTR(ret_val) = SysAllocString(L"");
+        hr = uia_send_message_timeout(base_hwnd_prov->hwnd, WM_GETTEXTLENGTH, 0, 0, UIA_DEFAULT_MSG_TIMEOUT, &lres);
+        if (FAILED(hr) || !lres)
+            break;
+
+        if (!SysReAllocStringLen(&V_BSTR(ret_val), NULL, lres))
+        {
+            hr = E_OUTOFMEMORY;
+            break;
+        }
+
+        hr = uia_send_message_timeout(base_hwnd_prov->hwnd, WM_GETTEXT, SysStringLen(V_BSTR(ret_val)) + 1,
+                (LPARAM)V_BSTR(ret_val), UIA_DEFAULT_MSG_TIMEOUT, &lres);
+        break;
+    }
+
+    case UIA_ControlTypePropertyId:
+    {
+        int control_type;
+
+        hr = get_uia_control_type_for_hwnd(base_hwnd_prov->hwnd, &control_type);
+        if (SUCCEEDED(hr))
+        {
+            V_VT(ret_val) = VT_I4;
+            V_I4(ret_val) = control_type;
+        }
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    if (FAILED(hr))
+        VariantClear(ret_val);
+
+    return hr;
+}
+
+static HRESULT WINAPI base_hwnd_provider_get_HostRawElementProvider(IRawElementProviderSimple *iface,
+        IRawElementProviderSimple **ret_val)
+{
+    TRACE("%p, %p\n", iface, ret_val);
+    *ret_val = NULL;
+    return S_OK;
+}
+
+static const IRawElementProviderSimpleVtbl base_hwnd_provider_vtbl = {
+    base_hwnd_provider_QueryInterface,
+    base_hwnd_provider_AddRef,
+    base_hwnd_provider_Release,
+    base_hwnd_provider_get_ProviderOptions,
+    base_hwnd_provider_GetPatternProvider,
+    base_hwnd_provider_GetPropertyValue,
+    base_hwnd_provider_get_HostRawElementProvider,
+};
+
+/*
+ * IRawElementProviderFragment interface for default ProviderType_BaseHwnd
+ * providers.
+ */
+static inline struct base_hwnd_provider *impl_from_base_hwnd_fragment(IRawElementProviderFragment *iface)
+{
+    return CONTAINING_RECORD(iface, struct base_hwnd_provider, IRawElementProviderFragment_iface);
+}
+
+static HRESULT WINAPI base_hwnd_fragment_QueryInterface(IRawElementProviderFragment *iface, REFIID riid,
+        void **ppv)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_fragment(iface);
+    return IRawElementProviderSimple_QueryInterface(&base_hwnd_prov->IRawElementProviderSimple_iface, riid, ppv);
+}
+
+static ULONG WINAPI base_hwnd_fragment_AddRef(IRawElementProviderFragment *iface)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_fragment(iface);
+    return IRawElementProviderSimple_AddRef(&base_hwnd_prov->IRawElementProviderSimple_iface);
+}
+
+static ULONG WINAPI base_hwnd_fragment_Release(IRawElementProviderFragment *iface)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_fragment(iface);
+    return IRawElementProviderSimple_Release(&base_hwnd_prov->IRawElementProviderSimple_iface);
+}
+
+static HRESULT WINAPI base_hwnd_fragment_Navigate(IRawElementProviderFragment *iface,
+        enum NavigateDirection direction, IRawElementProviderFragment **ret_val)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_fragment(iface);
+    IRawElementProviderSimple *elprov = NULL;
+    HRESULT hr = S_OK;
+
+    TRACE("%p, %d, %p\n", iface, direction, ret_val);
+
+    *ret_val = NULL;
+
+    switch (direction)
+    {
+    case NavigateDirection_Parent:
+    {
+        HWND parent, owner;
+
+        /*
+         * Top level owned windows have their owner window as a parent instead
+         * of the desktop window.
+         */
+        if (uia_is_top_level_hwnd(base_hwnd_prov->hwnd) && (owner = GetWindow(base_hwnd_prov->hwnd, GW_OWNER)))
+            parent = owner;
+        else
+            parent = GetAncestor(base_hwnd_prov->hwnd, GA_PARENT);
+
+        if (parent)
+            hr = create_base_hwnd_provider(parent, &elprov);
+        break;
+    }
+
+    case NavigateDirection_FirstChild:
+    case NavigateDirection_LastChild:
+    case NavigateDirection_PreviousSibling:
+    case NavigateDirection_NextSibling:
+        FIXME("Unimplemented NavigateDirection %d\n", direction);
+        return E_NOTIMPL;
+
+    default:
+        FIXME("Invalid NavigateDirection %d\n", direction);
+        return E_INVALIDARG;
+    }
+
+    if (elprov)
+    {
+        hr = IRawElementProviderSimple_QueryInterface(elprov, &IID_IRawElementProviderFragment, (void **)ret_val);
+        IRawElementProviderSimple_Release(elprov);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI base_hwnd_fragment_GetRuntimeId(IRawElementProviderFragment *iface,
+        SAFEARRAY **ret_val)
+{
+    FIXME("%p, %p: stub!\n", iface, ret_val);
+    *ret_val = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI base_hwnd_fragment_get_BoundingRectangle(IRawElementProviderFragment *iface,
+        struct UiaRect *ret_val)
+{
+    struct base_hwnd_provider *base_hwnd_prov = impl_from_base_hwnd_fragment(iface);
+    RECT rect = { 0 };
+
+    TRACE("%p, %p\n", iface, ret_val);
+
+    memset(ret_val, 0, sizeof(*ret_val));
+
+    /* Top level minimized window - Return empty rect. */
+    if (uia_is_top_level_hwnd(base_hwnd_prov->hwnd) && IsIconic(base_hwnd_prov->hwnd))
+        return S_OK;
+
+    if (!GetWindowRect(base_hwnd_prov->hwnd, &rect))
+        return uia_get_hr_for_last_error();
+
+    ret_val->left = rect.left;
+    ret_val->top = rect.top;
+    ret_val->width = (rect.right - rect.left);
+    ret_val->height = (rect.bottom - rect.top);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI base_hwnd_fragment_GetEmbeddedFragmentRoots(IRawElementProviderFragment *iface,
+        SAFEARRAY **ret_val)
+{
+    FIXME("%p, %p: stub!\n", iface, ret_val);
+    *ret_val = NULL;
+    return S_OK;
+}
+
+static HRESULT WINAPI base_hwnd_fragment_SetFocus(IRawElementProviderFragment *iface)
+{
+    FIXME("%p: stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI base_hwnd_fragment_get_FragmentRoot(IRawElementProviderFragment *iface,
+        IRawElementProviderFragmentRoot **ret_val)
+{
+    FIXME("%p, %p: stub!\n", iface, ret_val);
+    *ret_val = NULL;
+    return S_OK;
+}
+
+static const IRawElementProviderFragmentVtbl base_hwnd_fragment_vtbl = {
+    base_hwnd_fragment_QueryInterface,
+    base_hwnd_fragment_AddRef,
+    base_hwnd_fragment_Release,
+    base_hwnd_fragment_Navigate,
+    base_hwnd_fragment_GetRuntimeId,
+    base_hwnd_fragment_get_BoundingRectangle,
+    base_hwnd_fragment_GetEmbeddedFragmentRoots,
+    base_hwnd_fragment_SetFocus,
+    base_hwnd_fragment_get_FragmentRoot,
+};
+
+HRESULT create_base_hwnd_provider(HWND hwnd, IRawElementProviderSimple **elprov)
+{
+    struct base_hwnd_provider *base_hwnd_prov;
+
+    *elprov = NULL;
+
+    if (!hwnd)
+        return E_INVALIDARG;
+
+    if (!IsWindow(hwnd))
+        return UIA_E_ELEMENTNOTAVAILABLE;
+
+    if (!(base_hwnd_prov = calloc(1, sizeof(*base_hwnd_prov))))
         return E_OUTOFMEMORY;
 
-    msaa_prov->IRawElementProviderSimple_iface.lpVtbl = &msaa_provider_vtbl;
-    msaa_prov->IRawElementProviderFragment_iface.lpVtbl = &msaa_fragment_vtbl;
-    msaa_prov->ILegacyIAccessibleProvider_iface.lpVtbl = &msaa_acc_provider_vtbl;
-    msaa_prov->refcount = 1;
-    msaa_prov->hwnd = hwnd;
-    variant_init_i4(&msaa_prov->cid, child_id);
-    msaa_prov->acc = acc;
-    IAccessible_AddRef(acc);
-    msaa_prov->ia2 = msaa_acc_get_ia2(acc);
-    *elprov = &msaa_prov->IRawElementProviderSimple_iface;
+    base_hwnd_prov->IRawElementProviderSimple_iface.lpVtbl = &base_hwnd_provider_vtbl;
+    base_hwnd_prov->IRawElementProviderFragment_iface.lpVtbl = &base_hwnd_fragment_vtbl;
+    base_hwnd_prov->refcount = 1;
+    base_hwnd_prov->hwnd = hwnd;
+    *elprov = &base_hwnd_prov->IRawElementProviderSimple_iface;
 
     return S_OK;
 }
@@ -1180,7 +1990,7 @@ void uia_provider_thread_remove_node(HUIANODE node)
         {
             rb_remove(&provider_thread.node_map, &node_data->map->entry);
             SafeArrayDestroy(node_data->map->runtime_id);
-            heap_free(node_data->map);
+            free(node_data->map);
         }
         node_data->map = NULL;
     }
@@ -1221,26 +2031,22 @@ static void uia_provider_thread_disconnect_node(SAFEARRAY *sa)
 
         rb_remove(&provider_thread.node_map, &prov_map->entry);
         SafeArrayDestroy(prov_map->runtime_id);
-        heap_free(prov_map);
+        free(prov_map);
     }
 
 exit:
     LeaveCriticalSection(&provider_thread_cs);
 }
 
-static HRESULT uia_provider_thread_add_node(HUIANODE node)
+static HRESULT uia_provider_thread_add_node(HUIANODE node, SAFEARRAY *rt_id)
 {
     struct uia_node *node_data = impl_from_IWineUiaNode((IWineUiaNode *)node);
     int prov_type = get_node_provider_type_at_idx(node_data, 0);
     struct uia_provider *prov_data;
-    SAFEARRAY *sa;
-    HRESULT hr;
+    HRESULT hr = S_OK;
 
     prov_data = impl_from_IWineUiaProvider(node_data->prov[prov_type]);
-    node_data->nested_node = prov_data->return_nested_node = TRUE;
-    hr = UiaGetRuntimeId(node, &sa);
-    if (FAILED(hr))
-        return hr;
+    node_data->nested_node = prov_data->return_nested_node = prov_data->refuse_hwnd_node_providers = TRUE;
 
     TRACE("Adding node %p\n", node);
 
@@ -1248,38 +2054,40 @@ static HRESULT uia_provider_thread_add_node(HUIANODE node)
     list_add_tail(&provider_thread.nodes_list, &node_data->prov_thread_list_entry);
 
     /* If we have a runtime ID, create an entry in the rb tree. */
-    if (sa)
+    if (rt_id)
     {
         struct uia_provider_thread_map_entry *prov_map;
         struct rb_entry *rb_entry;
 
-        if ((rb_entry = rb_get(&provider_thread.node_map, sa)))
-        {
+        if ((rb_entry = rb_get(&provider_thread.node_map, rt_id)))
             prov_map = RB_ENTRY_VALUE(rb_entry, struct uia_provider_thread_map_entry, entry);
-            SafeArrayDestroy(sa);
-        }
         else
         {
-            prov_map = heap_alloc_zero(sizeof(*prov_map));
+            prov_map = calloc(1, sizeof(*prov_map));
             if (!prov_map)
             {
-                SafeArrayDestroy(sa);
-                LeaveCriticalSection(&provider_thread_cs);
-                return E_OUTOFMEMORY;
+                hr = E_OUTOFMEMORY;
+                goto exit;
             }
 
-            prov_map->runtime_id = sa;
+            hr = SafeArrayCopy(rt_id, &prov_map->runtime_id);
+            if (FAILED(hr))
+            {
+                free(prov_map);
+                goto exit;
+            }
             list_init(&prov_map->nodes_list);
-            rb_put(&provider_thread.node_map, sa, &prov_map->entry);
+            rb_put(&provider_thread.node_map, prov_map->runtime_id, &prov_map->entry);
         }
 
         list_add_tail(&prov_map->nodes_list, &node_data->node_map_list_entry);
         node_data->map = prov_map;
     }
 
+exit:
     LeaveCriticalSection(&provider_thread_cs);
 
-    return S_OK;
+    return hr;
 }
 
 #define WM_GET_OBJECT_UIA_NODE (WM_USER + 1)
@@ -1291,13 +2099,13 @@ static LRESULT CALLBACK uia_provider_thread_msg_proc(HWND hwnd, UINT msg, WPARAM
     {
     case WM_GET_OBJECT_UIA_NODE:
     {
+        SAFEARRAY *rt_id = (SAFEARRAY *)wparam;
         HUIANODE node = (HUIANODE)lparam;
         LRESULT lr;
 
-        if (FAILED(uia_provider_thread_add_node(node)))
+        if (FAILED(uia_provider_thread_add_node(node, rt_id)))
         {
             WARN("Failed to add node %p to provider thread list.\n", node);
-            UiaNodeRelease(node);
             return 0;
         }
 
@@ -1312,11 +2120,6 @@ static LRESULT CALLBACK uia_provider_thread_msg_proc(HWND hwnd, UINT msg, WPARAM
             lr = 0;
         }
 
-        /*
-         * LresultFromObject increases refcnt by 1. If LresultFromObject
-         * failed, this is expected to release the node.
-         */
-        UiaNodeRelease(node);
         return lr;
     }
 
@@ -1432,13 +2235,24 @@ void uia_stop_provider_thread(void)
  */
 LRESULT uia_lresult_from_node(HUIANODE huianode)
 {
-    if (!uia_start_provider_thread())
-    {
-        UiaNodeRelease(huianode);
-        return 0;
-    }
+    SAFEARRAY *rt_id;
+    LRESULT lr = 0;
+    HRESULT hr;
 
-    return SendMessageW(provider_thread.hwnd, WM_GET_OBJECT_UIA_NODE, 0, (LPARAM)huianode);
+    hr = UiaGetRuntimeId(huianode, &rt_id);
+    if (SUCCEEDED(hr) && uia_start_provider_thread())
+        lr = SendMessageW(provider_thread.hwnd, WM_GET_OBJECT_UIA_NODE, (WPARAM)rt_id, (LPARAM)huianode);
+
+    if (FAILED(hr))
+        WARN("UiaGetRuntimeId failed with hr %#lx\n", hr);
+
+    /*
+     * LresultFromObject increases refcnt by 1. If LresultFromObject
+     * failed or wasn't called, this is expected to release the node.
+     */
+    UiaNodeRelease(huianode);
+    SafeArrayDestroy(rt_id);
+    return lr;
 }
 
 /***********************************************************************
@@ -1464,7 +2278,7 @@ LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wparam,
         return 0;
     }
 
-    hr = create_uia_node_from_elprov(elprov, &node, FALSE);
+    hr = create_uia_node_from_elprov(elprov, &node, FALSE, 0);
     if (FAILED(hr))
     {
         WARN("Failed to create HUIANODE with hr %#lx\n", hr);
@@ -1485,7 +2299,7 @@ HRESULT WINAPI UiaDisconnectProvider(IRawElementProviderSimple *elprov)
 
     TRACE("(%p)\n", elprov);
 
-    hr = create_uia_node_from_elprov(elprov, &node, FALSE);
+    hr = create_uia_node_from_elprov(elprov, &node, FALSE, 0);
     if (FAILED(hr))
         return hr;
 

@@ -49,6 +49,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(opengl);
 
+static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
+
+static BOOL is_wow64(void)
+{
+    return !!NtCurrentTeb()->WowTebOffset;
+}
+
 static pthread_mutex_t wgl_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* handle management */
@@ -78,6 +85,7 @@ struct opengl_context
     GLubyte *extensions;         /* extension string */
     GLuint *disabled_exts;       /* indices of disabled extensions */
     struct wgl_context *drv_ctx; /* driver context */
+    GLubyte *version_string;
 
 #ifdef __APPLE__
     LONG last_error;
@@ -89,7 +97,7 @@ struct opengl_context
 struct wgl_handle
 {
     UINT handle;
-    struct opengl_funcs *funcs;
+    const struct opengl_funcs *funcs;
     union
     {
         struct opengl_context *context; /* for HANDLE_CONTEXT */
@@ -129,7 +137,7 @@ static struct wgl_handle *get_handle_ptr( HANDLE handle, enum wgl_handle_type ty
     return NULL;
 }
 
-static HANDLE alloc_handle( enum wgl_handle_type type, struct opengl_funcs *funcs, void *user_ptr )
+static HANDLE alloc_handle( enum wgl_handle_type type, const struct opengl_funcs *funcs, void *user_ptr )
 {
     HANDLE handle = 0;
     struct wgl_handle *ptr = NULL;
@@ -188,7 +196,13 @@ static GLubyte *filter_extensions_list( const char *extensions, const char *disa
         memcpy( p, extensions, end - extensions );
         p[end - extensions] = 0;
 
-        if (!has_extension( disabled, p, strlen( p ) ))
+        /* We do not support GL_MAP_PERSISTENT_BIT, and hence
+         * ARB_buffer_storage, on wow64. */
+        if (is_win64 && is_wow64() && (!strcmp( p, "GL_ARB_buffer_storage" ) || !strcmp( p, "GL_EXT_buffer_storage" )))
+        {
+            TRACE( "-- %s (disabled due to wow64)\n", p );
+        }
+        else if (!has_extension( disabled, p, strlen( p ) ))
         {
             TRACE( "++ %s\n", p );
             p += end - extensions;
@@ -204,13 +218,32 @@ static GLubyte *filter_extensions_list( const char *extensions, const char *disa
     return (GLubyte *)str;
 }
 
+static const char *parse_gl_version( const char *gl_version, int *major, int *minor )
+{
+    const char *ptr = gl_version;
+
+    *major = atoi( ptr );
+    if (*major <= 0)
+        ERR( "Invalid OpenGL major version %d.\n", *major );
+
+    while (isdigit( *ptr )) ++ptr;
+    if (*ptr++ != '.')
+        ERR( "Invalid OpenGL version string %s.\n", debugstr_a(gl_version) );
+
+    *minor = atoi( ptr );
+
+    while (isdigit( *ptr )) ++ptr;
+    return ptr;
+}
+
 static GLuint *filter_extensions_index( TEB *teb, const char *disabled )
 {
     const struct opengl_funcs *funcs = teb->glTable;
+    const char *ext, *version;
     GLuint *disabled_index;
     GLint extensions_count;
     unsigned int i = 0, j;
-    const char *ext;
+    int major, minor;
 
     if (!funcs->ext.p_glGetStringi)
     {
@@ -218,6 +251,11 @@ static GLuint *filter_extensions_index( TEB *teb, const char *disabled )
         *func_ptr = funcs->wgl.p_wglGetProcAddress( "glGetStringi" );
         if (!funcs->ext.p_glGetStringi) return NULL;
     }
+
+    version = (const char *)funcs->gl.p_glGetString( GL_VERSION );
+    parse_gl_version( version, &major, &minor );
+    if (major < 3)
+        return NULL;
 
     funcs->gl.p_glGetIntegerv( GL_NUM_EXTENSIONS, &extensions_count );
     disabled_index = malloc( extensions_count * sizeof(*disabled_index) );
@@ -228,7 +266,15 @@ static GLuint *filter_extensions_index( TEB *teb, const char *disabled )
     for (j = 0; j < extensions_count; ++j)
     {
         ext = (const char *)funcs->ext.p_glGetStringi( GL_EXTENSIONS, j );
-        if (!has_extension( disabled, ext, strlen( ext ) ))
+
+        /* We do not support GL_MAP_PERSISTENT_BIT, and hence
+         * ARB_buffer_storage, on wow64. */
+        if (is_win64 && is_wow64() && (!strcmp( ext, "GL_ARB_buffer_storage" ) || !strcmp( ext, "GL_EXT_buffer_storage" )))
+        {
+            TRACE( "-- %s (disabled due to wow64)\n", ext );
+            disabled_index[i++] = j;
+        }
+        else if (!has_extension( disabled, ext, strlen( ext ) ))
         {
             TRACE( "++ %s\n", ext );
         }
@@ -368,7 +414,6 @@ static BOOL filter_extensions( TEB * teb, const char *extensions, GLubyte **exts
         else disabled = "";
     }
 
-    if (!disabled[0]) return FALSE;
     if (extensions && !*exts_list) *exts_list = filter_extensions_list( extensions, disabled );
     if (!*disabled_exts) *disabled_exts = filter_extensions_index( teb, disabled );
     return (exts_list && *exts_list) || *disabled_exts;
@@ -440,6 +485,21 @@ static void wrap_glGetIntegerv( TEB *teb, GLenum pname, GLint *data )
 
     if (pname == GL_NUM_EXTENSIONS && (disabled = disabled_extensions_index( teb )))
         while (*disabled++ != ~0u) (*data)--;
+
+    if (is_win64 && is_wow64())
+    {
+        /* 4.4 depends on ARB_buffer_storage, which we don't support on wow64. */
+        if (pname == GL_MAJOR_VERSION && *data > 4)
+            *data = 4;
+        else if (pname == GL_MINOR_VERSION)
+        {
+            GLint major;
+
+            funcs->gl.p_glGetIntegerv( GL_MAJOR_VERSION, &major );
+            if (major == 4 && *data > 3)
+                *data = 3;
+        }
+    }
 }
 
 static const GLubyte *wrap_glGetString( TEB *teb, GLenum name )
@@ -447,12 +507,37 @@ static const GLubyte *wrap_glGetString( TEB *teb, GLenum name )
     const struct opengl_funcs *funcs = teb->glTable;
     const GLubyte *ret;
 
-    if ((ret = funcs->gl.p_glGetString( name )) && name == GL_EXTENSIONS)
+    if ((ret = funcs->gl.p_glGetString( name )))
     {
-        struct wgl_handle *ptr = get_current_context_ptr( teb );
-        GLubyte **extensions = &ptr->u.context->extensions;
-        GLuint **disabled = &ptr->u.context->disabled_exts;
-        if (*extensions || filter_extensions( teb, (const char *)ret, extensions, disabled )) return *extensions;
+        if (name == GL_EXTENSIONS)
+        {
+            struct wgl_handle *ptr = get_current_context_ptr( teb );
+            GLubyte **extensions = &ptr->u.context->extensions;
+            GLuint **disabled = &ptr->u.context->disabled_exts;
+            if (*extensions || filter_extensions( teb, (const char *)ret, extensions, disabled )) return *extensions;
+        }
+        else if (name == GL_VERSION && is_win64 && is_wow64())
+        {
+            struct wgl_handle *ptr = get_current_context_ptr( teb );
+            int major, minor;
+            const char *rest;
+
+            if (ptr->u.context->version_string)
+                return ptr->u.context->version_string;
+
+            rest = parse_gl_version( (const char *)ret, &major, &minor );
+
+            /* 4.4 depends on ARB_buffer_storage, which we don't support on wow64. */
+            if (major > 4 || (major == 4 && minor >= 4))
+            {
+                char *str = malloc( 3 + strlen( rest ) + 1 );
+
+                sprintf( str, "4.3%s", rest );
+                if (InterlockedCompareExchangePointer( (void **)&ptr->u.context->version_string, str, NULL ))
+                    free( str );
+                return ptr->u.context->version_string;
+            }
+        }
     }
 
     return ret;
@@ -607,7 +692,7 @@ static HGLRC wrap_wglCreateContext( HDC hdc )
     HGLRC ret = 0;
     struct wgl_context *drv_ctx;
     struct opengl_context *context;
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
+    const struct opengl_funcs *funcs = get_dc_funcs( hdc );
 
     if (!funcs) return 0;
     if (!(drv_ctx = funcs->wgl.p_wglCreateContext( hdc ))) return 0;
@@ -639,7 +724,7 @@ static BOOL wrap_wglMakeCurrent( TEB *teb, HDC hdc, HGLRC hglrc )
                 teb->glReserved1[0] = hdc;
                 teb->glReserved1[1] = hdc;
                 teb->glCurrentRC = hglrc;
-                teb->glTable = ptr->funcs;
+                teb->glTable = (void *)ptr->funcs;
             }
         }
         else
@@ -676,6 +761,7 @@ static BOOL wrap_wglDeleteContext( TEB *teb, HGLRC hglrc )
     }
     if (hglrc == teb->glCurrentRC) wrap_wglMakeCurrent( teb, 0, 0 );
     ptr->funcs->wgl.p_wglDeleteContext( ptr->u.context->drv_ctx );
+    free( ptr->u.context->version_string );
     free( ptr->u.context->disabled_exts );
     free( ptr->u.context->extensions );
     free( ptr->u.context );
@@ -710,7 +796,7 @@ static HGLRC wrap_wglCreateContextAttribsARB( HDC hdc, HGLRC share, const int *a
     struct wgl_context *drv_ctx;
     struct wgl_handle *share_ptr = NULL;
     struct opengl_context *context;
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
+    const struct opengl_funcs *funcs = get_dc_funcs( hdc );
 
     if (!funcs)
     {
@@ -755,7 +841,7 @@ static HPBUFFERARB wrap_wglCreatePbufferARB( HDC hdc, int format, int width, int
 {
     HPBUFFERARB ret;
     struct wgl_pbuffer *pbuffer;
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
+    const struct opengl_funcs *funcs = get_dc_funcs( hdc );
 
     if (!funcs || !funcs->ext.p_wglCreatePbufferARB) return 0;
     if (!(pbuffer = funcs->ext.p_wglCreatePbufferARB( hdc, format, width, height, attribs ))) return 0;
@@ -801,7 +887,7 @@ static BOOL wrap_wglMakeContextCurrentARB( TEB *teb, HDC draw_hdc, HDC read_hdc,
                 teb->glReserved1[0] = draw_hdc;
                 teb->glReserved1[1] = read_hdc;
                 teb->glCurrentRC = hglrc;
-                teb->glTable = ptr->funcs;
+                teb->glTable = (void *)ptr->funcs;
             }
         }
         else
@@ -862,8 +948,15 @@ static void gl_debug_message_callback( GLenum source, GLenum type, GLuint id, GL
     };
     void *ret_ptr;
     ULONG ret_len;
-
     struct wgl_handle *ptr = (struct wgl_handle *)userParam;
+
+    if (!NtCurrentTeb())
+    {
+        fprintf( stderr, "msg:gl_debug_message_callback called from native thread, severity %#x, message \"%.*s\".\n",
+                 severity, length, message );
+        return;
+    }
+
     if (!(params.user_callback = ptr->u.context->debug_callback)) return;
     params.user_data = ptr->u.context->debug_user;
 
@@ -1107,34 +1200,34 @@ NTSTATUS process_detach( void *args )
 
 typedef ULONG PTR32;
 
-extern NTSTATUS ext_glClientWaitSync( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glDeleteSync( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glFenceSync( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glGetBufferPointerv( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glGetBufferPointervARB( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glGetNamedBufferPointerv( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glGetNamedBufferPointervEXT( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glGetSynciv( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glIsSync( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glMapBuffer( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS ext_glClientWaitSync( void *args );
+extern NTSTATUS ext_glDeleteSync( void *args );
+extern NTSTATUS ext_glFenceSync( void *args );
+extern NTSTATUS ext_glGetBufferPointerv( void *args );
+extern NTSTATUS ext_glGetBufferPointervARB( void *args );
+extern NTSTATUS ext_glGetNamedBufferPointerv( void *args );
+extern NTSTATUS ext_glGetNamedBufferPointervEXT( void *args );
+extern NTSTATUS ext_glGetSynciv( void *args );
+extern NTSTATUS ext_glIsSync( void *args );
+extern NTSTATUS ext_glMapBuffer( void *args );
 
-extern NTSTATUS ext_glUnmapBuffer( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glUnmapBufferARB( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glUnmapNamedBuffer( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glUnmapNamedBufferEXT( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS ext_glUnmapBuffer( void *args );
+extern NTSTATUS ext_glUnmapBufferARB( void *args );
+extern NTSTATUS ext_glUnmapNamedBuffer( void *args );
+extern NTSTATUS ext_glUnmapNamedBufferEXT( void *args );
 
-extern NTSTATUS ext_glMapBufferARB( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glMapBufferRange( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glMapNamedBuffer( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glMapNamedBufferEXT( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glMapNamedBufferRange( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glMapNamedBufferRangeEXT( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glPathGlyphIndexRangeNV( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_glWaitSync( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_wglGetExtensionsStringARB( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_wglGetExtensionsStringEXT( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_wglQueryCurrentRendererStringWINE( void *args ) DECLSPEC_HIDDEN;
-extern NTSTATUS ext_wglQueryRendererStringWINE( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS ext_glMapBufferARB( void *args );
+extern NTSTATUS ext_glMapBufferRange( void *args );
+extern NTSTATUS ext_glMapNamedBuffer( void *args );
+extern NTSTATUS ext_glMapNamedBufferEXT( void *args );
+extern NTSTATUS ext_glMapNamedBufferRange( void *args );
+extern NTSTATUS ext_glMapNamedBufferRangeEXT( void *args );
+extern NTSTATUS ext_glPathGlyphIndexRangeNV( void *args );
+extern NTSTATUS ext_glWaitSync( void *args );
+extern NTSTATUS ext_wglGetExtensionsStringARB( void *args );
+extern NTSTATUS ext_wglGetExtensionsStringEXT( void *args );
+extern NTSTATUS ext_wglQueryCurrentRendererStringWINE( void *args );
+extern NTSTATUS ext_wglQueryRendererStringWINE( void *args );
 
 struct wow64_string_entry
 {
@@ -2015,7 +2108,7 @@ static NTSTATUS wow64_map_buffer( TEB *teb, GLint buffer, GLenum target, void *p
 {
     if (*ret)  /* wow64 pointer provided, map buffer to it */
     {
-        if (access & GL_MAP_READ_BIT)
+        if (!(access & (GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT)))
         {
             TRACE( "Copying %#zx from buffer at %p to wow64 buffer %p\n", size, ptr, UlongToPtr(*ret) );
             memcpy( UlongToPtr(*ret), ptr, size );
@@ -2043,6 +2136,19 @@ static NTSTATUS wow64_map_buffer( TEB *teb, GLint buffer, GLenum target, void *p
 
     *ret = size;
     return STATUS_INVALID_ADDRESS;
+}
+
+static GLbitfield map_range_flags_from_map_flags( GLenum flags )
+{
+    switch (flags)
+    {
+        case GL_READ_ONLY: return GL_MAP_READ_BIT;
+        case GL_WRITE_ONLY: return GL_MAP_WRITE_BIT;
+        case GL_READ_WRITE: return GL_MAP_READ_BIT | GL_MAP_WRITE_BIT;
+        default:
+            ERR( "invalid map flags %#x\n", flags );
+            return GL_MAP_READ_BIT | GL_MAP_WRITE_BIT;
+    }
 }
 
 static NTSTATUS wow64_unmap_buffer( void *ptr, SIZE_T size, GLbitfield access )
@@ -2258,7 +2364,8 @@ static NTSTATUS wow64_gl_map_buffer( void *args, NTSTATUS (*gl_map_buffer64)(voi
     if (params32->ret) params.ret = get_buffer_pointer( params.teb, params.target );
     else if ((status = gl_map_buffer64( &params ))) return status;
 
-    status = wow64_map_buffer( params.teb, 0, params.target, params.ret, 0, params.access, &params32->ret );
+    status = wow64_map_buffer( params.teb, 0, params.target, params.ret, 0,
+                               map_range_flags_from_map_flags( params.access ), &params32->ret );
     if (!status || status == STATUS_INVALID_ADDRESS) return status;
 
     unmap_buffer( params.teb, params.target );
@@ -2338,7 +2445,8 @@ static NTSTATUS wow64_gl_map_named_buffer( void *args, NTSTATUS (*gl_map_named_b
     if (params32->ret) params.ret = get_named_buffer_pointer( params.teb, params.buffer );
     else if ((status = gl_map_named_buffer64( &params ))) return status;
 
-    status = wow64_map_buffer( params.teb, params.buffer, 0, params.ret, 0, params.access, &params32->ret );
+    status = wow64_map_buffer( params.teb, params.buffer, 0, params.ret, 0,
+                               map_range_flags_from_map_flags( params.access ), &params32->ret );
     if (!status || status == STATUS_INVALID_ADDRESS) return status;
 
     unmap_named_buffer( params.teb, params.buffer );

@@ -1329,12 +1329,11 @@ static BOOL init_gl_info(void)
 }
 
 
-static int get_dc_pixel_format(HDC hdc)
+static int get_dc_pixel_format(HWND hwnd, HDC hdc)
 {
     int format;
-    HWND hwnd;
 
-    if ((hwnd = NtUserWindowFromDC(hdc)))
+    if (hwnd)
     {
         struct macdrv_win_data *data;
 
@@ -1526,7 +1525,7 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share, uns
  *
  * Implementation of wglSetPixelFormat and wglSetPixelFormatWINE.
  */
-static BOOL set_pixel_format(HDC hdc, int fmt, BOOL allow_reset)
+static BOOL set_pixel_format(HDC hdc, int fmt, BOOL internal)
 {
     struct macdrv_win_data *data;
     const pixel_format *pf;
@@ -1541,16 +1540,19 @@ static BOOL set_pixel_format(HDC hdc, int fmt, BOOL allow_reset)
         return FALSE;
     }
 
+    if (!internal)
+    {
+        /* cannot change it if already set */
+        int prev = win32u_get_window_pixel_format( hwnd );
+
+        if (prev)
+            return prev == fmt;
+    }
+
     if (!(data = get_win_data(hwnd)))
     {
         FIXME("DC for window %p of other process: not implemented\n", hwnd);
         return FALSE;
-    }
-
-    if (!allow_reset && data->pixel_format)  /* cannot change it if already set */
-    {
-        ret = (data->pixel_format == fmt);
-        goto done;
     }
 
     /* Check if fmt is in our list of supported formats to see if it is supported. */
@@ -1588,7 +1590,8 @@ static BOOL set_pixel_format(HDC hdc, int fmt, BOOL allow_reset)
 
 done:
     release_win_data(data);
-    if (ret && gl_surface_mode == GL_SURFACE_BEHIND) NtUserSetWindowPixelFormat(hwnd, fmt);
+    if (ret && gl_surface_mode == GL_SURFACE_BEHIND)
+        win32u_set_window_pixel_format(hwnd, fmt, internal);
     return ret;
 }
 
@@ -2719,7 +2722,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
 
     TRACE("hdc %p, share_context %p, attrib_list %p\n", hdc, share_context, attrib_list);
 
-    format = get_dc_pixel_format(hdc);
+    format = get_dc_pixel_format(NtUserWindowFromDC(hdc), hdc);
 
     if (!is_valid_pixel_format(format))
     {
@@ -4323,6 +4326,7 @@ static int macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMA
     descr->dwFlags          = PFD_SUPPORT_OPENGL;
     if (pf->window)         descr->dwFlags |= PFD_DRAW_TO_WINDOW;
     if (!pf->accelerated)   descr->dwFlags |= PFD_GENERIC_FORMAT;
+    else                    descr->dwFlags |= PFD_SUPPORT_COMPOSITION;
     if (pf->double_buffer)  descr->dwFlags |= PFD_DOUBLEBUFFER;
     if (pf->stereo)         descr->dwFlags |= PFD_STEREO;
     if (pf->backing_store)  descr->dwFlags |= PFD_SWAP_COPY;
@@ -4417,8 +4421,12 @@ static BOOL macdrv_wglDeleteContext(struct wgl_context *context)
 static int macdrv_wglGetPixelFormat(HDC hdc)
 {
     int format;
+    HWND hwnd;
 
-    format = get_dc_pixel_format(hdc);
+    if ((hwnd = NtUserWindowFromDC( hdc )))
+        return win32u_get_window_pixel_format( hwnd );
+
+    format = get_dc_pixel_format(NULL, hdc);
 
     if (!is_valid_pixel_format(format))  /* not set yet */
         format = 0;

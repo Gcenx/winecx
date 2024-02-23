@@ -39,7 +39,6 @@ enum { MAX_QUOTA = 5000000 };
 typedef struct {
     DispatchEx dispex;
     IHTMLStorage IHTMLStorage_iface;
-    LONG ref;
     unsigned num_props;
     BSTR *props;
     HTMLInnerWindow *window;
@@ -200,32 +199,39 @@ static inline HTMLStorage *impl_from_IHTMLStorage(IHTMLStorage *iface)
 static HRESULT build_session_origin(IUri*,BSTR,BSTR*);
 
 struct storage_event_task {
-    task_t header;
-    HTMLInnerWindow *window;
+    event_task_t header;
     DOMEvent *event;
 };
 
-static void storage_event_proc(task_t *_task)
+static void storage_event_proc(event_task_t *_task)
 {
     struct storage_event_task *task = (struct storage_event_task*)_task;
-    HTMLInnerWindow *window = task->window;
+    HTMLInnerWindow *window = task->header.window;
     DOMEvent *event = task->event;
+    compat_mode_t compat_mode;
     VARIANT_BOOL cancelled;
+    HRESULT hres;
+    VARIANT var;
 
-    if(event->event_id == EVENTID_STORAGE && dispex_compat_mode(&window->event_target.dispex) >= COMPAT_MODE_IE9) {
+    if(event->event_id == EVENTID_STORAGE && (compat_mode = dispex_compat_mode(&window->event_target.dispex)) >= COMPAT_MODE_IE9) {
         dispatch_event(&window->event_target, event);
-        if(window->doc)
-            fire_event(&window->doc->node, L"onstorage", NULL, &cancelled);
+        if(window->doc) {
+            hres = create_event_obj(event, compat_mode, (IHTMLEventObj**)&V_DISPATCH(&var));
+            if(SUCCEEDED(hres)) {
+                V_VT(&var) = VT_DISPATCH;
+                fire_event(&window->doc->node, L"onstorage", &var, &cancelled);
+                IDispatch_Release(V_DISPATCH(&var));
+            }
+        }
     }else if(window->doc) {
         dispatch_event(&window->doc->node.event_target, event);
     }
 }
 
-static void storage_event_destr(task_t *_task)
+static void storage_event_destr(event_task_t *_task)
 {
     struct storage_event_task *task = (struct storage_event_task*)_task;
     IDOMEvent_Release(&task->event->IDOMEvent_iface);
-    IHTMLWindow2_Release(&task->window->base.IHTMLWindow2_iface);
 }
 
 struct send_storage_event_ctx {
@@ -254,9 +260,7 @@ static HRESULT push_storage_event_task(struct send_storage_event_ctx *ctx, HTMLI
     }
 
     task->event = event;
-    task->window = window;
-    IHTMLWindow2_AddRef(&task->window->base.IHTMLWindow2_iface);
-    return push_task(&task->header, storage_event_proc, storage_event_destr, window->task_magic);
+    return push_event_task(&task->header, window, storage_event_proc, storage_event_destr, window->task_magic);
 }
 
 static HRESULT send_storage_event_impl(struct send_storage_event_ctx *ctx, HTMLInnerWindow *window)
@@ -286,6 +290,8 @@ static HRESULT send_storage_event_impl(struct send_storage_event_ctx *ctx, HTMLI
         origin = storage->session_storage->origin;
         origin_len = ctx->skip_window ? wcslen(origin) : storage->session_storage->origin_len;
         bstr = NULL;
+    }else if(!window->base.outer_window->uri) {
+        return S_OK;
     }else {
         hres = IUri_GetHost(window->base.outer_window->uri, &bstr);
         if(hres != S_OK) {
@@ -325,8 +331,11 @@ static HRESULT send_storage_event(HTMLStorage *storage, BSTR key, BSTR old_value
     HRESULT hres = S_OK;
 
     ctx.url = NULL;
-    if(!window)
+
+    /* FIXME: Events are actually sent to the current window on native, even if we're detached. */
+    if(!window->base.outer_window)
         goto done;
+
     if(window->base.outer_window->uri_nofrag) {
         hres = IUri_GetDisplayUri(window->base.outer_window->uri_nofrag, &ctx.url);
         if(hres != S_OK)
@@ -365,52 +374,19 @@ done:
 static HRESULT WINAPI HTMLStorage_QueryInterface(IHTMLStorage *iface, REFIID riid, void **ppv)
 {
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
-
-    if(IsEqualGUID(&IID_IUnknown, riid)) {
-        *ppv = &This->IHTMLStorage_iface;
-    }else if(IsEqualGUID(&IID_IHTMLStorage, riid)) {
-        *ppv = &This->IHTMLStorage_iface;
-    }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
-        return *ppv ? S_OK : E_NOINTERFACE;
-    }else {
-        *ppv = NULL;
-        WARN("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
-        return E_NOINTERFACE;
-    }
-
-    IUnknown_AddRef((IUnknown*)*ppv);
-    return S_OK;
+    return IDispatchEx_QueryInterface(&This->dispex.IDispatchEx_iface, riid, ppv);
 }
 
 static ULONG WINAPI HTMLStorage_AddRef(IHTMLStorage *iface)
 {
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
-
-    TRACE("(%p) ref=%ld\n", This, ref);
-
-    return ref;
+    return IDispatchEx_AddRef(&This->dispex.IDispatchEx_iface);
 }
 
 static ULONG WINAPI HTMLStorage_Release(IHTMLStorage *iface)
 {
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
-    LONG ref = InterlockedDecrement(&This->ref);
-
-    TRACE("(%p) ref=%ld\n", This, ref);
-
-    if(!ref) {
-        release_session_map_entry(This->session_storage);
-        release_dispex(&This->dispex);
-        free(This->filename);
-        CloseHandle(This->mutex);
-        release_props(This);
-        free(This);
-    }
-
-    return ref;
+    return IDispatchEx_Release(&This->dispex.IDispatchEx_iface);
 }
 
 static HRESULT WINAPI HTMLStorage_GetTypeInfoCount(IHTMLStorage *iface, UINT *pctinfo)
@@ -1067,6 +1043,45 @@ static inline HTMLStorage *impl_from_DispatchEx(DispatchEx *iface)
     return CONTAINING_RECORD(iface, HTMLStorage, dispex);
 }
 
+static void *HTMLStorage_query_interface(DispatchEx *dispex, REFIID riid)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+
+    if(IsEqualGUID(&IID_IHTMLStorage, riid))
+        return &This->IHTMLStorage_iface;
+
+    return NULL;
+}
+
+static void HTMLStorage_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+
+    if(This->window)
+        note_cc_edge((nsISupports*)&This->window->base.IHTMLWindow2_iface, "window", cb);
+}
+
+static void HTMLStorage_unlink(DispatchEx *dispex)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+
+    if(This->window) {
+        HTMLInnerWindow *window = This->window;
+        This->window = NULL;
+        IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
+    }
+}
+
+static void HTMLStorage_destructor(DispatchEx *dispex)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+    release_session_map_entry(This->session_storage);
+    free(This->filename);
+    CloseHandle(This->mutex);
+    release_props(This);
+    free(This);
+}
+
 static HRESULT check_item(HTMLStorage *This, const WCHAR *key)
 {
     struct session_entry *session_entry;
@@ -1312,13 +1327,15 @@ static HRESULT HTMLStorage_next_dispid(DispatchEx *dispex, DISPID id, DISPID *pi
 }
 
 static const dispex_static_data_vtbl_t HTMLStorage_dispex_vtbl = {
-    NULL,
-    HTMLStorage_get_dispid,
-    HTMLStorage_get_name,
-    HTMLStorage_invoke,
-    HTMLStorage_delete,
-    HTMLStorage_next_dispid,
-    NULL
+    .query_interface  = HTMLStorage_query_interface,
+    .destructor       = HTMLStorage_destructor,
+    .traverse         = HTMLStorage_traverse,
+    .unlink           = HTMLStorage_unlink,
+    .get_dispid       = HTMLStorage_get_dispid,
+    .get_name         = HTMLStorage_get_name,
+    .invoke           = HTMLStorage_invoke,
+    .delete           = HTMLStorage_delete,
+    .next_dispid      = HTMLStorage_next_dispid,
 };
 
 static const tid_t HTMLStorage_iface_tids[] = {
@@ -1326,7 +1343,7 @@ static const tid_t HTMLStorage_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLStorage_dispex = {
-    L"Storage",
+    "Storage",
     &HTMLStorage_dispex_vtbl,
     IHTMLStorage_tid,
     HTMLStorage_iface_tids
@@ -1479,18 +1496,11 @@ HRESULT create_html_storage(HTMLInnerWindow *window, BOOL local, IHTMLStorage **
     }
 
     storage->IHTMLStorage_iface.lpVtbl = &HTMLStorageVtbl;
-    storage->ref = 1;
     storage->window = window;
+    IHTMLWindow2_AddRef(&window->base.IHTMLWindow2_iface);
 
-    init_dispatch(&storage->dispex, (IUnknown*)&storage->IHTMLStorage_iface, &HTMLStorage_dispex,
-                  dispex_compat_mode(&window->event_target.dispex));
+    init_dispatch(&storage->dispex, &HTMLStorage_dispex, dispex_compat_mode(&window->event_target.dispex));
 
     *p = &storage->IHTMLStorage_iface;
     return S_OK;
-}
-
-void detach_html_storage(IHTMLStorage *iface)
-{
-    HTMLStorage *storage = impl_from_IHTMLStorage(iface);
-    storage->window = NULL;
 }

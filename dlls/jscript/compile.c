@@ -720,16 +720,20 @@ static HRESULT compile_new_expression(compiler_ctx_t *ctx, call_expression_t *ex
 
 static HRESULT compile_call_expression(compiler_ctx_t *ctx, call_expression_t *expr, BOOL emit_ret)
 {
-    unsigned arg_cnt = 0, extra_args;
+    unsigned arg_cnt = 0, extra_args = 0;
+    HRESULT hres = S_OK;
     argument_t *arg;
     unsigned instr;
     jsop_t op;
-    HRESULT hres;
 
     if(is_memberid_expr(expr->expression->type)) {
-        op = OP_call_member;
-        extra_args = 2;
-        hres = compile_memberid_expression(ctx, expr->expression, 0);
+        if(expr->expression->type == EXPR_IDENT && !wcscmp(((identifier_expression_t*)expr->expression)->identifier, L"eval"))
+            op = OP_call_eval;
+        else {
+            op = OP_call_member;
+            extra_args = 2;
+            hres = compile_memberid_expression(ctx, expr->expression, 0);
+        }
     }else {
         op = OP_call;
         extra_args = 1;
@@ -2563,7 +2567,7 @@ static HRESULT compile_function(compiler_ctx_t *ctx, statement_t *source, functi
         }
     }
 
-    for(i = 0; i < func->param_cnt; i++) {
+    for(i = func->param_cnt; i--;) {
         if(!find_local(ctx, func->params[i], 0) && !alloc_local(ctx, func->params[i], -i-1, 0))
             return E_OUTOFMEMORY;
     }

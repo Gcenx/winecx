@@ -202,7 +202,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
         details.dwControlID = control->dwControlID;
         details.cChannels = 1;
-        U(details).cMultipleItems = 0;
+        details.cMultipleItems = 0;
         details.cbDetails = sizeof(value);
 
         /* test NULL paDetails */
@@ -224,7 +224,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
 
             trace("            Value=%ld\n",value.dwValue);
 
-            if (value.dwValue + control->Metrics.cSteps < S1(control->Bounds).dwMaximum)
+            if (value.dwValue + control->Metrics.cSteps < control->Bounds.dwMaximum)
                 new_value.dwValue = value.dwValue + control->Metrics.cSteps;
             else
                 new_value.dwValue = value.dwValue - control->Metrics.cSteps;
@@ -232,7 +232,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
             new_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
             new_details.dwControlID = control->dwControlID;
             new_details.cChannels = 1;
-            U(new_details).cMultipleItems = 0;
+            new_details.cMultipleItems = 0;
             new_details.paDetails = &new_value;
             new_details.cbDetails = sizeof(new_value);
 
@@ -248,7 +248,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
                 ret_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                 ret_details.dwControlID = control->dwControlID;
                 ret_details.cChannels = 1;
-                U(ret_details).cMultipleItems = 0;
+                ret_details.cMultipleItems = 0;
                 ret_details.paDetails = &ret_value;
                 ret_details.cbDetails = sizeof(ret_value);
 
@@ -267,7 +267,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
                         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                         details.dwControlID = control->dwControlID;
                         details.cChannels = 1;
-                        U(details).cMultipleItems = 0;
+                        details.cMultipleItems = 0;
                         details.paDetails = &value;
                         details.cbDetails = sizeof(value);
 
@@ -289,7 +289,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
         details.dwControlID = control->dwControlID;
         details.cChannels = 1;
-        U(details).cMultipleItems = 0;
+        details.cMultipleItems = 0;
         details.paDetails = &value;
         details.cbDetails = sizeof(value);
 
@@ -311,7 +311,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
             new_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
             new_details.dwControlID = control->dwControlID;
             new_details.cChannels = 1;
-            U(new_details).cMultipleItems = 0;
+            new_details.cMultipleItems = 0;
             new_details.paDetails = &new_value;
             new_details.cbDetails = sizeof(new_value);
 
@@ -327,7 +327,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
                 ret_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                 ret_details.dwControlID = control->dwControlID;
                 ret_details.cChannels = 1;
-                U(ret_details).cMultipleItems = 0;
+                ret_details.cMultipleItems = 0;
                 ret_details.paDetails = &ret_value;
                 ret_details.cbDetails = sizeof(ret_value);
 
@@ -346,7 +346,7 @@ static void mixer_test_controlA(HMIXEROBJ mix, MIXERCONTROLA *control)
                         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                         details.dwControlID = control->dwControlID;
                         details.cChannels = 1;
-                        U(details).cMultipleItems = 0;
+                        details.cMultipleItems = 0;
                         details.paDetails = &value;
                         details.cbDetails = sizeof(value);
 
@@ -512,8 +512,7 @@ static void mixer_test_deviceA(int device)
                               mixerlineA.Target.wMid, mixerlineA.Target.wPid);
                     }
                     if (mixerlineA.cControls) {
-                        array=HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,
-                            mixerlineA.cControls*sizeof(MIXERCONTROLA));
+                        array=calloc(mixerlineA.cControls, sizeof(MIXERCONTROLA));
                         if (array) {
                             memset(&controls, 0, sizeof(controls));
 
@@ -556,8 +555,8 @@ static void mixer_test_deviceA(int device)
                                               control_flags(array[nc].fdwControl));
                                         trace("            Items=%ld Min=%ld Max=%ld Step=%ld\n",
                                               array[nc].cMultipleItems,
-                                              S1(array[nc].Bounds).dwMinimum,
-                                              S1(array[nc].Bounds).dwMaximum,
+                                              array[nc].Bounds.dwMinimum,
+                                              array[nc].Bounds.dwMaximum,
                                               array[nc].Metrics.cSteps);
                                     }
 
@@ -565,7 +564,7 @@ static void mixer_test_deviceA(int device)
                                 }
                             }
 
-                            HeapFree(GetProcessHeap(),0,array);
+                            free(array);
                         }
                     }
                 }
@@ -588,7 +587,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
         details.dwControlID = control->dwControlID;
         details.cChannels = 1;
-        U(details).cMultipleItems = 0;
+        details.cMultipleItems = 0;
         details.paDetails = &value;
         details.cbDetails = sizeof(value);
 
@@ -603,7 +602,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
 
             trace("            Value=%ld\n",value.dwValue);
 
-            if (value.dwValue + control->Metrics.cSteps < S1(control->Bounds).dwMaximum)
+            if (value.dwValue + control->Metrics.cSteps < control->Bounds.dwMaximum)
                 new_value.dwValue = value.dwValue + control->Metrics.cSteps;
             else
                 new_value.dwValue = value.dwValue - control->Metrics.cSteps;
@@ -611,7 +610,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
             new_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
             new_details.dwControlID = control->dwControlID;
             new_details.cChannels = 1;
-            U(new_details).cMultipleItems = 0;
+            new_details.cMultipleItems = 0;
             new_details.paDetails = &new_value;
             new_details.cbDetails = sizeof(new_value);
 
@@ -627,7 +626,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
                 ret_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                 ret_details.dwControlID = control->dwControlID;
                 ret_details.cChannels = 1;
-                U(ret_details).cMultipleItems = 0;
+                ret_details.cMultipleItems = 0;
                 ret_details.paDetails = &ret_value;
                 ret_details.cbDetails = sizeof(ret_value);
 
@@ -646,7 +645,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
                         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                         details.dwControlID = control->dwControlID;
                         details.cChannels = 1;
-                        U(details).cMultipleItems = 0;
+                        details.cMultipleItems = 0;
                         details.paDetails = &value;
                         details.cbDetails = sizeof(value);
 
@@ -668,7 +667,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
         details.dwControlID = control->dwControlID;
         details.cChannels = 1;
-        U(details).cMultipleItems = 0;
+        details.cMultipleItems = 0;
         details.paDetails = &value;
         details.cbDetails = sizeof(value);
 
@@ -690,7 +689,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
             new_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
             new_details.dwControlID = control->dwControlID;
             new_details.cChannels = 1;
-            U(new_details).cMultipleItems = 0;
+            new_details.cMultipleItems = 0;
             new_details.paDetails = &new_value;
             new_details.cbDetails = sizeof(new_value);
 
@@ -706,7 +705,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
                 ret_details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                 ret_details.dwControlID = control->dwControlID;
                 ret_details.cChannels = 1;
-                U(ret_details).cMultipleItems = 0;
+                ret_details.cMultipleItems = 0;
                 ret_details.paDetails = &ret_value;
                 ret_details.cbDetails = sizeof(ret_value);
 
@@ -725,7 +724,7 @@ static void mixer_test_controlW(HMIXEROBJ mix, MIXERCONTROLW *control)
                         details.cbStruct = sizeof(MIXERCONTROLDETAILS);
                         details.dwControlID = control->dwControlID;
                         details.cChannels = 1;
-                        U(details).cMultipleItems = 0;
+                        details.cMultipleItems = 0;
                         details.paDetails = &value;
                         details.cbDetails = sizeof(value);
 
@@ -913,8 +912,7 @@ static void mixer_test_deviceW(int device)
                               mixerlineW.Target.wMid, mixerlineW.Target.wPid);
                     }
                     if (mixerlineW.cControls) {
-                        array=HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,
-                            mixerlineW.cControls*sizeof(MIXERCONTROLW));
+                        array=calloc(mixerlineW.cControls, sizeof(MIXERCONTROLW));
                         if (array) {
                             rc = mixerGetLineControlsW(mix, 0, MIXER_GETLINECONTROLSF_ALL);
                             ok(rc==MMSYSERR_INVALPARAM,
@@ -959,15 +957,15 @@ static void mixer_test_deviceW(int device)
                                               control_flags(array[nc].fdwControl));
                                         trace("            Items=%ld Min=%ld Max=%ld Step=%ld\n",
                                               array[nc].cMultipleItems,
-                                              S1(array[nc].Bounds).dwMinimum,
-                                              S1(array[nc].Bounds).dwMaximum,
+                                              array[nc].Bounds.dwMinimum,
+                                              array[nc].Bounds.dwMaximum,
                                               array[nc].Metrics.cSteps);
                                     }
                                     mixer_test_controlW(mix, &array[nc]);
                                 }
                             }
 
-                            HeapFree(GetProcessHeap(),0,array);
+                            free(array);
                         }
                     }
                 }

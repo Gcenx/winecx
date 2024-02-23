@@ -127,6 +127,7 @@
 @ stdcall CM_Locate_DevNodeW(ptr wstr long) setupapi.CM_Locate_DevNodeW
 @ stdcall CM_Locate_DevNode_ExA(ptr str long long) setupapi.CM_Locate_DevNode_ExA
 @ stdcall CM_Locate_DevNode_ExW(ptr wstr long long) setupapi.CM_Locate_DevNode_ExW
+@ stdcall CM_MapCrToWin32Err(long long)
 @ stub CM_Merge_Range_List
 @ stub CM_Modify_Res_Des
 @ stub CM_Modify_Res_Des_Ex
@@ -153,6 +154,7 @@
 @ stub CM_Register_Device_InterfaceW
 @ stub CM_Register_Device_Interface_ExA
 @ stub CM_Register_Device_Interface_ExW
+@ stdcall CM_Register_Notification(ptr ptr ptr ptr)
 @ stub CM_Remove_SubTree
 @ stub CM_Remove_SubTree_Ex
 @ stub CM_Remove_Unmarked_Children

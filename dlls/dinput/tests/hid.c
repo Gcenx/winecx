@@ -442,6 +442,7 @@ static void add_file_to_catalog( HANDLE catalog, const WCHAR *file )
                                      sizeof(L"2:6.0"), (BYTE *)L"2:6.0" );
         ok( ret, "Failed to write attr, error %lu\n", GetLastError() );
     }
+    free( indirect_data );
 }
 
 static void unload_driver( SC_HANDLE service )
@@ -519,8 +520,11 @@ void bus_device_stop(void)
     SetFilePointer( okfile, 0, NULL, FILE_BEGIN );
     SetEndOfFile( okfile );
 
+    InterlockedAdd( &winetest_successes, InterlockedExchange( &test_data->successes, 0 ) );
     winetest_add_failures( InterlockedExchange( &test_data->failures, 0 ) );
+    InterlockedAdd( &winetest_todo_successes, InterlockedExchange( &test_data->todo_successes, 0 ) );
     winetest_add_failures( InterlockedExchange( &test_data->todo_failures, 0 ) );
+    InterlockedAdd( &winetest_skipped, InterlockedExchange( &test_data->skipped, 0 ) );
 
     GetFullPathNameW( L"winetest.inf", ARRAY_SIZE(path), path, NULL );
     ret = SetupCopyOEMInfW( path, NULL, 0, 0, dest, ARRAY_SIZE(dest), NULL, &filepart );
@@ -590,7 +594,7 @@ static BOOL find_hid_device_path( WCHAR *device_path )
 
 BOOL bus_device_start(void)
 {
-    static const WCHAR bus_hardware_id[] = L"WINETEST\\BUS";
+    static const WCHAR bus_hardware_ids[] = L"WINETEST\\BUS\0";
     SP_DEVINFO_DATA device = {sizeof(SP_DEVINFO_DATA)};
     const WCHAR *service_name = L"winetest_bus";
     WCHAR path[MAX_PATH], filename[MAX_PATH];
@@ -665,7 +669,7 @@ BOOL bus_device_start(void)
     ret = SetupDiCreateDeviceInfoW( set, L"root\\winetest\\0", &GUID_NULL, NULL, NULL, 0, &device );
     ok( ret, "failed to create device, error %#lx\n", GetLastError() );
 
-    ret = SetupDiSetDeviceRegistryPropertyW( set, &device, SPDRP_HARDWAREID, (const BYTE *)bus_hardware_id, sizeof(bus_hardware_id) );
+    ret = SetupDiSetDeviceRegistryPropertyW( set, &device, SPDRP_HARDWAREID, (const BYTE *)bus_hardware_ids, sizeof(bus_hardware_ids) );
     ok( ret, "failed to create set hardware ID, error %lu\n", GetLastError() );
 
     ret = SetupDiCallClassInstaller( DIF_REGISTERDEVICE, set, &device );
@@ -676,7 +680,7 @@ BOOL bus_device_start(void)
 
     GetFullPathNameW( L"winetest.inf", ARRAY_SIZE(path), path, NULL );
 
-    ret = UpdateDriverForPlugAndPlayDevicesW( NULL, bus_hardware_id, path, INSTALLFLAG_FORCE, &need_reboot );
+    ret = UpdateDriverForPlugAndPlayDevicesW( NULL, bus_hardware_ids, path, INSTALLFLAG_FORCE, &need_reboot );
     ok( ret, "failed to install device, error %lu\n", GetLastError() );
     ok( !need_reboot, "expected no reboot necessary\n" );
 
@@ -1840,6 +1844,11 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
     ok( status == HIDP_STATUS_SUCCESS, "HidP_GetUsageValueArray returned %#lx\n", status );
     ok( buffer[0] == (char)0xcd, "got report value %#x\n", buffer[0] );
     ok( buffer[1] == (char)0xcd, "got report value %#x\n", buffer[1] );
+
+    status = HidP_GetUsageValue( HidP_Input, HID_USAGE_PAGE_GENERIC, 0, 0, &value, preparsed_data, report, caps.InputReportByteLength );
+    ok( status == HIDP_STATUS_USAGE_NOT_FOUND, "HidP_GetUsageValue returned %#lx\n", status );
+    status = HidP_GetUsageValue( HidP_Input, 0, 0, HID_USAGE_GENERIC_X, &value, preparsed_data, report, caps.InputReportByteLength );
+    ok( status == HIDP_STATUS_USAGE_NOT_FOUND, "HidP_GetUsageValue returned %#lx\n", status );
 
     report[16] = 0xff;
     report[17] = 0xff;
@@ -3168,11 +3177,9 @@ static void check_preparsed_data( HANDLE file, const struct hidp_kdr *expect_kdr
         check_member( *kdr, *expect_kdr, "%d", output_caps_end );
         check_member( *kdr, *expect_kdr, "%d", output_report_byte_length );
         check_member( *kdr, *expect_kdr, "%d", feature_caps_start );
-        todo_wine
         check_member( *kdr, *expect_kdr, "%d", feature_caps_count );
         check_member( *kdr, *expect_kdr, "%d", feature_caps_end );
         check_member( *kdr, *expect_kdr, "%d", feature_report_byte_length );
-        todo_wine
         check_member( *kdr, *expect_kdr, "%d", caps_size );
         check_member( *kdr, *expect_kdr, "%d", number_link_collection_nodes );
 
@@ -3684,7 +3691,6 @@ HRESULT dinput_test_create_device( DWORD version, DIDEVICEINSTANCEW *devinst, ID
         ok( hr == DI_OK, "CreateDevice returned %#lx\n", hr );
 
         ref = IDirectInput8_Release( di8 );
-        todo_wine
         ok( ref == 0, "Release returned %ld\n", ref );
     }
     else
@@ -3711,7 +3717,6 @@ HRESULT dinput_test_create_device( DWORD version, DIDEVICEINSTANCEW *devinst, ID
         ok( hr == DI_OK, "CreateDevice returned %#lx\n", hr );
 
         ref = IDirectInput_Release( di );
-        todo_wine
         ok( ref == 0, "Release returned %ld\n", ref );
     }
 

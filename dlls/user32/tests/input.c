@@ -180,6 +180,118 @@ static void init_function_pointers(void)
         is_wow64 = FALSE;
 }
 
+static const char *debugstr_ok( const char *cond )
+{
+    int c, n = 0;
+    /* skip possible casts */
+    while ((c = *cond++))
+    {
+        if (c == '(') n++;
+        if (!n) break;
+        if (c == ')') n--;
+    }
+    if (!strchr( cond - 1, '(' )) return wine_dbg_sprintf( "got %s", cond - 1 );
+    return wine_dbg_sprintf( "%.*s returned", (int)strcspn( cond - 1, "( " ), cond - 1 );
+}
+
+#define ok_eq( e, r, t, f, ... )                                                                   \
+    do                                                                                             \
+    {                                                                                              \
+        t v = (r);                                                                                 \
+        ok( v == (e), "%s " f "\n", debugstr_ok( #r ), v, ##__VA_ARGS__ );                         \
+    } while (0)
+#define ok_rect( e, r )                                                                            \
+    do                                                                                             \
+    {                                                                                              \
+        RECT v = (r);                                                                              \
+        ok( EqualRect( &v, &(e) ), "%s %s\n", debugstr_ok(#r), wine_dbgstr_rect(&v) );             \
+    } while (0)
+#define ok_ret( e, r ) ok_eq( e, r, UINT_PTR, "%Iu, error %ld", GetLastError() )
+
+#define run_in_process( a, b ) run_in_process_( __FILE__, __LINE__, a, b )
+static void run_in_process_( const char *file, int line, char **argv, const char *args )
+{
+    STARTUPINFOA startup = {.cb = sizeof(STARTUPINFOA)};
+    PROCESS_INFORMATION info = {0};
+    char cmdline[MAX_PATH * 2];
+    DWORD ret;
+
+    sprintf( cmdline, "%s %s %s", argv[0], argv[1], args );
+    ret = CreateProcessA( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info );
+    ok_(file, line)( ret, "CreateProcessA failed, error %lu\n", GetLastError() );
+    if (!ret) return;
+
+    wait_child_process( info.hProcess );
+    CloseHandle( info.hThread );
+    CloseHandle( info.hProcess );
+}
+
+#define run_in_desktop( a, b, c ) run_in_desktop_( __FILE__, __LINE__, a, b, c )
+static void run_in_desktop_( const char *file, int line, char **argv,
+                             const char *args, BOOL input )
+{
+    const char *desktop_name = "WineTest Desktop";
+    STARTUPINFOA startup = {.cb = sizeof(STARTUPINFOA)};
+    PROCESS_INFORMATION info = {0};
+    HDESK old_desktop, desktop;
+    char cmdline[MAX_PATH * 2];
+    DWORD ret;
+
+    old_desktop = OpenInputDesktop( 0, FALSE, DESKTOP_ALL_ACCESS );
+    ok_(file, line)( !!old_desktop, "OpenInputDesktop failed, error %lu\n", GetLastError() );
+    desktop = CreateDesktopA( desktop_name, NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
+    ok_(file, line)( !!desktop, "CreateDesktopA failed, error %lu\n", GetLastError() );
+    if (input)
+    {
+        ret = SwitchDesktop( desktop );
+        ok_(file, line)( ret, "SwitchDesktop failed, error %lu\n", GetLastError() );
+    }
+
+    startup.lpDesktop = (char *)desktop_name;
+    sprintf( cmdline, "%s %s %s", argv[0], argv[1], args );
+    ret = CreateProcessA( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info );
+    ok_(file, line)( ret, "CreateProcessA failed, error %lu\n", GetLastError() );
+    if (!ret) return;
+
+    wait_child_process( info.hProcess );
+    CloseHandle( info.hThread );
+    CloseHandle( info.hProcess );
+
+    if (input)
+    {
+        ret = SwitchDesktop( old_desktop );
+        ok_(file, line)( ret, "SwitchDesktop failed, error %lu\n", GetLastError() );
+    }
+    ret = CloseDesktop( desktop );
+    ok_(file, line)( ret, "CloseDesktop failed, error %lu\n", GetLastError() );
+    ret = CloseDesktop( old_desktop );
+    ok_(file, line)( ret, "CloseDesktop failed, error %lu\n", GetLastError() );
+}
+
+#define msg_wait_for_events( a, b, c ) msg_wait_for_events_( __FILE__, __LINE__, a, b, c )
+static DWORD msg_wait_for_events_( const char *file, int line, DWORD count, HANDLE *events, DWORD timeout )
+{
+    DWORD ret, end = GetTickCount() + min( timeout, 5000 );
+    MSG msg;
+
+    while ((ret = MsgWaitForMultipleObjects( count, events, FALSE, min( timeout, 5000 ), QS_ALLINPUT )) <= count)
+    {
+        while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ))
+        {
+            TranslateMessage( &msg );
+            DispatchMessageW( &msg );
+        }
+        if (ret < count) return ret;
+        if (timeout >= 5000) continue;
+        if (end <= GetTickCount()) timeout = 0;
+        else timeout = end - GetTickCount();
+    }
+
+    if (timeout >= 5000) ok_(file, line)( 0, "MsgWaitForMultipleObjects returned %#lx\n", ret );
+    else ok_(file, line)( ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %#lx\n", ret );
+    return ret;
+}
+
 static int KbdMessage( KEV kev, WPARAM *pwParam, LPARAM *plParam )
 {
     UINT message;
@@ -1471,13 +1583,10 @@ done:
     SetCursorPos(pt_org.x, pt_org.y);
 }
 
-static void test_GetMouseMovePointsEx(const char *argv0)
+static void test_GetMouseMovePointsEx( char **argv )
 {
 #define BUFLIM  64
 #define MYERROR 0xdeadbeef
-    PROCESS_INFORMATION process_info;
-    STARTUPINFOA startup_info;
-    char path[MAX_PATH];
     int i, count, retval;
     MOUSEMOVEPOINT in;
     MOUSEMOVEPOINT out[200];
@@ -1695,16 +1804,7 @@ static void test_GetMouseMovePointsEx(const char *argv0)
     retval = pGetMouseMovePointsEx( sizeof(MOUSEMOVEPOINT), &in, out, BUFLIM, GMMP_USE_HIGH_RESOLUTION_POINTS );
     todo_wine ok( retval == 64, "expected to get 64 high resolution mouse move points but got %d\n", retval );
 
-    sprintf(path, "%s input get_mouse_move_points_test", argv0);
-    memset(&startup_info, 0, sizeof(startup_info));
-    startup_info.cb = sizeof(startup_info);
-    startup_info.dwFlags = STARTF_USESHOWWINDOW;
-    startup_info.wShowWindow = SW_SHOWNORMAL;
-    retval = CreateProcessA(NULL, path, NULL, NULL, TRUE, 0, NULL, NULL, &startup_info, &process_info );
-    ok(retval, "CreateProcess \"%s\" failed err %lu.\n", path, GetLastError());
-    winetest_wait_child_process(process_info.hProcess);
-    CloseHandle(process_info.hProcess);
-    CloseHandle(process_info.hThread);
+    run_in_process( argv, "test_GetMouseMovePointsEx_process" );
 #undef BUFLIM
 #undef MYERROR
 }
@@ -1929,7 +2029,7 @@ static void test_GetRawInputDeviceList(void)
                 (info.dwType != RIM_TYPEHID && sz == 0),
                 "Got wrong PPD size for type 0x%lx: %u\n", info.dwType, sz);
 
-        ppd = HeapAlloc(GetProcessHeap(), 0, sz);
+        ppd = malloc(sz);
         ret = pGetRawInputDeviceInfoW(devices[i].hDevice, RIDI_PREPARSEDDATA, ppd, &sz);
         ok(ret == sz, "GetRawInputDeviceInfo gave wrong return: %u, should be %u\n", ret, sz);
 
@@ -1956,7 +2056,7 @@ static void test_GetRawInputDeviceList(void)
                 HidD_FreePreparsedData(preparsed);
         }
 
-        HeapFree(GetProcessHeap(), 0, ppd);
+        free(ppd);
 
         CloseHandle(file);
     }
@@ -2491,7 +2591,7 @@ static LRESULT CALLBACK rawinput_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPA
 
         ret = GetRawInputData((HRAWINPUT)lparam, RID_INPUT, NULL, &raw_size, sizeof(RAWINPUTHEADER));
         ok(ret == 0, "GetRawInputData failed\n");
-        ok(raw_size <= sizeof(raw), "Unexpected rawinput data size: %u", raw_size);
+        ok(raw_size <= sizeof(raw), "Unexpected rawinput data size: %u\n", raw_size);
 
         raw_size = sizeof(raw);
         ret = GetRawInputData((HRAWINPUT)lparam, RID_INPUT, &raw, &raw_size, sizeof(RAWINPUTHEADER));
@@ -3042,6 +3142,7 @@ static void test_key_map(void)
 
 #define shift 1
 #define ctrl  2
+#define menu  4
 
 static const struct tounicode_tests
 {
@@ -3054,6 +3155,9 @@ static const struct tounicode_tests
 {
     { 0, 0, 'a', 1, {'a',0}},
     { 0, shift, 'a', 1, {'A',0}},
+    { 0, menu, 'a', 1, {'a',0}},
+    { 0, shift|menu, 'a', 1, {'A',0}},
+    { 0, shift|ctrl|menu, 'a', 0, {}},
     { 0, ctrl, 'a', 1, {1, 0}},
     { 0, shift|ctrl, 'a', 1, {1, 0}},
     { VK_TAB, ctrl, 0, 0, {}},
@@ -3142,6 +3246,7 @@ static void test_ToUnicode(void)
 
         state[VK_SHIFT]   = state[VK_LSHIFT]   = (mod & shift) ? HIGHEST_BIT : 0;
         state[VK_CONTROL] = state[VK_LCONTROL] = (mod & ctrl) ? HIGHEST_BIT : 0;
+        state[VK_MENU]    = state[VK_LMENU]    = (mod & menu) ? HIGHEST_BIT : 0;
 
         ret = ToUnicode(vk, scan, state, wStr, 4, 0);
         ok(ret == utests[i].expect_ret, "%d: got %d expected %d\n", i, ret, utests[i].expect_ret);
@@ -3169,12 +3274,14 @@ static void test_ToUnicode(void)
 
 static void test_ToAscii(void)
 {
+    WCHAR wstr[16];
+    char str[16];
     WORD character;
     BYTE state[256];
     const BYTE SC_RETURN = 0x1c, SC_A = 0x1e;
     const BYTE HIGHEST_BIT = 0x80;
-    int ret;
-    BOOL us_kbd = (GetKeyboardLayout(0) == (HKL)(ULONG_PTR)0x04090409);
+    int ret, len;
+    DWORD gle;
 
     memset(state, 0, sizeof(state));
 
@@ -3183,10 +3290,32 @@ static void test_ToAscii(void)
     ok(ret == 1, "ToAscii for Return key didn't return 1 (was %i)\n", ret);
     ok(character == '\r', "ToAscii for Return was %i (expected 13)\n", character);
 
+    wstr[0] = 0;
+    ret = ToUnicode('A', SC_A, state, wstr, ARRAY_SIZE(wstr), 0);
+    ok(ret == 1, "ToUnicode(A) returned %i, expected 1\n", ret);
+
+    str[0] = '\0';
+    len = WideCharToMultiByte(CP_ACP, 0, wstr, -1, str, sizeof(str), NULL, NULL);
+    gle = GetLastError();
+    ok(len > 0, "Could not convert %s (gle %lu)\n", wine_dbgstr_w(wstr), gle);
+
     character = 0;
     ret = ToAscii('A', SC_A, state, &character, 0);
-    ok(ret == 1, "ToAscii for character 'A' didn't return 1 (was %i)\n", ret);
-    if (us_kbd) ok(character == 'a', "ToAscii for character 'A' was %i (expected %i)\n", character, 'a');
+    if (len == 1 || len == 2)
+        ok(ret == 1, "ToAscii(A) returned %i, expected 1\n", ret);
+    else
+        /* ToAscii() can only return 2 chars => it fails if len > 2 */
+        ok(ret == 0, "ToAscii(A) returned %i, expected 0\n", ret);
+    switch ((ULONG_PTR)GetKeyboardLayout(0))
+    {
+    case 0x04090409: /* Qwerty */
+    case 0x04070407: /* Qwertz */
+    case 0x040c040c: /* Azerty */
+        ok(lstrcmpW(wstr, L"a") == 0, "ToUnicode(A) returned %s\n", wine_dbgstr_w(wstr));
+        ok(character == 'a', "ToAscii(A) returned char=%i, expected %i\n", character, 'a');
+        break;
+    /* Other keyboard layouts may or may not return 'a' */
+    }
 
     state[VK_CONTROL] |= HIGHEST_BIT;
     state[VK_LCONTROL] |= HIGHEST_BIT;
@@ -3240,6 +3369,16 @@ static void test_keyboard_layout_name(void)
     ok(GetLastError() == ERROR_NOACCESS, "got %ld\n", GetLastError());
 
     layout = GetKeyboardLayout(0);
+    if (broken( layout == (HKL)0x040a0c0a ))
+    {
+        /* The testbot w7u_es has a broken layout configuration, its active layout is 040a:0c0a,
+         * with 0c0a its user locale and 040a its layout langid. Its layout preload list contains
+         * a 00000c0a layout but the system layouts OTOH only contains the standard 0000040a layout.
+         * Later, after activating 0409:0409 layout, GetKeyboardLayoutNameW returns 00000c0a.
+         */
+        win_skip( "broken keyboard layout, skipping tests\n" );
+        return;
+    }
 
     len = GetKeyboardLayoutList(0, NULL);
     ok(len > 0, "GetKeyboardLayoutList returned %d\n", len);
@@ -3250,7 +3389,7 @@ static void test_keyboard_layout_name(void)
     len = GetKeyboardLayoutList(len, layouts);
     ok(len > 0, "GetKeyboardLayoutList returned %d\n", len);
 
-    layouts_preload = calloc(len, sizeof(HKL));
+    layouts_preload = calloc(1, sizeof(HKL));
     ok(layouts_preload != NULL, "Could not allocate memory\n");
 
     if (!RegOpenKeyW( HKEY_CURRENT_USER, L"Keyboard Layout\\Preload", &hkey ))
@@ -3259,24 +3398,26 @@ static void test_keyboard_layout_name(void)
         type = REG_SZ;
         klid_size = sizeof(klid);
         value_size = ARRAY_SIZE(value);
-        while (i < len && !RegEnumValueW( hkey, i++, value, &value_size, NULL, &type, (void *)&klid, &klid_size ))
+        while (!RegEnumValueW( hkey, i++, value, &value_size, NULL, &type, (void *)&klid, &klid_size ))
         {
             klid_size = sizeof(klid);
             value_size = ARRAY_SIZE(value);
+            layouts_preload = realloc( layouts_preload, (i + 1) * sizeof(*layouts_preload) );
+            ok(layouts_preload != NULL, "Could not allocate memory\n");
             layouts_preload[i - 1] = UlongToHandle( wcstoul( klid, NULL, 16 ) );
+            layouts_preload[i] = 0;
 
             id = (DWORD_PTR)layouts_preload[i - 1];
             if (id & 0x80000000) todo_wine_if(HIWORD(id) == 0xe001) ok((id & 0xf0000000) == 0xd0000000, "Unexpected preloaded keyboard layout high bits %#lx\n", id);
             else ok(!(id & 0xf0000000), "Unexpected preloaded keyboard layout high bits %#lx\n", id);
         }
 
-        ok(i <= len, "Unexpected keyboard count %d in preload list\n", i);
         RegCloseKey( hkey );
     }
 
     if (!RegOpenKeyW( HKEY_CURRENT_USER, L"Keyboard Layout\\Substitutes", &hkey ))
     {
-        for (i = 0; i < len && layouts_preload[i]; ++i)
+        for (i = 0; layouts_preload[i]; ++i)
         {
             type = REG_SZ;
             klid_size = sizeof(klid);
@@ -3302,10 +3443,23 @@ static void test_keyboard_layout_name(void)
     for (i = len - 1; i >= 0; --i)
     {
         id = (DWORD_PTR)layouts[i];
+
+        winetest_push_context( "%08lx", id );
+
         ActivateKeyboardLayout(layouts[i], 0);
+
+        tmplayout = GetKeyboardLayout(0);
+        todo_wine_if(tmplayout != layouts[i])
+        ok( tmplayout == layouts[i], "Failed to activate keyboard layout\n");
+        if (tmplayout != layouts[i])
+        {
+            winetest_pop_context();
+            continue;
+        }
+
         GetKeyboardLayoutNameW(klid);
 
-        for (j = 0; j < len; ++j)
+        for (j = 0; layouts_preload[j]; ++j)
         {
             swprintf( tmpklid, KL_NAMELENGTH, L"%08X", layouts_preload[j] );
             if (!wcscmp( tmpklid, klid )) break;
@@ -3341,12 +3495,193 @@ static void test_keyboard_layout_name(void)
         /* The layout name only depends on the keyboard layout: the high word of HKL. */
         GetKeyboardLayoutNameW(tmpklid);
         ok(!wcsicmp(klid, tmpklid), "GetKeyboardLayoutNameW returned %s, expected %s\n", debugstr_w(tmpklid), debugstr_w(klid));
+
+        winetest_pop_context();
     }
 
     ActivateKeyboardLayout(layout, 0);
 
     free(layouts);
     free(layouts_preload);
+}
+
+static HKL expect_hkl;
+static HKL change_hkl;
+static int got_setfocus;
+
+static LRESULT CALLBACK test_ActivateKeyboardLayout_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    ok( msg != WM_INPUTLANGCHANGEREQUEST, "got WM_INPUTLANGCHANGEREQUEST\n" );
+
+    if (msg == WM_SETFOCUS) got_setfocus = 1;
+    if (msg == WM_INPUTLANGCHANGE)
+    {
+        HKL layout = GetKeyboardLayout( 0 );
+        CHARSETINFO info;
+        WCHAR klidW[64];
+        UINT codepage;
+        LCID lcid;
+
+        /* get keyboard layout lcid from its name, as the HKL might be aliased */
+        GetKeyboardLayoutNameW( klidW );
+        swscanf( klidW, L"%x", &lcid );
+        lcid = LOWORD(lcid);
+
+        if (!(HIWORD(layout) & 0x8000)) ok( lcid == HIWORD(layout), "got lcid %#lx\n", lcid );
+
+        GetLocaleInfoA( lcid, LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
+                        (char *)&codepage, sizeof(codepage) );
+        TranslateCharsetInfo( UlongToPtr( codepage ), &info, TCI_SRCCODEPAGE );
+
+        ok( !got_setfocus, "got WM_SETFOCUS before WM_INPUTLANGCHANGE\n" );
+        ok( layout == expect_hkl, "got layout %p\n", layout );
+        ok( wparam == info.ciCharset || broken(wparam == 0 && (HIWORD(layout) & 0x8000)),
+            "got wparam %#Ix\n", wparam );
+        ok( lparam == (LPARAM)expect_hkl, "got lparam %#Ix\n", lparam );
+        change_hkl = (HKL)lparam;
+    }
+
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static DWORD CALLBACK test_ActivateKeyboardLayout_thread_proc( void *arg )
+{
+    ActivateKeyboardLayout( arg, 0 );
+    return 0;
+}
+
+static void test_ActivateKeyboardLayout( char **argv )
+{
+    HKL layout, tmp_layout, *layouts;
+    HWND hwnd1, hwnd2;
+    HANDLE thread;
+    UINT i, count;
+    DWORD ret;
+
+    layout = GetKeyboardLayout( 0 );
+    if (broken( layout == (HKL)0x040a0c0a ))
+    {
+        /* The testbot w7u_es has a broken layout configuration, see test_keyboard_layout_name above. */
+        win_skip( "broken keyboard layout, skipping tests\n" );
+        return;
+    }
+
+    count = GetKeyboardLayoutList( 0, NULL );
+    ok( count > 0, "GetKeyboardLayoutList returned %d\n", count );
+    layouts = malloc( count * sizeof(HKL) );
+    ok( layouts != NULL, "Could not allocate memory\n" );
+    count = GetKeyboardLayoutList( count, layouts );
+    ok( count > 0, "GetKeyboardLayoutList returned %d\n", count );
+
+    hwnd1 = CreateWindowA( "static", "static", WS_VISIBLE | WS_POPUP,
+                           100, 100, 100, 100, 0, NULL, NULL, NULL );
+    ok( !!hwnd1, "CreateWindow failed, error %lu\n", GetLastError() );
+    empty_message_queue();
+
+    SetWindowLongPtrA( hwnd1, GWLP_WNDPROC, (LONG_PTR)test_ActivateKeyboardLayout_window_proc );
+
+    for (i = 0; i < count; ++i)
+    {
+        BOOL broken_focus_activate = FALSE;
+        HKL other_layout = layouts[i];
+
+        winetest_push_context( "%08x / %08x", (UINT)(UINT_PTR)layout, (UINT)(UINT_PTR)other_layout );
+
+        /* test WM_INPUTLANGCHANGE message */
+
+        change_hkl = 0;
+        expect_hkl = other_layout;
+        got_setfocus = 0;
+        ActivateKeyboardLayout( other_layout, 0 );
+        if (other_layout == layout) ok( change_hkl == 0, "got change_hkl %p\n", change_hkl );
+        else todo_wine ok( change_hkl == other_layout, "got change_hkl %p\n", change_hkl );
+        change_hkl = expect_hkl = 0;
+
+        tmp_layout = GetKeyboardLayout( 0 );
+        todo_wine_if(layout != other_layout)
+        ok( tmp_layout == other_layout, "got tmp_layout %p\n", tmp_layout );
+
+        /* changing the layout from another thread doesn't send the message */
+
+        thread = CreateThread( NULL, 0, test_ActivateKeyboardLayout_thread_proc, layout, 0, 0 );
+        ret = WaitForSingleObject( thread, 1000 );
+        ok( !ret, "WaitForSingleObject returned %#lx\n", ret );
+        CloseHandle( thread );
+
+        /* and has no immediate effect */
+
+        empty_message_queue();
+        tmp_layout = GetKeyboardLayout( 0 );
+        todo_wine_if(layout != other_layout)
+        ok( tmp_layout == other_layout, "got tmp_layout %p\n", tmp_layout );
+
+        /* but the change only takes effect after focus changes */
+
+        hwnd2 = CreateWindowA( "static", "static", WS_VISIBLE | WS_POPUP,
+                               100, 100, 100, 100, 0, NULL, NULL, NULL );
+        ok( !!hwnd2, "CreateWindow failed, error %lu\n", GetLastError() );
+
+        tmp_layout = GetKeyboardLayout( 0 );
+        todo_wine_if(layout != other_layout)
+        ok( tmp_layout == layout || broken(layout != other_layout && tmp_layout == other_layout) /* w7u */,
+            "got tmp_layout %p\n", tmp_layout );
+        if (broken(layout != other_layout && tmp_layout == other_layout))
+        {
+            win_skip( "Broken layout activation on focus change, skipping some tests\n" );
+            broken_focus_activate = TRUE;
+        }
+        empty_message_queue();
+
+        /* only the focused window receives the WM_INPUTLANGCHANGE message */
+
+        ActivateKeyboardLayout( other_layout, 0 );
+        ok( change_hkl == 0, "got change_hkl %p\n", change_hkl );
+
+        tmp_layout = GetKeyboardLayout( 0 );
+        todo_wine_if(layout != other_layout)
+        ok( tmp_layout == other_layout, "got tmp_layout %p\n", tmp_layout );
+
+        thread = CreateThread( NULL, 0, test_ActivateKeyboardLayout_thread_proc, layout, 0, 0 );
+        ret = WaitForSingleObject( thread, 1000 );
+        ok( !ret, "WaitForSingleObject returned %#lx\n", ret );
+        CloseHandle( thread );
+
+        tmp_layout = GetKeyboardLayout( 0 );
+        todo_wine_if(layout != other_layout)
+        ok( tmp_layout == other_layout, "got tmp_layout %p\n", tmp_layout );
+
+        /* changing focus is enough for the layout change to take effect */
+
+        change_hkl = 0;
+        expect_hkl = layout;
+        got_setfocus = 0;
+        SetFocus( hwnd1 );
+
+        if (broken_focus_activate)
+        {
+            ok( got_setfocus == 1, "got got_setfocus %d\n", got_setfocus );
+            ok( change_hkl == 0, "got change_hkl %p\n", change_hkl );
+            got_setfocus = 0;
+            ActivateKeyboardLayout( layout, 0 );
+        }
+
+        if (other_layout == layout) ok( change_hkl == 0, "got change_hkl %p\n", change_hkl );
+        else todo_wine ok( change_hkl == layout, "got change_hkl %p\n", change_hkl );
+        change_hkl = expect_hkl = 0;
+
+        tmp_layout = GetKeyboardLayout( 0 );
+        todo_wine_if(layout != other_layout)
+        ok( tmp_layout == layout, "got tmp_layout %p\n", tmp_layout );
+
+        DestroyWindow( hwnd2 );
+        empty_message_queue();
+
+        winetest_pop_context();
+    }
+
+    DestroyWindow( hwnd1 );
+
+    free( layouts );
 }
 
 static void test_key_names(void)
@@ -3397,13 +3732,13 @@ static void simulate_click(BOOL left, int x, int y)
     SetCursorPos(x, y);
     memset(input, 0, sizeof(input));
     input[0].type = INPUT_MOUSE;
-    U(input[0]).mi.dx = x;
-    U(input[0]).mi.dy = y;
-    U(input[0]).mi.dwFlags = left ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+    input[0].mi.dx = x;
+    input[0].mi.dy = y;
+    input[0].mi.dwFlags = left ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
     input[1].type = INPUT_MOUSE;
-    U(input[1]).mi.dx = x;
-    U(input[1]).mi.dy = y;
-    U(input[1]).mi.dwFlags = left ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
+    input[1].mi.dx = x;
+    input[1].mi.dy = y;
+    input[1].mi.dwFlags = left ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
     events_no = SendInput(2, input, sizeof(input[0]));
     ok(events_no == 2, "SendInput returned %d\n", events_no);
 }
@@ -4158,7 +4493,7 @@ static DWORD WINAPI get_key_state_thread(void *arg)
     struct get_key_state_test_desc* test;
     HANDLE *semaphores = params->semaphores;
     DWORD result;
-    BYTE keystate[256];
+    BYTE keystate[256] = {0};
     BOOL has_queue;
     BOOL expect_x, expect_c;
     MSG msg;
@@ -4220,7 +4555,7 @@ static void test_GetKeyState(void)
     struct get_key_state_thread_params params;
     HANDLE thread;
     DWORD result;
-    BYTE keystate[256];
+    BYTE keystate[256] = {0};
     BOOL expect_x, expect_c;
     HWND hwnd;
     MSG msg;
@@ -4233,7 +4568,6 @@ static void test_GetKeyState(void)
         return;
     }
 
-    memset(keystate, 0, sizeof(keystate));
     params.semaphores[0] = CreateSemaphoreA(NULL, 0, 1, NULL);
     ok(params.semaphores[0] != NULL, "CreateSemaphoreA failed %lu\n", GetLastError());
     params.semaphores[1] = CreateSemaphoreA(NULL, 0, 1, NULL);
@@ -4830,10 +5164,12 @@ static void test_GetPointerInfo( BOOL mouse_in_pointer_enabled )
     ok( ret, "UnregisterClassW failed: %lu\n", GetLastError() );
 }
 
-static void test_EnableMouseInPointer_process( const char *arg )
+static void test_EnableMouseInPointer( const char *arg )
 {
     DWORD enable = strtoul( arg, 0, 10 );
     BOOL ret;
+
+    winetest_push_context( "enable %lu", enable );
 
     ret = pEnableMouseInPointer( enable );
     todo_wine
@@ -4844,37 +5180,210 @@ static void test_EnableMouseInPointer_process( const char *arg )
     ok( !ret, "EnableMouseInPointer succeeded\n" );
     todo_wine
     ok( GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError() );
-    if (!pIsMouseInPointerEnabled) ret = !enable;
-    else ret = pIsMouseInPointerEnabled();
-    todo_wine_if(!pIsMouseInPointerEnabled)
+    ret = pIsMouseInPointerEnabled();
+    todo_wine_if(enable)
     ok( ret == enable, "IsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
 
     ret = pEnableMouseInPointer( enable );
     todo_wine
     ok( ret, "EnableMouseInPointer failed, error %lu\n", GetLastError() );
-    if (!pIsMouseInPointerEnabled) ret = !enable;
-    else ret = pIsMouseInPointerEnabled();
-    todo_wine_if(!pIsMouseInPointerEnabled)
+    ret = pIsMouseInPointerEnabled();
+    todo_wine_if(enable)
     ok( ret == enable, "IsMouseInPointerEnabled returned %u, error %lu\n", ret, GetLastError() );
 
     test_GetPointerInfo( enable );
+
+    winetest_pop_context();
 }
 
-static void test_EnableMouseInPointer( char **argv, BOOL enable )
+static BOOL CALLBACK get_virtual_screen_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
 {
-    STARTUPINFOA startup = {.cb = sizeof(STARTUPINFOA)};
-    PROCESS_INFORMATION info = {0};
-    char cmdline[MAX_PATH * 2];
-    BOOL ret;
+    RECT *virtual_rect = (RECT *)lp;
+    UnionRect( virtual_rect, virtual_rect, rect );
+    return TRUE;
+}
 
-    sprintf( cmdline, "%s %s EnableMouseInPointer %u", argv[0], argv[1], enable );
-    ret = CreateProcessA( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info );
-    ok( ret, "CreateProcessA failed, error %lu\n", GetLastError() );
-    if (!ret) return;
+RECT get_virtual_screen_rect(void)
+{
+    RECT rect = {0};
+    EnumDisplayMonitors( 0, NULL, get_virtual_screen_proc, (LPARAM)&rect );
+    return rect;
+}
 
-    wait_child_process( info.hProcess );
-    CloseHandle( info.hThread );
-    CloseHandle( info.hProcess );
+static void test_ClipCursor_dirty( const char *arg )
+{
+    RECT rect, expect_rect = {1, 2, 3, 4};
+
+    /* check leaked clip rect from another desktop or process */
+    ok_ret( 1, GetClipCursor( &rect ) );
+    todo_wine_if( !strcmp( arg, "desktop" ) )
+    ok_rect( expect_rect, rect );
+
+    /* intentionally leaking clipping rect */
+}
+
+static DWORD CALLBACK test_ClipCursor_thread( void *arg )
+{
+    RECT rect, clip_rect, virtual_rect = get_virtual_screen_rect();
+    HWND hwnd;
+
+    clip_rect.left = clip_rect.right = (virtual_rect.left + virtual_rect.right) / 2;
+    clip_rect.top = clip_rect.bottom = (virtual_rect.top + virtual_rect.bottom) / 2;
+
+    /* creating a window doesn't reset clipping rect */
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW, 0, 0, 0, 0,
+                          NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* setting a window foreground does, even from the same process */
+    ok_ret( 1, SetForegroundWindow( hwnd ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( virtual_rect, rect );
+
+    /* destroying the window doesn't reset the clipping rect */
+    InflateRect( &clip_rect, +1, +1 );
+    ok_ret( 1, ClipCursor( &clip_rect ) );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* intentionally leaking clipping rect */
+    return 0;
+}
+
+static void test_ClipCursor_process(void)
+{
+    RECT rect, clip_rect, virtual_rect = get_virtual_screen_rect();
+    HWND hwnd, tmp_hwnd;
+    HANDLE thread;
+
+    clip_rect.left = clip_rect.right = (virtual_rect.left + virtual_rect.right) / 2;
+    clip_rect.top = clip_rect.bottom = (virtual_rect.top + virtual_rect.bottom) / 2;
+
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* creating an invisible window doesn't reset clip cursor */
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW, 0, 0, 0, 0,
+                          NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* setting a window foreground, even invisible, resets it */
+    hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW, 0, 0, 0, 0,
+                          NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    ok_ret( 1, SetForegroundWindow( hwnd ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( virtual_rect, rect );
+
+    ok_ret( 1, ClipCursor( &clip_rect ) );
+
+    /* creating and setting another window foreground doesn't reset it */
+    tmp_hwnd = CreateWindowW( L"static", NULL, WS_OVERLAPPEDWINDOW, 0, 0, 0, 0,
+                              NULL, NULL, NULL, NULL );
+    ok( !!tmp_hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    ok_ret( 1, SetForegroundWindow( tmp_hwnd ) );
+    ok_ret( 1, DestroyWindow( tmp_hwnd ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* but changing foreground to another thread in the same process reset it */
+    thread = CreateThread( NULL, 0, test_ClipCursor_thread, NULL, 0, NULL );
+    ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
+    msg_wait_for_events( 1, &thread, 5000 );
+
+    /* thread exit and foreground window destruction doesn't reset the clipping rect */
+    InflateRect( &clip_rect, +1, +1 );
+    ok_ret( 1, DestroyWindow( hwnd ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* intentionally leaking clipping rect */
+}
+
+static void test_ClipCursor_desktop( char **argv )
+{
+    RECT rect, clip_rect, virtual_rect = get_virtual_screen_rect();
+
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( virtual_rect, rect );
+
+    /* ClipCursor clips rectangle to the virtual screen rect */
+    clip_rect = virtual_rect;
+    InflateRect( &clip_rect, +1, +1 );
+    ok_ret( 1, ClipCursor( &clip_rect ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( virtual_rect, rect );
+
+    clip_rect = virtual_rect;
+    InflateRect( &clip_rect, -1, -1 );
+    ok_ret( 1, ClipCursor( &clip_rect ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* ClipCursor(NULL) resets to the virtual screen rect */
+    ok_ret( 1, ClipCursor( NULL ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( virtual_rect, rect );
+
+    clip_rect.left = clip_rect.right = (virtual_rect.left + virtual_rect.right) / 2;
+    clip_rect.top = clip_rect.bottom = (virtual_rect.top + virtual_rect.bottom) / 2;
+    ok_ret( 1, ClipCursor( &clip_rect ) );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* ClipCursor rejects invalid rectangles */
+    clip_rect.right -= 1;
+    clip_rect.bottom -= 1;
+    SetLastError( 0xdeadbeef );
+    ok_ret( 0, ClipCursor( &clip_rect ) );
+    todo_wine
+    ok_ret( ERROR_ACCESS_DENIED, GetLastError() );
+
+    /* which doesn't reset the previous clip rect */
+    clip_rect.right += 1;
+    clip_rect.bottom += 1;
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* running a process causes it to leak until foreground actually changes */
+    run_in_process( argv, "test_ClipCursor_process" );
+
+    /* as foreground window is now transient, cursor clipping isn't reset */
+    InflateRect( &clip_rect, +1, +1 );
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* intentionally leaking clipping rect */
+}
+
+static void test_ClipCursor( char **argv )
+{
+    RECT rect, clip_rect = {1, 2, 3, 4}, virtual_rect = get_virtual_screen_rect();
+
+    ok_ret( 1, ClipCursor( &clip_rect ) );
+
+    /* running a new process doesn't reset clipping rectangle */
+    run_in_process( argv, "test_ClipCursor_dirty process" );
+
+    /* running in a separate desktop, without switching desktop as well */
+    run_in_desktop( argv, "test_ClipCursor_dirty desktop", 0 );
+
+    ok_ret( 1, GetClipCursor( &rect ) );
+    ok_rect( clip_rect, rect );
+
+    /* running in a desktop and switching input resets the clipping rect */
+    run_in_desktop( argv, "test_ClipCursor_desktop", 1 );
+
+    ok_ret( 1, GetClipCursor( &rect ) );
+    todo_wine
+    ok_rect( virtual_rect, rect );
+    if (!EqualRect( &rect, &virtual_rect )) ok_ret( 1, ClipCursor( NULL ) );
 }
 
 START_TEST(input)
@@ -4887,25 +5396,18 @@ START_TEST(input)
     GetCursorPos( &pos );
 
     argc = winetest_get_mainargs(&argv);
-    if (argc >= 3 && strcmp(argv[2], "rawinput_test") == 0)
-    {
-        rawinput_test_process();
-        return;
-    }
-
-    if (argc >= 3 && strcmp(argv[2], "get_mouse_move_points_test") == 0)
-    {
-        test_GetMouseMovePointsEx_process();
-        return;
-    }
-
-    if (argc >= 4 && strcmp( argv[2], "EnableMouseInPointer" ) == 0)
-    {
-        winetest_push_context( "enable %s", argv[3] );
-        test_EnableMouseInPointer_process( argv[3] );
-        winetest_pop_context();
-        return;
-    }
+    if (argc >= 3 && !strcmp( argv[2], "rawinput_test" ))
+        return rawinput_test_process();
+    if (argc >= 3 && !strcmp( argv[2], "test_GetMouseMovePointsEx_process" ))
+        return test_GetMouseMovePointsEx_process();
+    if (argc >= 4 && !strcmp( argv[2], "test_EnableMouseInPointer" ))
+        return test_EnableMouseInPointer( argv[3] );
+    if (argc >= 4 && !strcmp( argv[2], "test_ClipCursor_dirty" ))
+        return test_ClipCursor_dirty( argv[3] );
+    if (argc >= 3 && !strcmp( argv[2], "test_ClipCursor_process" ))
+        return test_ClipCursor_process();
+    if (argc >= 3 && !strcmp( argv[2], "test_ClipCursor_desktop" ))
+        return test_ClipCursor_desktop( argv );
 
     test_SendInput();
     test_Input_blackbox();
@@ -4919,6 +5421,7 @@ START_TEST(input)
     test_ToAscii();
     test_get_async_key_state();
     test_keyboard_layout_name();
+    test_ActivateKeyboardLayout( argv );
     test_key_names();
     test_attach_input();
     test_GetKeyState();
@@ -4930,7 +5433,7 @@ START_TEST(input)
     test_DefRawInputProc();
 
     if(pGetMouseMovePointsEx)
-        test_GetMouseMovePointsEx(argv[0]);
+        test_GetMouseMovePointsEx( argv );
     else
         win_skip("GetMouseMovePointsEx is not available\n");
 
@@ -4957,7 +5460,9 @@ START_TEST(input)
         win_skip( "EnableMouseInPointer not found, skipping tests\n" );
     else
     {
-        test_EnableMouseInPointer( argv, FALSE );
-        test_EnableMouseInPointer( argv, TRUE );
+        run_in_process( argv, "test_EnableMouseInPointer 0" );
+        run_in_process( argv, "test_EnableMouseInPointer 1" );
     }
+
+    test_ClipCursor( argv );
 }

@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-
 #undef INITGUID
 #include <guiddef.h>
 #include "mfapi.h"
@@ -150,7 +148,7 @@ static inline const char *debugstr_propvar(const PROPVARIANT *v)
     }
 }
 
-static inline const char *debugstr_fourcc(DWORD format)
+static inline const char *mf_debugstr_fourcc(DWORD format)
 {
     static const struct format_name
     {

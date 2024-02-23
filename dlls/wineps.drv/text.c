@@ -40,7 +40,7 @@ static BOOL PSDRV_Text(print_ctx *ctx, INT x, INT y, UINT flags,
 		       LPCWSTR str, UINT count,
 		       BOOL bDrawBackground, const INT *lpDx);
 
-extern const unsigned short vertical_orientation_table[] DECLSPEC_HIDDEN;
+extern const unsigned short vertical_orientation_table[];
 
 static BOOL check_unicode_tategaki(WCHAR uchar)
 {
@@ -129,8 +129,8 @@ static Run* build_vertical_runs(print_ctx *ctx, UINT flags, LPCWSTR str, UINT co
 /***********************************************************************
  *           PSDRV_ExtTextOut
  */
-BOOL CDECL PSDRV_ExtTextOut( print_ctx *ctx, INT x, INT y, UINT flags, const RECT *lprect, LPCWSTR str, UINT count,
-                             const INT *lpDx )
+BOOL PSDRV_ExtTextOut( print_ctx *ctx, INT x, INT y, UINT flags, const RECT *lprect, LPCWSTR str, UINT count,
+                       const INT *lpDx )
 {
     BOOL bResult = TRUE;
     BOOL bClipped = FALSE;

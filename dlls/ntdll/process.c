@@ -49,6 +49,15 @@ PEB * WINAPI RtlGetCurrentPeb(void)
 }
 
 
+/******************************************************************************
+ *              RtlIsCurrentProcess  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsCurrentProcess( HANDLE handle )
+{
+    return handle == NtCurrentProcess() || !NtCompareObjects( handle, NtCurrentProcess() );
+}
+
+
 /******************************************************************
  *		RtlWow64EnableFsRedirection   (NTDLL.@)
  */
@@ -99,22 +108,36 @@ USHORT WINAPI RtlWow64GetCurrentMachine(void)
  */
 NTSTATUS WINAPI RtlWow64GetProcessMachines( HANDLE process, USHORT *current_ret, USHORT *native_ret )
 {
-    ULONG i, machines[8];
+    SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
     USHORT current = 0, native = 0;
     NTSTATUS status;
+    ULONG i;
 
     status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
                                          machines, sizeof(machines), NULL );
     if (status) return status;
-    for (i = 0; machines[i]; i++)
+    for (i = 0; machines[i].Machine; i++)
     {
-        USHORT flags = HIWORD(machines[i]);
-        USHORT machine = LOWORD(machines[i]);
-        if (flags & 4 /* native machine */) native = machine;
-        else if (flags & 8 /* current machine */) current = machine;
+        if (machines[i].Native) native = machines[i].Machine;
+        else if (machines[i].Process) current = machines[i].Machine;
     }
     if (current_ret) *current_ret = current;
     if (native_ret) *native_ret = native;
+    return status;
+}
+
+
+/**********************************************************************
+ *           RtlWow64GetSharedInfoProcess  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64GetSharedInfoProcess( HANDLE process, BOOLEAN *is_wow64, WOW64INFO *info )
+{
+    PEB32 *peb32;
+    NTSTATUS status = NtQueryInformationProcess( process, ProcessWow64Information,
+                                                 &peb32, sizeof(peb32), NULL );
+    if (status) return status;
+    if (peb32) status = NtReadVirtualMemory( process, peb32 + 1, info, sizeof(*info), NULL );
+    *is_wow64 = !!peb32;
     return status;
 }
 
@@ -124,18 +147,19 @@ NTSTATUS WINAPI RtlWow64GetProcessMachines( HANDLE process, USHORT *current_ret,
  */
 NTSTATUS WINAPI RtlWow64IsWowGuestMachineSupported( USHORT machine, BOOLEAN *supported )
 {
-    ULONG i, machines[8];
+    SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
     HANDLE process = 0;
     NTSTATUS status;
+    ULONG i;
 
     status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
                                          machines, sizeof(machines), NULL );
     if (status) return status;
     *supported = FALSE;
-    for (i = 0; machines[i]; i++)
+    for (i = 0; machines[i].Machine; i++)
     {
-        if (HIWORD(machines[i]) & 4 /* native machine */) continue;
-        if (machine == LOWORD(machines[i])) *supported = TRUE;
+        if (machines[i].Native) continue;
+        if (machine == machines[i].Machine) *supported = TRUE;
     }
     return status;
 }
@@ -225,13 +249,18 @@ NTSTATUS WINAPI RtlWow64GetThreadSelectorEntry( HANDLE handle, THREAD_DESCRIPTOR
     if (RtlWow64GetThreadContext( handle, &context ))
     {
         /* hardcoded values */
+#ifdef __arm64ec__
+        context.SegCs = 0x33;
+        context.SegSs = 0x2b;
+        context.SegFs = 0x53;
+#elif defined(__x86_64__)
         context.SegCs = 0x23;
-#ifdef __x86_64__
         __asm__( "movw %%fs,%0" : "=m" (context.SegFs) );
         __asm__( "movw %%ss,%0" : "=m" (context.SegSs) );
 #else
-        context.SegSs = 0x2b;
-        context.SegFs = 0x53;
+        context.SegCs = 0x1b;
+        context.SegSs = 0x23;
+        context.SegFs = 0x3b;
 #endif
     }
 
@@ -278,7 +307,147 @@ done:
     return STATUS_SUCCESS;
 }
 
-#endif
+
+/**********************************************************************
+ *           RtlOpenCrossProcessEmulatorWorkConnection  (NTDLL.@)
+ */
+void WINAPI RtlOpenCrossProcessEmulatorWorkConnection( HANDLE process, HANDLE *section, void **addr )
+{
+    WOW64INFO wow64info;
+    BOOLEAN is_wow64;
+    SIZE_T size = 0;
+
+    *addr = NULL;
+    *section = 0;
+
+    if (RtlWow64GetSharedInfoProcess( process, &is_wow64, &wow64info )) return;
+    if (!is_wow64) return;
+    if (!wow64info.SectionHandle) return;
+
+    if (NtDuplicateObject( process, (HANDLE)(ULONG_PTR)wow64info.SectionHandle,
+                           GetCurrentProcess(), section, 0, 0, DUPLICATE_SAME_ACCESS ))
+        return;
+
+    if (!NtMapViewOfSection( *section, GetCurrentProcess(), addr, 0, 0, NULL,
+                             &size, ViewShare, 0, PAGE_READWRITE )) return;
+
+    NtClose( *section );
+    *section = 0;
+}
+
+
+/**********************************************************************
+ *           RtlWow64PopAllCrossProcessWorkFromWorkList  (NTDLL.@)
+ */
+CROSS_PROCESS_WORK_ENTRY * WINAPI RtlWow64PopAllCrossProcessWorkFromWorkList( CROSS_PROCESS_WORK_HDR *list, BOOLEAN *flush )
+{
+    CROSS_PROCESS_WORK_HDR prev, new;
+    UINT pos, prev_pos = 0;
+
+    do
+    {
+        prev.hdr = list->hdr;
+        if (!prev.first) break;
+        new.first = 0;
+        new.counter = prev.counter + 1;
+    } while (InterlockedCompareExchange64( &list->hdr, new.hdr, prev.hdr ) != prev.hdr);
+
+    *flush = (prev.first & CROSS_PROCESS_LIST_FLUSH) != 0;
+    if (!(pos = prev.first & ~CROSS_PROCESS_LIST_FLUSH)) return NULL;
+
+    /* reverse the list */
+
+    for (;;)
+    {
+        CROSS_PROCESS_WORK_ENTRY *entry = CROSS_PROCESS_LIST_ENTRY( list, pos );
+        UINT next = entry->next;
+        entry->next = prev_pos;
+        if (!next) return entry;
+        prev_pos = pos;
+        pos = next;
+    }
+}
+
+
+/**********************************************************************
+ *           RtlWow64PopCrossProcessWorkFromFreeList  (NTDLL.@)
+ */
+CROSS_PROCESS_WORK_ENTRY * WINAPI RtlWow64PopCrossProcessWorkFromFreeList( CROSS_PROCESS_WORK_HDR *list )
+{
+    CROSS_PROCESS_WORK_ENTRY *ret;
+    CROSS_PROCESS_WORK_HDR prev, new;
+
+    do
+    {
+        prev.hdr = list->hdr;
+        if (!prev.first) return NULL;
+        ret = CROSS_PROCESS_LIST_ENTRY( list, prev.first );
+        new.first = ret->next;
+        new.counter = prev.counter + 1;
+    } while (InterlockedCompareExchange64( &list->hdr, new.hdr, prev.hdr ) != prev.hdr);
+
+    ret->next = 0;
+    return ret;
+}
+
+
+/**********************************************************************
+ *           RtlWow64PushCrossProcessWorkOntoFreeList  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlWow64PushCrossProcessWorkOntoFreeList( CROSS_PROCESS_WORK_HDR *list, CROSS_PROCESS_WORK_ENTRY *entry )
+{
+    CROSS_PROCESS_WORK_HDR prev, new;
+
+    do
+    {
+        prev.hdr = list->hdr;
+        entry->next = prev.first;
+        new.first = (char *)entry - (char *)list;
+        new.counter = prev.counter + 1;
+    } while (InterlockedCompareExchange64( &list->hdr, new.hdr, prev.hdr ) != prev.hdr);
+
+    return TRUE;
+}
+
+
+/**********************************************************************
+ *           RtlWow64PushCrossProcessWorkOntoWorkList  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlWow64PushCrossProcessWorkOntoWorkList( CROSS_PROCESS_WORK_HDR *list, CROSS_PROCESS_WORK_ENTRY *entry, void **unknown )
+{
+    CROSS_PROCESS_WORK_HDR prev, new;
+
+    *unknown = NULL;
+    do
+    {
+        prev.hdr = list->hdr;
+        entry->next = prev.first;
+        new.first = ((char *)entry - (char *)list) | (prev.first & CROSS_PROCESS_LIST_FLUSH);
+        new.counter = prev.counter + 1;
+    } while (InterlockedCompareExchange64( &list->hdr, new.hdr, prev.hdr ) != prev.hdr);
+
+    return TRUE;
+}
+
+
+/**********************************************************************
+ *           RtlWow64RequestCrossProcessHeavyFlush  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlWow64RequestCrossProcessHeavyFlush( CROSS_PROCESS_WORK_HDR *list )
+{
+    CROSS_PROCESS_WORK_HDR prev, new;
+
+    do
+    {
+        prev.hdr = list->hdr;
+        new.first = prev.first | CROSS_PROCESS_LIST_FLUSH;
+        new.counter = prev.counter + 1;
+    } while (InterlockedCompareExchange64( &list->hdr, new.hdr, prev.hdr ) != prev.hdr);
+
+    return TRUE;
+}
+
+#endif /* _WIN64 */
 
 /**********************************************************************
  *           RtlCreateUserProcess  (NTDLL.@)
@@ -485,6 +654,13 @@ NTSTATUS WINAPI DbgUiConvertStateChangeStructure( DBGUI_WAIT_STATE_CHANGE *state
             event->dwDebugEventCode = OUTPUT_DEBUG_STRING_EVENT;
             event->u.DebugString.lpDebugStringData  = (void *)info->ExceptionRecord.ExceptionInformation[1];
             event->u.DebugString.fUnicode           = FALSE;
+            event->u.DebugString.nDebugStringLength = info->ExceptionRecord.ExceptionInformation[0];
+        }
+        else if (code == DBG_PRINTEXCEPTION_WIDE_C && info->ExceptionRecord.NumberParameters >= 2)
+        {
+            event->dwDebugEventCode = OUTPUT_DEBUG_STRING_EVENT;
+            event->u.DebugString.lpDebugStringData  = (void *)info->ExceptionRecord.ExceptionInformation[1];
+            event->u.DebugString.fUnicode           = TRUE;
             event->u.DebugString.nDebugStringLength = info->ExceptionRecord.ExceptionInformation[0];
         }
         else if (code == DBG_RIPEXCEPTION && info->ExceptionRecord.NumberParameters >= 2)

@@ -30,6 +30,24 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ieframe);
 
+const WCHAR *error_url_frag(const WCHAR *url)
+{
+    if(!wcsncmp(url, L"res://", ARRAY_SIZE(L"res://")-1)) {
+        WCHAR buf[MAX_PATH];
+        UINT len = GetSystemDirectoryW(buf, ARRAY_SIZE(buf));
+
+        if(len && !wcsncmp(url + ARRAY_SIZE(L"res://")-1, buf, len)) {
+            len += ARRAY_SIZE(L"res://")-1;
+            if(!wcsncmp(url + len, L"\\shdoclc.dll/ERROR.HTM", ARRAY_SIZE(L"\\shdoclc.dll/ERROR.HTM")-1)) {
+                len += ARRAY_SIZE(L"\\shdoclc.dll/ERROR.HTM")-1;
+                url = wcschr(url + len, '#');
+                return url ? url + 1 : NULL;
+            }
+        }
+    }
+    return NULL;
+}
+
 static inline ShellBrowser *impl_from_IShellBrowser(IShellBrowser *iface)
 {
     return CONTAINING_RECORD(iface, ShellBrowser, IShellBrowser_iface);
@@ -741,6 +759,7 @@ static HRESULT WINAPI DocObjectService_FireNavigateComplete2(
     ShellBrowser *This = impl_from_IDocObjectService(iface);
     DocHost *doc_host = This->doc_host;
     IHTMLPrivateWindow *priv_window;
+    const WCHAR *orig_url;
     VARIANTARG params[2];
     DISPPARAMS dp = {params, NULL, 2, 0};
     VARIANT url_var;
@@ -768,6 +787,13 @@ static HRESULT WINAPI DocObjectService_FireNavigateComplete2(
 
     TRACE("got URL %s\n", debugstr_w(url));
     set_dochost_url(This->doc_host, url);
+
+    orig_url = error_url_frag(url);
+    if(orig_url) {
+        BSTR tmp = SysAllocString(orig_url);
+        SysFreeString(url);
+        url = tmp;
+    }
 
     V_VT(params) = (VT_BYREF|VT_VARIANT);
     V_VARIANTREF(params) = &url_var;
@@ -814,6 +840,7 @@ static HRESULT WINAPI DocObjectService_FireDocumentComplete(
 {
     ShellBrowser *This = impl_from_IDocObjectService(iface);
     IHTMLPrivateWindow *priv_window;
+    const WCHAR *orig_url;
     VARIANTARG params[2];
     DISPPARAMS dp = {params, NULL, 2, 0};
     VARIANT url_var;
@@ -832,6 +859,13 @@ static HRESULT WINAPI DocObjectService_FireDocumentComplete(
         return hres;
 
     TRACE("got URL %s\n", debugstr_w(url));
+
+    orig_url = error_url_frag(url);
+    if(orig_url) {
+        BSTR tmp = SysAllocString(orig_url);
+        SysFreeString(url);
+        url = tmp;
+    }
 
     V_VT(params) = (VT_BYREF|VT_VARIANT);
     V_VARIANTREF(params) = &url_var;
@@ -897,9 +931,10 @@ static HRESULT WINAPI DocObjectService_IsErrorUrl(
         BOOL *pfIsError)
 {
     ShellBrowser *This = impl_from_IDocObjectService(iface);
-    FIXME("%p %s %p\n", This, debugstr_w(lpszUrl), pfIsError);
 
-    *pfIsError = FALSE;
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(lpszUrl), pfIsError);
+
+    *pfIsError = !!error_url_frag(lpszUrl);
     return S_OK;
 }
 

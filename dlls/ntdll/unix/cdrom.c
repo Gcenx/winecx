@@ -117,7 +117,6 @@ typedef struct
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winternl.h"
 #include "winioctl.h"
@@ -204,7 +203,7 @@ static const char *iocodex(DWORD code)
    for(i=0; i<ARRAY_SIZE(iocodextable); i++)
       if (code==iocodextable[i].code)
 	 return iocodextable[i].codex;
-   sprintf(buffer, "IOCTL_CODE_%x", (int)code);
+   snprintf(buffer, sizeof(buffer), "IOCTL_CODE_%x", (int)code);
    return buffer;
 }
 

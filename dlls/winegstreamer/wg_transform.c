@@ -196,7 +196,6 @@ static gboolean transform_sink_query_cb(GstPad *pad, GstObject *parent, GstQuery
         case GST_QUERY_CAPS:
         {
             GstCaps *caps, *filter, *temp;
-            gchar *str;
 
             gst_query_parse_caps(query, &filter);
             if (!(caps = wg_format_to_caps(&transform->output_format)))
@@ -209,9 +208,7 @@ static gboolean transform_sink_query_cb(GstPad *pad, GstObject *parent, GstQuery
                 caps = temp;
             }
 
-            str = gst_caps_to_string(caps);
-            GST_INFO("Returning caps %s", str);
-            g_free(str);
+            GST_INFO("Returning caps %" GST_PTR_FORMAT, caps);
 
             gst_query_set_caps_result(query, caps);
             gst_caps_unref(caps);
@@ -361,6 +358,7 @@ NTSTATUS wg_transform_create(void *args)
         case WG_MAJOR_TYPE_VIDEO_CINEPAK:
         case WG_MAJOR_TYPE_VIDEO_INDEO:
         case WG_MAJOR_TYPE_VIDEO_WMV:
+        case WG_MAJOR_TYPE_VIDEO_MPEG1:
             if (!(element = find_element(GST_ELEMENT_FACTORY_TYPE_DECODER, src_caps, raw_caps))
                     || !append_element(transform->container, element, &first, &last))
             {
@@ -401,7 +399,6 @@ NTSTATUS wg_transform_create(void *args)
             break;
 
         case WG_MAJOR_TYPE_VIDEO:
-        case WG_MAJOR_TYPE_VIDEO_WMV:
             if (!(element = create_element("videoconvert", "base"))
                     || !append_element(transform->container, element, &first, &last))
                 goto out;
@@ -418,13 +415,15 @@ NTSTATUS wg_transform_create(void *args)
             gst_util_set_object_arg(G_OBJECT(element), "n-threads", "0");
             break;
 
+        case WG_MAJOR_TYPE_UNKNOWN:
         case WG_MAJOR_TYPE_AUDIO_MPEG1:
         case WG_MAJOR_TYPE_AUDIO_MPEG4:
         case WG_MAJOR_TYPE_AUDIO_WMA:
         case WG_MAJOR_TYPE_VIDEO_CINEPAK:
         case WG_MAJOR_TYPE_VIDEO_H264:
-        case WG_MAJOR_TYPE_UNKNOWN:
         case WG_MAJOR_TYPE_VIDEO_INDEO:
+        case WG_MAJOR_TYPE_VIDEO_WMV:
+        case WG_MAJOR_TYPE_VIDEO_MPEG1:
             GST_FIXME("Format %u not implemented!", output_format.major_type);
             goto out;
     }
@@ -443,10 +442,10 @@ NTSTATUS wg_transform_create(void *args)
         goto out;
 
     if (!(event = gst_event_new_stream_start("stream"))
-            || !gst_pad_push_event(transform->my_src, event))
+            || !push_event(transform->my_src, event))
         goto out;
     if (!(event = gst_event_new_caps(src_caps))
-            || !gst_pad_push_event(transform->my_src, event))
+            || !push_event(transform->my_src, event))
         goto out;
 
     /* We need to use GST_FORMAT_TIME here because it's the only format
@@ -455,7 +454,7 @@ NTSTATUS wg_transform_create(void *args)
     transform->segment.start = 0;
     transform->segment.stop = -1;
     if (!(event = gst_event_new_segment(&transform->segment))
-            || !gst_pad_push_event(transform->my_src, event))
+            || !push_event(transform->my_src, event))
         goto out;
 
     gst_caps_unref(src_caps);
@@ -498,7 +497,6 @@ NTSTATUS wg_transform_set_output_format(void *args)
     const struct wg_format *format = params->format;
     GstSample *sample;
     GstCaps *caps;
-    gchar *str;
 
     if (!(caps = wg_format_to_caps(format)))
     {
@@ -531,15 +529,13 @@ NTSTATUS wg_transform_set_output_format(void *args)
             value = "none";
         gst_util_set_object_arg(G_OBJECT(transform->video_flip), "method", value);
     }
-    if (!gst_pad_push_event(transform->my_sink, gst_event_new_reconfigure()))
+    if (!push_event(transform->my_sink, gst_event_new_reconfigure()))
     {
         GST_ERROR("Failed to reconfigure transform %p.", transform);
         return STATUS_UNSUCCESSFUL;
     }
 
-    str = gst_caps_to_string(caps);
-    GST_INFO("Configured new caps %s.", str);
-    g_free(str);
+    GST_INFO("Configured new caps %" GST_PTR_FORMAT ".", caps);
 
     /* Ideally and to be fully compatible with native transform, the queued
      * output buffers will need to be converted to the new output format and
@@ -892,16 +888,16 @@ NTSTATUS wg_transform_drain(void *args)
     }
 
     if (!(event = gst_event_new_segment_done(GST_FORMAT_TIME, -1))
-            || !gst_pad_push_event(transform->my_src, event))
+            || !push_event(transform->my_src, event))
         goto error;
     if (!(event = gst_event_new_eos())
-            || !gst_pad_push_event(transform->my_src, event))
+            || !push_event(transform->my_src, event))
         goto error;
     if (!(event = gst_event_new_stream_start("stream"))
-            || !gst_pad_push_event(transform->my_src, event))
+            || !push_event(transform->my_src, event))
         goto error;
     if (!(event = gst_event_new_segment(&transform->segment))
-            || !gst_pad_push_event(transform->my_src, event))
+            || !push_event(transform->my_src, event))
         goto error;
 
     return STATUS_SUCCESS;
@@ -933,4 +929,34 @@ NTSTATUS wg_transform_flush(void *args)
     transform->output_sample = NULL;
 
     return STATUS_SUCCESS;
+}
+
+NTSTATUS wg_transform_notify_qos(void *args)
+{
+    const struct wg_transform_notify_qos_params *params = args;
+    struct wg_transform *transform = get_transform(params->transform);
+    GstClockTimeDiff diff = params->diff * 100;
+    GstClockTime stream_time;
+    GstEvent *event;
+
+    /* We return timestamps in stream time, i.e. relative to the start of the
+     * file (or other medium), but gst_event_new_qos() expects the timestamp in
+     * running time. */
+    stream_time = gst_segment_to_running_time(&transform->segment, GST_FORMAT_TIME, params->timestamp * 100);
+    if (diff < (GstClockTimeDiff)-stream_time)
+        diff = -stream_time;
+    if (stream_time == -1)
+    {
+        /* This can happen legitimately if the sample falls outside of the
+         * segment bounds. GStreamer elements shouldn't present the sample in
+         * that case, but DirectShow doesn't care. */
+        GST_LOG("Ignoring QoS event.");
+        return S_OK;
+    }
+    if (!(event = gst_event_new_qos(params->underflow ? GST_QOS_TYPE_UNDERFLOW : GST_QOS_TYPE_OVERFLOW,
+            params->proportion, diff, stream_time)))
+        GST_ERROR("Failed to create QOS event.");
+    push_event(transform->my_sink, event);
+
+    return S_OK;
 }

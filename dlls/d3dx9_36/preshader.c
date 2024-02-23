@@ -308,7 +308,7 @@ static HRESULT regstore_alloc_table(struct d3dx_regstore *rs, unsigned int table
     size = get_offset_reg(table, rs->table_sizes[table]) * table_info[table].component_size;
     if (size)
     {
-        rs->tables[table] = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+        rs->tables[table] = calloc(1, size);
         if (!rs->tables[table])
             return E_OUTOFMEMORY;
     }
@@ -321,7 +321,7 @@ static void regstore_free_tables(struct d3dx_regstore *rs)
 
     for (i = 0; i < PRES_REGTAB_COUNT; ++i)
     {
-        HeapFree(GetProcessHeap(), 0, rs->tables[i]);
+        free(rs->tables[i]);
     }
 }
 
@@ -593,7 +593,7 @@ static HRESULT append_const_set(struct d3dx_const_tab *const_tab, struct d3dx_co
         if (!const_tab->const_set_size)
         {
             new_size = INITIAL_CONST_SET_SIZE;
-            new_alloc = HeapAlloc(GetProcessHeap(), 0, sizeof(*const_tab->const_set) * new_size);
+            new_alloc = malloc(sizeof(*const_tab->const_set) * new_size);
             if (!new_alloc)
             {
                 ERR("Out of memory.\n");
@@ -603,8 +603,7 @@ static HRESULT append_const_set(struct d3dx_const_tab *const_tab, struct d3dx_co
         else
         {
             new_size = const_tab->const_set_size * 2;
-            new_alloc = HeapReAlloc(GetProcessHeap(), 0, const_tab->const_set,
-                    sizeof(*const_tab->const_set) * new_size);
+            new_alloc = realloc(const_tab->const_set, sizeof(*const_tab->const_set) * new_size);
             if (!new_alloc)
             {
                 ERR("Out of memory.\n");
@@ -875,8 +874,8 @@ static HRESULT get_constants_desc(unsigned int *byte_code, struct d3dx_const_tab
         goto cleanup;
     }
 
-    out->inputs = cdesc = HeapAlloc(GetProcessHeap(), 0, sizeof(*cdesc) * desc.Constants);
-    out->inputs_param = inputs_param = HeapAlloc(GetProcessHeap(), 0, sizeof(*inputs_param) * desc.Constants);
+    out->inputs = cdesc = malloc(sizeof(*cdesc) * desc.Constants);
+    out->inputs_param = inputs_param = malloc(sizeof(*inputs_param) * desc.Constants);
     if (!cdesc || !inputs_param)
     {
         hr = E_OUTOFMEMORY;
@@ -980,8 +979,7 @@ static HRESULT get_constants_desc(unsigned int *byte_code, struct d3dx_const_tab
             }
         }
 
-        new_alloc = HeapReAlloc(GetProcessHeap(), 0, out->const_set,
-                sizeof(*out->const_set) * out->const_set_count);
+        new_alloc = realloc(out->const_set, sizeof(*out->const_set) * out->const_set_count);
         if (new_alloc)
         {
             out->const_set = new_alloc;
@@ -1110,13 +1108,15 @@ static HRESULT parse_preshader(struct d3dx_preshader *pres, unsigned int *ptr, u
         struct d3dx_parameters_store *parameters)
 {
     unsigned int *p;
-    unsigned int i, j, const_count;
+    unsigned int i, j, const_count, magic;
     double *dconst;
     HRESULT hr;
     unsigned int saved_word;
     unsigned int section_size;
 
-    TRACE("Preshader version %#x.\n", *ptr & 0xffff);
+    magic = *ptr;
+
+    TRACE("Preshader version %#x.\n", *ptr);
 
     if (!count)
     {
@@ -1156,7 +1156,7 @@ static HRESULT parse_preshader(struct d3dx_preshader *pres, unsigned int *ptr, u
         return D3DXERR_INVALIDDATA;
     }
     TRACE("%u instructions.\n", pres->ins_count);
-    pres->ins = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pres->ins) * pres->ins_count);
+    pres->ins = calloc(pres->ins_count, sizeof(*pres->ins));
     if (!pres->ins)
         return E_OUTOFMEMORY;
     for (i = 0; i < pres->ins_count; ++i)
@@ -1186,6 +1186,8 @@ static HRESULT parse_preshader(struct d3dx_preshader *pres, unsigned int *ptr, u
         return D3DXERR_INVALIDDATA;
     }
     pres->regs.table_sizes[PRES_REGTAB_IMMED] = get_reg_offset(PRES_REGTAB_IMMED, const_count);
+    if (magic == FOURCC_TX_1)
+        pres->regs.table_sizes[PRES_REGTAB_INPUT] = 2;
 
     update_table_sizes_consts(pres->regs.table_sizes, &pres->inputs);
     for (i = 0; i < pres->ins_count; ++i)
@@ -1248,7 +1250,7 @@ HRESULT d3dx_create_param_eval(struct d3dx_parameters_store *parameters, void *b
         return D3D_OK;
     }
 
-    peval = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*peval));
+    peval = calloc(1, sizeof(*peval));
     if (!peval)
     {
         ret = E_OUTOFMEMORY;
@@ -1339,14 +1341,14 @@ err_out:
 
 static void d3dx_free_const_tab(struct d3dx_const_tab *ctab)
 {
-    HeapFree(GetProcessHeap(), 0, ctab->inputs);
-    HeapFree(GetProcessHeap(), 0, ctab->inputs_param);
-    HeapFree(GetProcessHeap(), 0, ctab->const_set);
+    free(ctab->inputs);
+    free(ctab->inputs_param);
+    free(ctab->const_set);
 }
 
 static void d3dx_free_preshader(struct d3dx_preshader *pres)
 {
-    HeapFree(GetProcessHeap(), 0, pres->ins);
+    free(pres->ins);
 
     regstore_free_tables(&pres->regs);
     d3dx_free_const_tab(&pres->inputs);
@@ -1361,7 +1363,7 @@ void d3dx_free_param_eval(struct d3dx_param_eval *peval)
 
     d3dx_free_preshader(&peval->pres);
     d3dx_free_const_tab(&peval->shader_inputs);
-    HeapFree(GetProcessHeap(), 0, peval);
+    free(peval);
 }
 
 static void pres_int_from_float(void *out, const void *in, unsigned int count)
@@ -1723,16 +1725,20 @@ HRESULT d3dx_evaluate_parameter(struct d3dx_param_eval *peval, const struct d3dx
     HRESULT hr;
     unsigned int i;
     unsigned int elements, elements_param, elements_table;
+    BOOL is_dirty;
     float *oc;
 
     TRACE("peval %p, param %p, param_value %p.\n", peval, param, param_value);
 
-    if (is_const_tab_input_dirty(&peval->pres.inputs, ULONG64_MAX))
+    if ((is_dirty = is_const_tab_input_dirty(&peval->pres.inputs, ULONG64_MAX)))
     {
         set_constants(&peval->pres.regs, &peval->pres.inputs,
-                next_update_version(peval->version_counter),
-                NULL, NULL, peval->param_type, FALSE, FALSE);
+                next_update_version(peval->version_counter), NULL, NULL,
+                peval->param_type, FALSE, FALSE);
+    }
 
+    if (is_dirty || peval->pres.regs.table_sizes[PRES_REGTAB_INPUT])
+    {
         if (FAILED(hr = execute_preshader(&peval->pres)))
             return hr;
     }

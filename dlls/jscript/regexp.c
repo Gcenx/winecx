@@ -41,13 +41,11 @@
 WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
 /* FIXME: Better error handling */
-#define ReportRegExpError(a,b,c)
-#define ReportRegExpErrorHelper(a,b,c,d)
-#define JS_ReportErrorNumber(a,b,c,d)
-#define JS_ReportErrorFlagsAndNumber(a,b,c,d,e,f)
-#define js_ReportOutOfScriptQuota(a)
-#define JS_ReportOutOfMemory(a)
-#define JS_COUNT_OPERATION(a,b)
+#define ReportRegExpError(a,b,c) throw_error((a)->context, E_FAIL, L"")
+#define ReportRegExpErrorHelper(a,b,c,d) throw_error((a)->context, E_FAIL, L"")
+#define JS_ReportErrorNumber(a,b,c,d) throw_error((a), E_FAIL, L"")
+#define JS_ReportErrorFlagsAndNumber(a,b,c,d,e,f) throw_error((a), E_FAIL, L"")
+#define JS_COUNT_OPERATION(a,b) throw_error((a), E_FAIL, L"")
 
 
 typedef BYTE JSPackedBool;
@@ -292,7 +290,7 @@ struct RENode {
 #define CLASS_CACHE_SIZE    4
 
 typedef struct CompilerState {
-    void            *context;
+    script_ctx_t    *context;
     const WCHAR     *cpbegin;
     const WCHAR     *cpend;
     const WCHAR     *cp;
@@ -412,7 +410,7 @@ NewRENode(CompilerState *state, REOp op)
 
     ren = heap_pool_alloc(state->pool, sizeof(*ren));
     if (!ren) {
-        /* js_ReportOutOfScriptQuota(cx); */
+        throw_error(state->context, E_OUTOFMEMORY, L"");
         return NULL;
     }
     ren->op = op;
@@ -1622,8 +1620,7 @@ doSimple:
       case '*':
       case '+':
       case '?':
-        ReportRegExpErrorHelper(state, JSREPORT_ERROR,
-                                JSMSG_BAD_QUANTIFIER, state->cp - 1);
+        throw_error(state->context, state->context->version < SCRIPTLANGUAGEVERSION_ES5 ? JS_E_REGEXP_SYNTAX : JS_E_UNEXPECTED_QUANTIFIER, L"");
         return FALSE;
       default:
 asFlat:
@@ -1945,7 +1942,7 @@ PushBackTrackState(REGlobalData *gData, REOp op,
         btincr = ((btincr+btsize-1)/btsize)*btsize;
         gData->backTrackStack = heap_pool_grow(gData->pool, gData->backTrackStack, btsize, btincr);
         if (!gData->backTrackStack) {
-            js_ReportOutOfScriptQuota(gData->cx);
+            throw_error(gData->cx, E_OUTOFMEMORY, L"");
             gData->ok = FALSE;
             return NULL;
         }
@@ -2113,7 +2110,7 @@ ProcessCharSet(REGlobalData *gData, RECharSet *charSet)
     byteLength = (charSet->length >> 3) + 1;
     charSet->u.bits = malloc(byteLength);
     if (!charSet->u.bits) {
-        JS_ReportOutOfMemory(gData->cx);
+        throw_error(gData->cx, E_OUTOFMEMORY, L"");
         gData->ok = FALSE;
         return FALSE;
     }
@@ -2301,7 +2298,7 @@ ReallocStateStack(REGlobalData *gData)
 
     gData->stateStack = heap_pool_grow(gData->pool, gData->stateStack, sz, sz);
     if (!gData->stateStack) {
-        js_ReportOutOfScriptQuota(gData->cx);
+        throw_error(gData->cx, E_OUTOFMEMORY, L"");
         gData->ok = FALSE;
         return FALSE;
     }
@@ -3132,7 +3129,6 @@ static HRESULT InitMatch(regexp_t *re, void *cx, heap_pool_t *pool, REGlobalData
     return S_OK;
 
 bad:
-    js_ReportOutOfScriptQuota(cx);
     gData->ok = FALSE;
     return E_OUTOFMEMORY;
 }

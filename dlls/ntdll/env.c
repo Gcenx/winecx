@@ -54,12 +54,9 @@ static inline SIZE_T get_env_length( const WCHAR *env )
  */
 static void set_wow64_environment( WCHAR **env )
 {
-    static WCHAR archW[]    = L"PROCESSOR_ARCHITECTURE";
-    static WCHAR arch6432W[] = L"PROCESSOR_ARCHITEW6432";
-
     WCHAR buf[256];
-    UNICODE_STRING arch_strW = { sizeof(archW) - sizeof(WCHAR), sizeof(archW), archW };
-    UNICODE_STRING arch6432_strW = { sizeof(arch6432W) - sizeof(WCHAR), sizeof(arch6432W), arch6432W };
+    UNICODE_STRING arch_strW = RTL_CONSTANT_STRING( L"PROCESSOR_ARCHITECTURE" );
+    UNICODE_STRING arch6432_strW = RTL_CONSTANT_STRING( L"PROCESSOR_ARCHITEW6432" );
     UNICODE_STRING valW = { 0, sizeof(buf), buf };
     UNICODE_STRING nameW;
 
@@ -687,6 +684,7 @@ void init_user_process_params(void)
     new_params->dwFillAttribute = params->dwFillAttribute;
     new_params->dwFlags         = params->dwFlags;
     new_params->wShowWindow     = params->wShowWindow;
+    new_params->ProcessGroupId  = params->ProcessGroupId;
 
     NtCurrentTeb()->Peb->ProcessParameters = new_params;
     NtFreeVirtualMemory( GetCurrentProcess(), (void **)&params, &size, MEM_RELEASE );

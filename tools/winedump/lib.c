@@ -46,18 +46,21 @@ static void dump_import_object(const IMPORT_OBJECT_HEADER *ioh)
     if (ioh->Version == 0)
     {
         static const char * const obj_type[] = { "code", "data", "const" };
-        static const char * const name_type[] = { "ordinal", "name", "no prefix", "undecorate" };
-        const char *name;
+        static const char * const name_type[] = { "ordinal", "name", "no prefix", "undecorate", "export as" };
+        const char *name, *dll_name;
 
         printf("  Version      : %X\n", ioh->Version);
         printf("  Machine      : %X (%s)\n", ioh->Machine, get_machine_str(ioh->Machine));
         printf("  TimeDateStamp: %08X %s\n", (UINT)ioh->TimeDateStamp, get_time_str(ioh->TimeDateStamp));
         printf("  SizeOfData   : %08X\n", (UINT)ioh->SizeOfData);
         name = (const char *)ioh + sizeof(*ioh);
-        printf("  DLL name     : %s\n", name + strlen(name) + 1);
+        dll_name = name + strlen(name) + 1;
+        printf("  DLL name     : %s\n", dll_name);
         printf("  Symbol name  : %s\n", name);
         printf("  Type         : %s\n", (ioh->Type < ARRAY_SIZE(obj_type)) ? obj_type[ioh->Type] : "unknown");
         printf("  Name type    : %s\n", (ioh->NameType < ARRAY_SIZE(name_type)) ? name_type[ioh->NameType] : "unknown");
+        if (ioh->NameType == IMPORT_OBJECT_NAME_EXPORTAS)
+            printf("  Export name  : %s\n", dll_name + strlen(dll_name) + 1);
         printf("  %-13s: %u\n", (ioh->NameType == IMPORT_OBJECT_ORDINAL) ? "Ordinal" : "Hint", ioh->Ordinal);
         printf("\n");
     }
@@ -231,6 +234,20 @@ void lib_dump(void)
                 printf("\n");
             }
         }
+        else if (!strncmp((const char *)iamh->Name, "/<ECSYMBOLS>/   ", sizeof(iamh->Name)))
+        {
+            unsigned int i, *count = (unsigned int *)ioh;
+            unsigned short *offsets = (unsigned short *)(count + 1);
+            const char *name = (const char *)(offsets + *count);
+
+            printf("%u EC symbols\n", *count);
+            for (i = 0; i < *count; i++)
+            {
+                printf("%8x %s\n", offsets[i], name);
+                name += strlen(name) + 1;
+            }
+            printf("\n");
+        }
         else if (!strncmp((const char *)iamh->Name, IMAGE_ARCHIVE_LONGNAMES_MEMBER, sizeof(iamh->Name)))
         {
             long_names = PRD(cur_file_pos, size);
@@ -243,11 +260,11 @@ void lib_dump(void)
 
             if (globals.do_dumpheader)
             {
-                dump_file_header(fh);
+                dump_file_header(fh, FALSE);
                 if (fh->SizeOfOptionalHeader)
                 {
                     const IMAGE_OPTIONAL_HEADER32 *oh = (const IMAGE_OPTIONAL_HEADER32 *)((const char *)fh + sizeof(*fh));
-                    dump_optional_header(oh, fh->SizeOfOptionalHeader);
+                    dump_optional_header(oh);
                 }
             }
             /* Sanity check */

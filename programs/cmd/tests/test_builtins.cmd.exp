@@ -204,6 +204,12 @@ food2
 food21
 @todo_wine@foo7@space@@space@@or_broken@not supported@space@
 @todo_wine@foo@or_broken@not supported
+--- redirect at beginning of line
+foo
+foo1
+foo2@space@
+foo2@space@
+fooA
 --- redirections within IF statements
 foo1
 foo2
@@ -821,9 +827,13 @@ exist wildcard works
 negate exist wildcard works
 exist wildcard bad subdir broken works
 exist subdir ok
-exist subdir with . ok
+exist subdir with \. ok
 exist subdir with \ ok
 exist subdir with \ and quotes ok
+exist subdir with /. ok
+exist subdir with / ok
+exist subdir with / and quotes ok
+exist empty string works
 ------ for numbers
 negative numbers handled
 negative numbers handled
@@ -918,6 +928,13 @@ x@space@
 A
 ------------ Testing if/set ------------
 C:\Program Files (x86)\dummy
+' ('
+zeta
+--- Testing if + var subst in delayed expansion mode
+[DEBUG] checking {abc}
+[DEBUG] checking {10.0}
+SDKVER=10.0
+[DEBUG] checking {11.0}
 ------------ Testing for ------------
 --- plain FOR
 A
@@ -1680,6 +1697,15 @@ Finished
 PATH=original
 PATH=try2
 PATH=try3
+------------ Testing PATH Evaluate ------------
+Test normal PATH usage
+I'm here!@space@
+Test PATH usage with leading semicolon
+I'm here!@space@
+Test PATH usage with fallback path
+I'm here!@space@
+Test PATH usage with double semicolon
+I'm here!@space@
 ------------ Testing start /W ------------
 start /W seems to really wait
 ------------ Testing changing the drive letter ----------

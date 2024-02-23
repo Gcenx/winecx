@@ -30,7 +30,7 @@ static ULONG d3d8_texture_incref(struct d3d8_texture *texture)
     {
         struct d3d8_surface *surface;
 
-        IDirect3DDevice8_AddRef(texture->parent_device);
+        IDirect3DDevice8_AddRef(&texture->parent_device->IDirect3DDevice8_iface);
         wined3d_mutex_lock();
         LIST_FOR_EACH_ENTRY(surface, &texture->rtv_list, struct d3d8_surface, rtv_entry)
         {
@@ -51,7 +51,7 @@ static ULONG d3d8_texture_decref(struct d3d8_texture *texture)
 
     if (!ref)
     {
-        IDirect3DDevice8 *parent_device = texture->parent_device;
+        IDirect3DDevice8 *parent_device = &texture->parent_device->IDirect3DDevice8_iface;
         struct d3d8_surface *surface;
 
         wined3d_mutex_lock();
@@ -70,11 +70,10 @@ static ULONG d3d8_texture_decref(struct d3d8_texture *texture)
 
 static void d3d8_texture_preload(struct d3d8_texture *texture)
 {
-    struct d3d8_device *device = impl_from_IDirect3DDevice8(texture->parent_device);
-
     wined3d_mutex_lock();
     if (texture->draw_texture)
-        wined3d_device_update_texture(device->wined3d_device, texture->wined3d_texture, texture->draw_texture);
+        wined3d_device_update_texture(texture->parent_device->wined3d_device,
+                texture->wined3d_texture, texture->draw_texture);
     else
         wined3d_resource_preload(wined3d_texture_get_resource(texture->wined3d_texture));
     wined3d_mutex_unlock();
@@ -135,7 +134,7 @@ static HRESULT WINAPI d3d8_texture_2d_GetDevice(IDirect3DTexture8 *iface, IDirec
 
     TRACE("iface %p, device %p.\n", iface, device);
 
-    *device = texture->parent_device;
+    *device = &texture->parent_device->IDirect3DDevice8_iface;
     IDirect3DDevice8_AddRef(*device);
 
     TRACE("Returning device %p.\n", *device);
@@ -227,7 +226,8 @@ static DWORD WINAPI d3d8_texture_2d_SetLOD(IDirect3DTexture8 *iface, DWORD lod)
     TRACE("iface %p, lod %lu.\n", iface, lod);
 
     wined3d_mutex_lock();
-    ret = wined3d_texture_set_lod(d3d8_texture_get_draw_texture(texture), lod);
+    ret = wined3d_stateblock_set_texture_lod(texture->parent_device->state,
+            d3d8_texture_get_draw_texture(texture), lod);
     wined3d_mutex_unlock();
 
     return ret;
@@ -436,7 +436,7 @@ static HRESULT WINAPI d3d8_texture_cube_GetDevice(IDirect3DCubeTexture8 *iface, 
 
     TRACE("iface %p, device %p.\n", iface, device);
 
-    *device = texture->parent_device;
+    *device = &texture->parent_device->IDirect3DDevice8_iface;
     IDirect3DDevice8_AddRef(*device);
 
     TRACE("Returning device %p.\n", *device);
@@ -528,7 +528,8 @@ static DWORD WINAPI d3d8_texture_cube_SetLOD(IDirect3DCubeTexture8 *iface, DWORD
     TRACE("iface %p, lod %lu.\n", iface, lod);
 
     wined3d_mutex_lock();
-    ret = wined3d_texture_set_lod(d3d8_texture_get_draw_texture(texture), lod);
+    ret = wined3d_stateblock_set_texture_lod(texture->parent_device->state,
+            d3d8_texture_get_draw_texture(texture), lod);
     wined3d_mutex_unlock();
 
     return ret;
@@ -760,7 +761,7 @@ static HRESULT WINAPI d3d8_texture_3d_GetDevice(IDirect3DVolumeTexture8 *iface, 
 
     TRACE("iface %p, device %p.\n", iface, device);
 
-    *device = texture->parent_device;
+    *device = &texture->parent_device->IDirect3DDevice8_iface;
     IDirect3DDevice8_AddRef(*device);
 
     TRACE("Returning device %p.\n", *device);
@@ -852,7 +853,8 @@ static DWORD WINAPI d3d8_texture_3d_SetLOD(IDirect3DVolumeTexture8 *iface, DWORD
     TRACE("iface %p, lod %lu.\n", iface, lod);
 
     wined3d_mutex_lock();
-    ret = wined3d_texture_set_lod(d3d8_texture_get_draw_texture(texture), lod);
+    ret = wined3d_stateblock_set_texture_lod(texture->parent_device->state,
+            d3d8_texture_get_draw_texture(texture), lod);
     wined3d_mutex_unlock();
 
     return ret;
@@ -1041,7 +1043,7 @@ static void STDMETHODCALLTYPE d3d8_texture_wined3d_object_destroyed(void *parent
     if (texture->draw_texture)
         wined3d_texture_decref(texture->wined3d_texture);
     d3d8_resource_cleanup(&texture->resource);
-    heap_free(texture);
+    free(texture);
 }
 
 static const struct wined3d_parent_ops d3d8_texture_wined3d_parent_ops =
@@ -1103,8 +1105,8 @@ static HRESULT d3d8_texture_init(struct d3d8_texture *texture, struct d3d8_devic
     }
     wined3d_mutex_unlock();
 
-    texture->parent_device = &device->IDirect3DDevice8_iface;
-    IDirect3DDevice8_AddRef(texture->parent_device);
+    texture->parent_device = device;
+    IDirect3DDevice8_AddRef(&texture->parent_device->IDirect3DDevice8_iface);
 
     return D3D_OK;
 }

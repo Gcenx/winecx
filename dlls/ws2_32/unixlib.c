@@ -66,6 +66,7 @@
 
 #ifdef HAVE_NETIPX_IPX_H
 # include <netipx/ipx.h>
+# define HAS_IPX
 #elif defined(HAVE_LINUX_IPX_H)
 # ifdef HAVE_ASM_TYPES_H
 #  include <asm/types.h>
@@ -74,9 +75,9 @@
 #  include <linux/types.h>
 # endif
 # include <linux/ipx.h>
-#endif
-#if defined(SOL_IPX) || defined(SO_DEFAULT_HEADERS)
-# define HAS_IPX
+# ifdef SOL_IPX
+#  define HAS_IPX
+# endif
 #endif
 
 #ifdef HAVE_LINUX_IRDA_H
@@ -102,6 +103,7 @@
 #include "ws2_32_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #ifndef HAVE_LINUX_GETHOSTBYNAME_R_6
 static pthread_mutex_t host_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -120,7 +122,9 @@ static const int addrinfo_flag_map[][2] =
 #ifdef AI_V4MAPPED
     MAP( AI_V4MAPPED ),
 #endif
+#ifdef AI_ALL
     MAP( AI_ALL ),
+#endif
     MAP( AI_ADDRCONFIG ),
 };
 
@@ -166,6 +170,51 @@ static const int ip_protocol_map[][2] =
 };
 
 #undef MAP
+
+static pthread_once_t hash_init_once = PTHREAD_ONCE_INIT;
+static BYTE byte_hash[256];
+
+static void init_hash(void)
+{
+    unsigned i, index;
+    NTSTATUS status;
+    BYTE *buf, tmp;
+    ULONG buf_len;
+
+    for (i = 0; i < sizeof(byte_hash); ++i)
+        byte_hash[i] = i;
+
+    buf_len = sizeof(SYSTEM_INTERRUPT_INFORMATION) * NtCurrentTeb()->Peb->NumberOfProcessors;
+    if (!(buf = malloc( buf_len )))
+    {
+        ERR( "No memory.\n" );
+        return;
+    }
+
+    for (i = 0; i < sizeof(byte_hash) - 1; ++i)
+    {
+        if (!(i % buf_len) && (status = NtQuerySystemInformation( SystemInterruptInformation, buf,
+                                                                  buf_len, &buf_len )))
+        {
+            ERR( "Failed to get random bytes.\n" );
+            free( buf );
+            return;
+        }
+        index = i + buf[i % buf_len] % (sizeof(byte_hash) - i);
+        tmp = byte_hash[index];
+        byte_hash[index] = byte_hash[i];
+        byte_hash[i] = tmp;
+    }
+    free( buf );
+}
+
+static void hash_random( BYTE *d, const BYTE *s, unsigned int len )
+{
+    unsigned int i;
+
+    for (i = 0; i < len; ++i)
+        d[i] = byte_hash[s[i]];
+}
 
 static int addrinfo_flags_from_unix( int flags )
 {
@@ -418,6 +467,7 @@ static int addrinfo_err_from_unix( int err )
         case EAI_SERVICE:   return WS_EAI_SERVICE;
         case EAI_SOCKTYPE:  return WS_EAI_SOCKTYPE;
         case EAI_SYSTEM:
+            if (errno == EBUSY) ERR_(winediag)("getaddrinfo() returned EBUSY. You may be missing a libnss plugin\n");
             /* some broken versions of glibc return EAI_SYSTEM and set errno to
              * 0 instead of returning EAI_NONAME */
             return errno ? errno_from_unix( errno ) : WS_EAI_NONAME;
@@ -889,6 +939,44 @@ static NTSTATUS unix_gethostbyaddr( void *args )
 #endif
 }
 
+static int compare_addrs_hashed( const void *a1, const void *a2, int addr_len )
+{
+    char a1_hashed[16], a2_hashed[16];
+
+    assert( addr_len <= sizeof(a1_hashed) );
+    hash_random( (BYTE *)a1_hashed, a1, addr_len );
+    hash_random( (BYTE *)a2_hashed, a2, addr_len );
+    return memcmp( a1_hashed, a2_hashed, addr_len );
+}
+
+static void sort_addrs_hashed( struct hostent *host )
+{
+    /* On Unix gethostbyname() may return IP addresses in random order on each call. On Windows the order of
+     * IP addresses is not determined as well but it is the same on consequent calls (changes after network
+     * resets and probably DNS timeout expiration).
+     * Life is Strange Remastered depends on gethostbyname() returning IP addresses in the same order to reuse
+     * the established TLS connection and avoid timeouts that happen in game when establishing multiple extra TLS
+     * connections.
+     * Just sorting the addresses would break server load balancing provided by gethostbyname(), so randomize the
+     * sort once per process. */
+    unsigned int i, j;
+    char *tmp;
+
+    pthread_once( &hash_init_once, init_hash );
+
+    for (i = 0; host->h_addr_list[i]; ++i)
+    {
+        for (j = i + 1; host->h_addr_list[j]; ++j)
+        {
+            if (compare_addrs_hashed( host->h_addr_list[j], host->h_addr_list[i], host->h_length ) < 0)
+            {
+                tmp = host->h_addr_list[j];
+                host->h_addr_list[j] = host->h_addr_list[i];
+                host->h_addr_list[i] = tmp;
+            }
+        }
+    }
+}
 
 #ifdef HAVE_LINUX_GETHOSTBYNAME_R_6
 static NTSTATUS unix_gethostbyname( void *args )
@@ -915,9 +1003,14 @@ static NTSTATUS unix_gethostbyname( void *args )
     }
 
     if (!unix_host)
+    {
         ret = (locerr < 0 ? errno_from_unix( errno ) : host_errno_from_unix( locerr ));
+    }
     else
+    {
+        sort_addrs_hashed( unix_host );
         ret = hostent_from_unix( unix_host, params->host, params->size );
+    }
 
     free( unix_buffer );
     return ret;
@@ -938,6 +1031,7 @@ static NTSTATUS unix_gethostbyname( void *args )
         return ret;
     }
 
+    sort_addrs_hashed( unix_host );
     ret = hostent_from_unix( unix_host, params->host, params->size );
 
     pthread_mutex_unlock( &host_mutex );
@@ -978,6 +1072,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     unix_gethostname,
     unix_getnameinfo,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == ws_unix_funcs_count );
 
 #ifdef _WIN64
 
@@ -1256,5 +1352,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_unix_gethostname,
     wow64_unix_getnameinfo,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == ws_unix_funcs_count );
 
 #endif  /* _WIN64 */

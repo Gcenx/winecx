@@ -673,17 +673,11 @@ static void test_sync_xhr(IHTMLDocument2 *doc, const WCHAR *xml_url, const WCHAR
 
     SET_EXPECT(xmlhttprequest_onreadystatechange_opened);
     hres = IHTMLXMLHttpRequest_open(xhr, method, url, vbool, vempty, vempty);
-    todo_wine ok(hres == S_OK, "open failed: %08lx\n", hres); /* Gecko 30+ only supports async */
-    todo_wine CHECK_CALLED(xmlhttprequest_onreadystatechange_opened);
+    ok(hres == S_OK, "open failed: %08lx\n", hres);
+    CHECK_CALLED(xmlhttprequest_onreadystatechange_opened);
 
     SysFreeString(method);
     SysFreeString(url);
-
-    if(FAILED(hres)) {
-        IHTMLXMLHttpRequest_Release(xhr);
-        xhr = NULL;
-        return;
-    }
 
     text = (BSTR)0xdeadbeef;
     hres = IHTMLXMLHttpRequest_getAllResponseHeaders(xhr, &text);

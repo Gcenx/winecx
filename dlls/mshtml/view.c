@@ -50,8 +50,8 @@ static void paint_document(HTMLDocumentObj *This)
     RECT rect;
     HDC hdc;
 
-    if(This->window && This->window->base.inner_window && !This->window->base.inner_window->performance_timing->first_paint_time)
-        This->window->base.inner_window->performance_timing->first_paint_time = get_time_stamp();
+    if(This->window && This->window->base.inner_window && !This->window->base.inner_window->first_paint_time)
+        This->window->base.inner_window->first_paint_time = get_time_stamp();
 
     GetClientRect(This->hwnd, &rect);
 
@@ -117,6 +117,7 @@ static LRESULT on_timer(HTMLDocumentObj *This)
 
     if(!This->update)
         return 0;
+    IUnknown_AddRef(This->outer_unk);
 
     if(This->update & UPDATE_UI) {
         if(This->hostui)
@@ -138,6 +139,8 @@ static LRESULT on_timer(HTMLDocumentObj *This)
 
     update_title(This);
     This->update = 0;
+
+    IUnknown_Release(This->outer_unk);
     return 0;
 }
 
@@ -411,45 +414,73 @@ HRESULT call_set_active_object(IOleInPlaceUIWindow *window, IOleInPlaceActiveObj
     return IOleInPlaceUIWindow_SetActiveObject(window, act_obj, act_obj ? html_documentW : NULL);
 }
 
-static void send_unload_events_impl(HTMLInnerWindow *window)
+static unsigned get_window_list_num(HTMLInnerWindow *window)
 {
     HTMLOuterWindow *child;
+    unsigned ret = 1;
+
+    LIST_FOR_EACH_ENTRY(child, &window->children, HTMLOuterWindow, sibling_entry)
+        ret += get_window_list_num(child->base.inner_window);
+    return ret;
+}
+
+static HTMLInnerWindow **get_window_list(HTMLInnerWindow *window, HTMLInnerWindow **output)
+{
+    HTMLOuterWindow *child;
+
+    *output++ = window;
+    IHTMLWindow2_AddRef(&window->base.IHTMLWindow2_iface);
+
+    LIST_FOR_EACH_ENTRY(child, &window->children, HTMLOuterWindow, sibling_entry)
+        output = get_window_list(child->base.inner_window, output);
+    return output;
+}
+
+static void send_unload_events(HTMLDocumentObj *doc)
+{
+    HTMLInnerWindow **windows, *window;
     DOMEvent *event;
+    unsigned i, num;
     HRESULT hres;
 
-    if(!window)
+    if(!doc->window || !doc->doc_node->content_ready)
         return;
+    window = doc->window->base.inner_window;
 
-    if(window->doc && !window->doc->unload_sent) {
-        window->doc->unload_sent = TRUE;
+    /* Grab list of all windows ahead, and keep refs,
+       since it can be detached from under our feet. */
+    num = get_window_list_num(window);
+    if(!(windows = malloc(num * sizeof(*windows))))
+        return;
+    get_window_list(window, windows);
 
-        /* Native sends pagehide events prior to unload on the same window
-           before it moves on to the next window, so they're interleaved. */
-        if(window->doc->document_mode >= COMPAT_MODE_IE11) {
-            hres = create_document_event(window->doc, EVENTID_PAGEHIDE, &event);
+    for(i = 0; i < num; i++) {
+        window = windows[i];
+
+        if(window->doc && !window->doc->unload_sent) {
+            window->doc->unload_sent = TRUE;
+
+            /* Native sends pagehide events prior to unload on the same window
+               before it moves on to the next window, so they're interleaved. */
+            if(window->doc->document_mode >= COMPAT_MODE_IE11) {
+                hres = create_document_event(window->doc, EVENTID_PAGEHIDE, &event);
+                if(SUCCEEDED(hres)) {
+                    dispatch_event(&window->event_target, event);
+                    IDOMEvent_Release(&event->IDOMEvent_iface);
+                }
+            }
+
+            hres = create_document_event(window->doc, EVENTID_UNLOAD, &event);
             if(SUCCEEDED(hres)) {
                 dispatch_event(&window->event_target, event);
                 IDOMEvent_Release(&event->IDOMEvent_iface);
             }
         }
 
-        hres = create_document_event(window->doc, EVENTID_UNLOAD, &event);
-        if(SUCCEEDED(hres)) {
-            dispatch_event(&window->event_target, event);
-            IDOMEvent_Release(&event->IDOMEvent_iface);
-        }
+        IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
     }
 
-    LIST_FOR_EACH_ENTRY(child, &window->children, HTMLOuterWindow, sibling_entry)
-        send_unload_events_impl(child->base.inner_window);
-}
-
-static void send_unload_events(HTMLDocumentObj *doc)
-{
-    if(!doc->window || !doc->doc_node->content_ready)
-        return;
-
-    send_unload_events_impl(doc->window->base.inner_window);
+    free(windows);
 }
 
 /**********************************************************
@@ -588,10 +619,7 @@ static HRESULT WINAPI OleDocumentView_Show(IOleDocumentView *iface, BOOL fShow)
         if(This->in_place_active)
             IOleInPlaceObjectWindowless_InPlaceDeactivate(&This->IOleInPlaceObjectWindowless_iface);
 
-        if(This->ip_window) {
-            IOleInPlaceUIWindow_Release(This->ip_window);
-            This->ip_window = NULL;
-        }
+        unlink_ref(&This->ip_window);
     }
 
     return S_OK;

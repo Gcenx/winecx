@@ -36,8 +36,6 @@
 #include <ctype.h>
 #include <time.h>
 
-#define NONAMELESSUNION
-
 #include "widl.h"
 #include "typelib.h"
 #include "typelib_struct.h"
@@ -1418,6 +1416,7 @@ static int add_func_desc(msft_typeinfo_t* typeinfo, var_t *func, int index)
             break;
         case ATTR_OUT:
             break;
+        case ATTR_DEFAULT_OVERLOAD:
         case ATTR_OVERLOAD:
             break;
         case ATTR_PROPGET:
@@ -2224,6 +2223,9 @@ static void add_structure_typeinfo(msft_typelib_t *typelib, type_t *structure)
 
     if (-1 < structure->typelib_idx)
         return;
+
+    if (!structure->name)
+        structure->name = gen_name();
 
     structure->typelib_idx = typelib->typelib_header.nrtypeinfos;
     msft_typeinfo = create_msft_typeinfo(typelib, TKIND_RECORD, structure->name, structure->attrs);

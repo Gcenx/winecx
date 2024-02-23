@@ -44,6 +44,7 @@
 #ifdef __APPLE__
 #define GetCurrentProcess GetCurrentProcess_Mac
 #define GetCurrentThread GetCurrentThread_Mac
+#define GetProcessInformation GetProcessInformation_Mac
 #define LoadResource LoadResource_Mac
 #define AnimatePalette AnimatePalette_Mac
 #define EqualRgn EqualRgn_Mac
@@ -71,6 +72,7 @@
 #include <ApplicationServices/ApplicationServices.h>
 #undef GetCurrentProcess
 #undef GetCurrentThread
+#undef GetProcessInformation
 #undef LoadResource
 #undef AnimatePalette
 #undef EqualRgn
@@ -433,6 +435,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     get_ppd,
 };
 
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+
 #ifdef _WIN64
 
 typedef ULONG PTR32;
@@ -522,5 +526,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_get_default_page_size,
     wow64_get_ppd,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
 
 #endif  /* _WIN64 */

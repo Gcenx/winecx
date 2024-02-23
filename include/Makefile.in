@@ -6,6 +6,7 @@ SOURCES = \
 	activation.idl \
 	activaut.idl \
 	activdbg.idl \
+	activeds.h \
 	activscp.idl \
 	adserr.h \
 	adshlp.h \
@@ -19,6 +20,7 @@ SOURCES = \
 	appcompatapi.h \
 	appmgmt.h \
 	appmodel.h \
+	appnotify.h \
 	asferr.h \
 	asptlb.idl \
 	asyncinfo.idl \
@@ -115,10 +117,10 @@ SOURCES = \
 	d3d10.idl \
 	d3d10_1.idl \
 	d3d10_1shader.h \
-	d3d10effect.h \
+	d3d10effect.idl \
 	d3d10misc.h \
 	d3d10sdklayers.idl \
-	d3d10shader.h \
+	d3d10shader.idl \
 	d3d11.idl \
 	d3d11_1.idl \
 	d3d11_2.idl \
@@ -130,6 +132,7 @@ SOURCES = \
 	d3d12.idl \
 	d3d12sdklayers.idl \
 	d3d12shader.idl \
+	d3d12video.idl \
 	d3d8.h \
 	d3d8caps.h \
 	d3d8types.h \
@@ -182,6 +185,9 @@ SOURCES = \
 	dciddi.h \
 	dciman.h \
 	dcommon.idl \
+	dcomp.idl \
+	dcompanimation.idl \
+	dcomptypes.idl \
 	dde.h \
 	dde.rh \
 	ddeml.h \
@@ -195,7 +201,6 @@ SOURCES = \
 	ddk/hidport.h \
 	ddk/hidsdi.h \
 	ddk/hidtypes.h \
-	ddk/imm.h \
 	ddk/mountmgr.h \
 	ddk/ndis.h \
 	ddk/ntddcdvd.h \
@@ -278,6 +283,8 @@ SOURCES = \
 	dwrite_1.idl \
 	dwrite_2.idl \
 	dwrite_3.idl \
+	dxcore.h \
+	dxcore_interface.h \
 	dxdiag.h \
 	dxerr8.h \
 	dxerr9.h \
@@ -338,6 +345,7 @@ SOURCES = \
 	highlevelmonitorconfigurationapi.h \
 	hlguids.h \
 	hlink.idl \
+	hrtfapoapi.idl \
 	hstring.idl \
 	htiface.idl \
 	htiframe.idl \
@@ -360,6 +368,7 @@ SOURCES = \
 	imagehlp.h \
 	ime.h \
 	imm.h \
+	immdev.h \
 	imnact.idl \
 	imnxport.idl \
 	in6addr.h \
@@ -380,6 +389,8 @@ SOURCES = \
 	iprtrmib.h \
 	iptypes.h \
 	isguids.h \
+	ivectorchangedeventargs.idl \
+	kbd.h \
 	knownfolders.h \
 	ks.h \
 	ksguid.h \
@@ -550,6 +561,7 @@ SOURCES = \
 	ndrtypes.h \
 	netcfgx.idl \
 	netcon.idl \
+	netevent.h \
 	netfw.idl \
 	netioapi.h \
 	netiodef.h \
@@ -631,6 +643,7 @@ SOURCES = \
 	ras.h \
 	rasdlg.h \
 	raserror.h \
+	realtimeapiset.h \
 	reason.h \
 	regstr.h \
 	relogger.idl \
@@ -642,6 +655,7 @@ SOURCES = \
 	rmxftmpl.x \
 	roapi.h \
 	roerrorapi.h \
+	rometadataresolution.h \
 	roparameterizediid.idl \
 	row.idl \
 	rowchg.idl \
@@ -681,6 +695,7 @@ SOURCES = \
 	sesprp.idl \
 	setupapi.h \
 	sfc.h \
+	shcore.h \
 	shdeprecated.idl \
 	shdispid.h \
 	shellapi.h \
@@ -701,6 +716,7 @@ SOURCES = \
 	softpub.h \
 	spatialaudioclient.idl \
 	specstrings.h \
+	specstrings_strict.h \
 	sperror.h \
 	sql.h \
 	sqlext.h \
@@ -719,6 +735,7 @@ SOURCES = \
 	structuredquerycondition.idl \
 	svrapi.h \
 	synchapi.h \
+	systemmediatransportcontrolsinterop.idl \
 	t2embapi.h \
 	tapi.h \
 	taskschd.idl \
@@ -751,6 +768,7 @@ SOURCES = \
 	uiautomationcore.idl \
 	uiautomationcoreapi.h \
 	uiribbon.idl \
+	uiviewsettingsinterop.idl \
 	unexposeenums2managed.h \
 	unknwn.idl \
 	urlhist.idl \
@@ -799,9 +817,15 @@ SOURCES = \
 	windef.h \
 	windns.h \
 	windot11.h \
+	windows.applicationmodel.core.idl \
+	windows.applicationmodel.idl \
+	windows.devices.bluetooth.idl \
 	windows.devices.enumeration.idl \
+	windows.devices.geolocation.idl \
 	windows.devices.haptics.idl \
 	windows.devices.power.idl \
+	windows.devices.radios.idl \
+	windows.devices.usb.idl \
 	windows.foundation.collections.idl \
 	windows.foundation.idl \
 	windows.foundation.metadata.idl \
@@ -811,19 +835,47 @@ SOURCES = \
 	windows.gaming.input.idl \
 	windows.gaming.ui.idl \
 	windows.globalization.idl \
+	windows.graphics.capture.idl \
+	windows.graphics.capture.interop.idl \
+	windows.graphics.directx.direct3d11.idl \
+	windows.graphics.directx.idl \
+	windows.graphics.effects.idl \
+	windows.graphics.holographic.idl \
 	windows.h \
+	windows.management.deployment.idl \
+	windows.media.capture.idl \
 	windows.media.closedcaptioning.idl \
 	windows.media.devices.idl \
+	windows.media.effects.idl \
 	windows.media.idl \
+	windows.media.render.idl \
 	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
+	windows.networking.connectivity.idl \
+	windows.networking.idl \
+	windows.perception.spatial.idl \
+	windows.perception.spatial.surfaces.idl \
+	windows.security.credentials.idl \
+	windows.security.credentials.ui.idl \
 	windows.security.cryptography.idl \
+	windows.security.exchangeactivesyncprovisioning.idl \
+	windows.security.isolation.idl \
+	windows.storage.fileproperties.idl \
+	windows.storage.idl \
+	windows.storage.search.idl \
 	windows.storage.streams.idl \
 	windows.system.idl \
 	windows.system.power.idl \
+	windows.system.profile.idl \
+	windows.system.profile.systemmanufacturers.idl \
 	windows.system.threading.idl \
 	windows.system.userprofile.idl \
+	windows.ui.composition.idl \
+	windows.ui.composition.interop.idl \
+	windows.ui.core.idl \
 	windows.ui.idl \
+	windows.ui.viewmanagement.idl \
+	windows.ui.xaml.hosting.desktopwindowxamlsource.idl \
 	windowscontracts.idl \
 	windowsx.h \
 	wine/afd.h \
@@ -887,6 +939,7 @@ SOURCES = \
 	winnt.h \
 	winnt.rh \
 	winperf.h \
+	winppi.h \
 	winreg.h \
 	winresrc.h \
 	winsafer.h \
@@ -908,6 +961,7 @@ SOURCES = \
 	winuser.rh \
 	winver.h \
 	wlanapi.h \
+	wldp.h \
 	wmcodecdsp.idl \
 	wmdrmsdk.idl \
 	wmistr.h \
@@ -949,6 +1003,7 @@ SOURCES = \
 	xact2wb.h \
 	xact3.h \
 	xact3wb.h \
+	xamlom.idl \
 	xapo.idl \
 	xapofx.h \
 	xaudio2.idl \

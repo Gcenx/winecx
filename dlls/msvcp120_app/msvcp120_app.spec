@@ -1693,7 +1693,7 @@
 @ cdecl -arch=win64 ?_Rep@?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@GU?$char_traits@G@std@@@2@V32@G_K@Z(ptr ptr ptr long long) msvcp120.?_Rep@?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@GU?$char_traits@G@std@@@2@V32@G_K@Z
 @ cdecl -arch=win32 ?_Rep@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@ABA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@_WI@Z(ptr ptr long ptr long long) msvcp120.?_Rep@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@ABA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@_WI@Z
 @ cdecl -arch=win64 ?_Rep@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@_W_K@Z(ptr ptr ptr long long) msvcp120.?_Rep@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@_W_K@Z
-@ stub ?_Rethrow_future_exception@std@@YAXVexception_ptr@1@@Z
+@ cdecl -norelay ?_Rethrow_future_exception@std@@YAXVexception_ptr@1@@Z() msvcp120.?_Rethrow_future_exception@std@@YAXVexception_ptr@1@@Z
 @ stub -arch=win32 ?_Rng_abort@std@@YAXPBD@Z
 @ stub -arch=win64 ?_Rng_abort@std@@YAXPEBD@Z
 @ cdecl -arch=win32 ?_Segment_index_of@_Concurrent_vector_base_v4@details@Concurrency@@KAII@Z(long) msvcp120.?_Segment_index_of@_Concurrent_vector_base_v4@details@Concurrency@@KAII@Z
@@ -1739,10 +1739,10 @@
 @ extern ?_Sync@ios_base@std@@0_NA msvcp120.?_Sync@ios_base@std@@0_NA
 @ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) msvcp120.?_Syserror_map@std@@YAPBDH@Z
 @ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) msvcp120.?_Syserror_map@std@@YAPEBDH@Z
-@ stub ?_Throw_C_error@std@@YAXH@Z
+@ cdecl ?_Throw_C_error@std@@YAXH@Z(long) msvcp120.?_Throw_C_error@std@@YAXH@Z
 @ stub ?_Throw_Cpp_error@std@@YAXH@Z
-@ stub -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z
-@ stub -arch=win64 ?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z
+@ cdecl -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z(ptr) msvcp120.?_Throw_future_error@std@@YAXABVerror_code@1@@Z
+@ cdecl -arch=win64 ?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z(ptr) msvcp120.?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z
 @ stub ?_Throw_lock_error@threads@stdext@@YAXXZ
 @ stub ?_Throw_resource_error@threads@stdext@@YAXXZ
 @ cdecl -arch=arm ?_Tidy@?$_Yarn@D@std@@AAAXXZ(ptr) msvcp120.?_Tidy@?$_Yarn@D@std@@AAAXXZ
@@ -1788,13 +1788,13 @@
 @ stub -arch=arm ?_W_Gettnames@_Locinfo@std@@QBA?AV_Timevec@2@XZ
 @ stub -arch=i386 ?_W_Gettnames@_Locinfo@std@@QBE?AV_Timevec@2@XZ
 @ stub -arch=win64 ?_W_Gettnames@_Locinfo@std@@QEBA?AV_Timevec@2@XZ
-@ stub -arch=win32 ?_Winerror_map@std@@YAPBDH@Z
-@ stub -arch=win64 ?_Winerror_map@std@@YAPEBDH@Z
+@ cdecl -arch=win32 ?_Winerror_map@std@@YAPBDH@Z(long) msvcp120.?_Winerror_map@std@@YAPBDH@Z
+@ cdecl -arch=win64 ?_Winerror_map@std@@YAPEBDH@Z(long) msvcp120.?_Winerror_map@std@@YAPEBDH@Z
 @ cdecl ?_XLgamma@std@@YAMM@Z(float) msvcp120.?_XLgamma@std@@YAMM@Z
 @ cdecl ?_XLgamma@std@@YANN@Z(double) msvcp120.?_XLgamma@std@@YANN@Z
 @ cdecl ?_XLgamma@std@@YAOO@Z(double) msvcp120.?_XLgamma@std@@YAOO@Z
 @ cdecl ?_Xbad_alloc@std@@YAXXZ() msvcp120.?_Xbad_alloc@std@@YAXXZ
-@ stub ?_Xbad_function_call@std@@YAXXZ
+@ cdecl ?_Xbad_function_call@std@@YAXXZ() msvcp120.?_Xbad_function_call@std@@YAXXZ
 @ cdecl -arch=win32 ?_Xinvalid_argument@std@@YAXPBD@Z(str) msvcp120.?_Xinvalid_argument@std@@YAXPBD@Z
 @ cdecl -arch=win64 ?_Xinvalid_argument@std@@YAXPEBD@Z(str) msvcp120.?_Xinvalid_argument@std@@YAXPEBD@Z
 @ cdecl -arch=win32 ?_Xlength_error@std@@YAXPBD@Z(str) msvcp120.?_Xlength_error@std@@YAXPBD@Z

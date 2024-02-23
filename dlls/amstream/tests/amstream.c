@@ -386,6 +386,7 @@ static void test_interfaces(void)
     check_interface(stream, &IID_IMediaStreamFilter, FALSE);
     check_interface(stream, &IID_IMultiMediaStream, FALSE);
     check_interface(stream, &IID_IPersist, FALSE);
+    check_interface(stream, &IID_IQualityControl, FALSE);
 
     IMediaStream_Release(stream);
 
@@ -408,6 +409,7 @@ static void test_interfaces(void)
     check_interface(stream, &IID_IMediaStreamFilter, FALSE);
     check_interface(stream, &IID_IMultiMediaStream, FALSE);
     check_interface(stream, &IID_IPersist, FALSE);
+    check_interface(stream, &IID_IQualityControl, FALSE);
 
     IMediaStream_Release(stream);
 
@@ -1017,10 +1019,13 @@ struct testfilter
     struct strmbase_filter filter;
     struct strmbase_source source;
     IMediaSeeking IMediaSeeking_iface;
+    IQualityControl IQualityControl_iface;
     LONGLONG current_position;
     LONGLONG stop_position;
     const AM_MEDIA_TYPE *preferred_mt;
     HANDLE wait_state_event;
+    IBaseFilter *qc_notify_sender;
+    Quality qc_notify_quality;
     HRESULT get_duration_hr;
     HRESULT get_stop_position_hr;
     HRESULT set_positions_hr;
@@ -1028,6 +1033,7 @@ struct testfilter
     HRESULT cleanup_stream_hr;
     HRESULT wait_state_hr;
     HRESULT is_format_supported_hr;
+    HRESULT qc_notify_hr;
 };
 
 static inline struct testfilter *impl_from_BaseFilter(struct strmbase_filter *iface)
@@ -1123,6 +1129,8 @@ static HRESULT testsource_query_interface(struct strmbase_pin *iface, REFIID iid
 
     if (IsEqualGUID(iid, &IID_IMediaSeeking) && filter->IMediaSeeking_iface.lpVtbl)
         *out = &filter->IMediaSeeking_iface;
+    else if (IsEqualGUID(iid, &IID_IQualityControl) && filter->IQualityControl_iface.lpVtbl)
+        *out = &filter->IQualityControl_iface;
     else
         return E_NOINTERFACE;
 
@@ -1356,6 +1364,54 @@ static const IMediaSeekingVtbl testsource_seeking_vtbl =
     testsource_seeking_SetRate,
     testsource_seeking_GetRate,
     testsource_seeking_GetPreroll,
+};
+
+static inline struct testfilter *impl_from_IQualityControl(IQualityControl *iface)
+{
+    return CONTAINING_RECORD(iface, struct testfilter, IQualityControl_iface);
+}
+
+static HRESULT WINAPI testsource_qc_QueryInterface(IQualityControl *iface, REFIID iid, void **out)
+{
+    struct testfilter *filter = impl_from_IQualityControl(iface);
+    return IBaseFilter_QueryInterface(&filter->filter.IBaseFilter_iface, iid, out);
+}
+
+static ULONG WINAPI testsource_qc_AddRef(IQualityControl *iface)
+{
+    struct testfilter *filter = impl_from_IQualityControl(iface);
+    return IBaseFilter_AddRef(&filter->filter.IBaseFilter_iface);
+}
+
+static ULONG WINAPI testsource_qc_Release(IQualityControl *iface)
+{
+    struct testfilter *filter = impl_from_IQualityControl(iface);
+    return IBaseFilter_Release(&filter->filter.IBaseFilter_iface);
+}
+
+static HRESULT WINAPI testsource_qc_Notify(IQualityControl *iface, IBaseFilter *sender, Quality q)
+{
+    struct testfilter *filter = impl_from_IQualityControl(iface);
+
+    filter->qc_notify_sender = sender;
+    filter->qc_notify_quality = q;
+
+    return filter->qc_notify_hr;
+}
+
+static HRESULT WINAPI testsource_qc_SetSink(IQualityControl *iface, IQualityControl *sink)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static const IQualityControlVtbl testsource_qc_vtbl =
+{
+    testsource_qc_QueryInterface,
+    testsource_qc_AddRef,
+    testsource_qc_Release,
+    testsource_qc_Notify,
+    testsource_qc_SetSink,
 };
 
 #define check_get_stream(a,b,c,d) check_get_stream_(__LINE__,a,b,c,d)
@@ -1839,10 +1895,10 @@ static void test_media_streams(void)
 static void test_enum_pins(void)
 {
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    IMediaStream *stream0, *stream1;
+    IPin *pins[3], *pin0, *pin1;
     IMediaStreamFilter *filter;
     IEnumPins *enum1, *enum2;
-    IMediaStream *stream;
-    IPin *pins[3], *pin;
     ULONG ref, count;
     HRESULT hr;
 
@@ -1877,9 +1933,13 @@ static void test_enum_pins(void)
     hr = IEnumPins_Skip(enum1, 1);
     ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
 
-    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, &stream);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, &stream0);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    hr = IMediaStream_QueryInterface(stream, &IID_IPin, (void **)&pin);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryAudio, 0, &stream1);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IMediaStream_QueryInterface(stream0, &IID_IPin, (void **)&pin0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IMediaStream_QueryInterface(stream1, &IID_IPin, (void **)&pin1);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
     /* Reset() isn't enough; we have to call EnumPins() again to see the updated
@@ -1899,17 +1959,30 @@ static void test_enum_pins(void)
     ok(ref == 4, "Got unexpected refcount %ld.\n", ref);
     ref = get_refcount(enum1);
     ok(ref == 1, "Got unexpected refcount %ld.\n", ref);
-    ref = get_refcount(pin);
+    ref = get_refcount(pin0);
+    ok(ref == 4, "Got unexpected refcount %ld.\n", ref);
+    ref = get_refcount(pin1);
     ok(ref == 4, "Got unexpected refcount %ld.\n", ref);
 
     hr = IEnumPins_Next(enum1, 1, pins, NULL);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(pins[0] == pin, "Expected pin %p, got %p.\n", pin, pins[0]);
+    ok(pins[0] == pin0, "Expected pin %p, got %p.\n", pin0, pins[0]);
     ref = get_refcount(filter);
     ok(ref == 4, "Got unexpected refcount %ld.\n", ref);
     ref = get_refcount(enum1);
     ok(ref == 1, "Got unexpected refcount %ld.\n", ref);
-    ref = get_refcount(pin);
+    ref = get_refcount(pin0);
+    ok(ref == 5, "Got unexpected refcount %ld.\n", ref);
+    IPin_Release(pins[0]);
+
+    hr = IEnumPins_Next(enum1, 1, pins, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(pins[0] == pin1, "Expected pin %p, got %p.\n", pin1, pins[0]);
+    ref = get_refcount(filter);
+    ok(ref == 4, "Got unexpected refcount %ld.\n", ref);
+    ref = get_refcount(enum1);
+    ok(ref == 1, "Got unexpected refcount %ld.\n", ref);
+    ref = get_refcount(pin1);
     ok(ref == 5, "Got unexpected refcount %ld.\n", ref);
     IPin_Release(pins[0]);
 
@@ -1922,20 +1995,28 @@ static void test_enum_pins(void)
     hr = IEnumPins_Next(enum1, 1, pins, &count);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(count == 1, "Got count %lu.\n", count);
-    ok(pins[0] == pin, "Expected pin %p, got %p.\n", pin, pins[0]);
+    ok(pins[0] == pin0, "Expected pin %p, got %p.\n", pin0, pins[0]);
+    IPin_Release(pins[0]);
+
+    hr = IEnumPins_Next(enum1, 1, pins, &count);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(count == 1, "Got count %lu.\n", count);
+    ok(pins[0] == pin1, "Expected pin %p, got %p.\n", pin1, pins[0]);
     IPin_Release(pins[0]);
 
     hr = IEnumPins_Reset(enum1);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-    hr = IEnumPins_Next(enum1, 2, pins, NULL);
+    hr = IEnumPins_Next(enum1, 3, pins, NULL);
     ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
 
-    hr = IEnumPins_Next(enum1, 2, pins, &count);
+    hr = IEnumPins_Next(enum1, 3, pins, &count);
     ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
-    ok(count == 1, "Got count %lu.\n", count);
-    ok(pins[0] == pin, "Expected pin %p, got %p.\n", pin, pins[0]);
+    ok(count == 2, "Got count %lu.\n", count);
+    ok(pins[0] == pin0, "Expected pin %p, got %p.\n", pin0, pins[0]);
+    ok(pins[1] == pin1, "Expected pin %p, got %p.\n", pin1, pins[1]);
     IPin_Release(pins[0]);
+    IPin_Release(pins[1]);
 
     hr = IEnumPins_Reset(enum1);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
@@ -1946,7 +2027,7 @@ static void test_enum_pins(void)
     hr = IEnumPins_Skip(enum1, 0);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-    hr = IEnumPins_Skip(enum1, 1);
+    hr = IEnumPins_Skip(enum1, 2);
     ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
 
     hr = IEnumPins_Next(enum1, 1, pins, NULL);
@@ -1954,7 +2035,12 @@ static void test_enum_pins(void)
 
     hr = IEnumPins_Next(enum2, 1, pins, NULL);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(pins[0] == pin, "Expected pin %p, got %p.\n", pin, pins[0]);
+    ok(pins[0] == pin0, "Expected pin %p, got %p.\n", pin0, pins[0]);
+    IPin_Release(pins[0]);
+
+    hr = IEnumPins_Next(enum2, 1, pins, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(pins[0] == pin1, "Expected pin %p, got %p.\n", pin1, pins[0]);
     IPin_Release(pins[0]);
 
     IEnumPins_Release(enum2);
@@ -1963,8 +2049,11 @@ static void test_enum_pins(void)
     IMediaStreamFilter_Release(filter);
     ref = IAMMultiMediaStream_Release(mmstream);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
-    IMediaStream_Release(stream);
-    ref = IPin_Release(pin);
+    IMediaStream_Release(stream1);
+    IMediaStream_Release(stream0);
+    ref = IPin_Release(pin1);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IPin_Release(pin0);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
 }
 
@@ -5991,6 +6080,9 @@ static void test_ddrawstream_begin_flush_end_flush(void)
     IDirectDrawMediaStream_Release(ddraw_stream);
     ref = IMediaStream_Release(stream);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    IPin_Release(pin2);
+    ref = IAMMediaStream_Release(stream2);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
 }
 
 static void test_ddrawstream_new_segment(void)
@@ -8154,6 +8246,244 @@ static void test_ddrawstream_create_sample(void)
             desc.ddckCKSrcBlt.dwColorSpaceHighValue);
 }
 
+static void test_ddrawstream_qc(void)
+{
+    static const BYTE test_data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    struct advise_time_cookie cookie = { 0 };
+    IDirectDrawStreamSample *stream_sample;
+    IDirectDrawMediaStream *ddraw_stream;
+    IMediaFilter *graph_media_filter;
+    STREAM_TIME filter_start_time;
+    IMemInputPin *mem_input_pin;
+    IMediaStreamFilter *filter;
+    struct testfilter source;
+    struct testclock clock;
+    STREAM_TIME start_time;
+    STREAM_TIME end_time;
+    IGraphBuilder *graph;
+    IMediaStream *stream;
+    VIDEOINFO video_info;
+    AM_MEDIA_TYPE mt;
+    HANDLE thread;
+    HRESULT hr;
+    ULONG ref;
+    IPin *pin;
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(!!filter, "Expected non-null filter.\n");
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, &stream);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IMediaStream_QueryInterface(stream, &IID_IDirectDrawMediaStream, (void **)&ddraw_stream);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IMediaStream_QueryInterface(stream, &IID_IPin, (void **)&pin);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IMediaStream_QueryInterface(stream, &IID_IMemInputPin, (void **)&mem_input_pin);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(graph != NULL, "Expected non-NULL graph.\n");
+    hr = IGraphBuilder_QueryInterface(graph, &IID_IMediaFilter, (void **)&graph_media_filter);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    testfilter_init(&source);
+    source.IQualityControl_iface.lpVtbl = &testsource_qc_vtbl;
+    hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    testclock_init(&clock);
+    cookie.advise_time_called_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(cookie.advise_time_called_event != NULL, "Expected non-NULL event.");
+
+    video_info = rgb32_video_info;
+    video_info.bmiHeader.biWidth = 3;
+    video_info.bmiHeader.biHeight = 1;
+    mt = rgb32_mt;
+    mt.pbFormat = (BYTE *)&video_info;
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectDrawMediaStream_CreateSample(ddraw_stream, NULL, NULL, 0, &stream_sample);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    /* There are no quality control messages without a sync source. */
+    hr = IMediaFilter_SetSyncSource(graph_media_filter, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    source.qc_notify_sender = (IBaseFilter *)0xdeadbeef;
+    source.qc_notify_quality.Type = Flood;
+    source.qc_notify_quality.Proportion = 0xdeadbeef;
+    source.qc_notify_quality.Late = 0xdeadbeef;
+    source.qc_notify_quality.TimeStamp = 0xdeadbeef;
+
+    thread = ammediastream_async_receive_time(&source,
+            11111111, 11111111, test_data, sizeof(test_data));
+    ok(WaitForSingleObject(thread, 100) == WAIT_TIMEOUT, "Receive returned prematurely.\n");
+
+    hr = IDirectDrawStreamSample_Update(stream_sample, 0, NULL, NULL, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ok(!WaitForSingleObject(thread, 2000), "Wait timed out.\n");
+    CloseHandle(thread);
+
+    ok(source.qc_notify_sender == (IBaseFilter *)0xdeadbeef, "Got sender %p.\n",
+            source.qc_notify_sender);
+    ok(source.qc_notify_quality.Type == Flood, "Got type %d.\n",
+            source.qc_notify_quality.Type);
+    ok(source.qc_notify_quality.Proportion == 0xdeadbeef, "Got proportion %ld.\n",
+            source.qc_notify_quality.Proportion);
+    ok(source.qc_notify_quality.Late == 0xdeadbeef,
+            "Got late %s.\n", wine_dbgstr_longlong(source.qc_notify_quality.Late));
+    ok(source.qc_notify_quality.TimeStamp == 0xdeadbeef, "Got time stamp %s.\n",
+            wine_dbgstr_longlong(source.qc_notify_quality.TimeStamp));
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IMediaFilter_SetSyncSource(graph_media_filter, &clock.IReferenceClock_iface);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    clock.time = 12345678;
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IMediaStreamFilter_GetCurrentStreamTime(filter, &filter_start_time);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    /* Quality control message is sent on update completion, q.Late is computed
+     * as a difference between sample start time and update completion time. */
+
+    /* Test Update() before Reveive(). */
+    source.qc_notify_sender = (IBaseFilter *)0xdeadbeef;
+    source.qc_notify_quality.Type = Flood;
+    source.qc_notify_quality.Proportion = 0xdeadbeef;
+    source.qc_notify_quality.Late = 0xdeadbeef;
+    source.qc_notify_quality.TimeStamp = 0xdeadbeef;
+
+    clock.time = 12345678 - filter_start_time + 11111111;
+
+    hr = IDirectDrawStreamSample_Update(stream_sample, SSUPDATE_ASYNC, NULL, NULL, 0);
+    ok(hr == MS_S_PENDING, "Got hr %#lx.\n", hr);
+
+    clock.advise_time_cookie = &cookie;
+    clock.time = 12345678 - filter_start_time + 11111111 + 100000;
+
+    start_time = 11111111 + 200000;
+    end_time = 11111111 + 200000;
+    thread = ammediastream_async_receive_time(&source,
+            start_time, end_time, test_data, sizeof(test_data));
+    ok(!WaitForSingleObject(cookie.advise_time_called_event, 2000), "Wait timed out.\n");
+
+    ok(source.qc_notify_sender == (IBaseFilter *)0xdeadbeef, "Got sender %p.\n",
+            source.qc_notify_sender);
+    ok(source.qc_notify_quality.Type == Flood, "Got type %d.\n",
+            source.qc_notify_quality.Type);
+    ok(source.qc_notify_quality.Proportion == 0xdeadbeef, "Got proportion %ld.\n",
+            source.qc_notify_quality.Proportion);
+    ok(source.qc_notify_quality.Late == 0xdeadbeef,
+            "Got late %s.\n", wine_dbgstr_longlong(source.qc_notify_quality.Late));
+    ok(source.qc_notify_quality.TimeStamp == 0xdeadbeef, "Got time stamp %s.\n",
+            wine_dbgstr_longlong(source.qc_notify_quality.TimeStamp));
+
+    clock.time = 12345678 - filter_start_time + 11111111 + 200000;
+
+    SetEvent(cookie.event);
+
+    ok(!WaitForSingleObject(thread, 2000), "Wait timed out.\n");
+    CloseHandle(thread);
+
+    hr = IDirectDrawStreamSample_CompletionStatus(stream_sample, 0, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ok(source.qc_notify_sender == (IBaseFilter *)filter, "Got sender %p.\n",
+            source.qc_notify_sender);
+    ok(source.qc_notify_quality.Type == Famine, "Got type %d.\n",
+            source.qc_notify_quality.Type);
+    ok(source.qc_notify_quality.Proportion == 1000, "Got proportion %ld.\n",
+            source.qc_notify_quality.Proportion);
+    ok(source.qc_notify_quality.Late == 0, "Got late %s.\n",
+            wine_dbgstr_longlong(source.qc_notify_quality.Late));
+    ok(source.qc_notify_quality.TimeStamp == start_time, "Got time stamp %s.\n",
+            wine_dbgstr_longlong(source.qc_notify_quality.TimeStamp));
+
+    /* Test Update() after Reveive(). */
+    source.qc_notify_sender = (IBaseFilter *)0xdeadbeef;
+    source.qc_notify_quality.Type = Flood;
+    source.qc_notify_quality.Proportion = 0xdeadbeef;
+    source.qc_notify_quality.Late = 0xdeadbeef;
+    source.qc_notify_quality.TimeStamp = 0xdeadbeef;
+
+    clock.advise_time_cookie = &cookie;
+    clock.time = 12345678 - filter_start_time + 11111111 + 300000;
+
+    start_time = 11111111 + 400000;
+    end_time = 11111111 + 400000;
+    thread = ammediastream_async_receive_time(&source,
+            start_time, end_time, test_data, sizeof(test_data));
+    ok(!WaitForSingleObject(cookie.advise_time_called_event, 2000), "Wait timed out.\n");
+
+    clock.time = 12345678 - filter_start_time + 11111111 + 400000;
+    SetEvent(cookie.event);
+
+    ok(WaitForSingleObject(thread, 100) == WAIT_TIMEOUT, "Receive returned prematurely.\n");
+
+    ok(source.qc_notify_sender == (IBaseFilter *)0xdeadbeef, "Got sender %p.\n",
+            source.qc_notify_sender);
+    ok(source.qc_notify_quality.Type == Flood, "Got type %d.\n",
+            source.qc_notify_quality.Type);
+    ok(source.qc_notify_quality.Proportion == 0xdeadbeef, "Got proportion %ld.\n",
+            source.qc_notify_quality.Proportion);
+    ok(source.qc_notify_quality.Late == 0xdeadbeef,
+            "Got late %s.\n", wine_dbgstr_longlong(source.qc_notify_quality.Late));
+    ok(source.qc_notify_quality.TimeStamp == 0xdeadbeef, "Got time stamp %s.\n",
+            wine_dbgstr_longlong(source.qc_notify_quality.TimeStamp));
+
+    clock.time = 12345678 - filter_start_time + 11111111 + 500000;
+
+    hr = IDirectDrawStreamSample_Update(stream_sample, 0, NULL, NULL, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ok(!WaitForSingleObject(thread, 2000), "Wait timed out.\n");
+    CloseHandle(thread);
+
+    ok(source.qc_notify_sender == (IBaseFilter *)filter, "Got sender %p.\n",
+            source.qc_notify_sender);
+    ok(source.qc_notify_quality.Type == Famine, "Got type %d.\n",
+            source.qc_notify_quality.Type);
+    ok(source.qc_notify_quality.Proportion == 1000, "Got proportion %ld.\n",
+            source.qc_notify_quality.Proportion);
+    ok(source.qc_notify_quality.Late == 100000, "Got late %s.\n",
+            wine_dbgstr_longlong(source.qc_notify_quality.Late));
+    ok(source.qc_notify_quality.TimeStamp == start_time, "Got time stamp %s.\n",
+            wine_dbgstr_longlong(source.qc_notify_quality.TimeStamp));
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    IGraphBuilder_Disconnect(graph, pin);
+    IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
+
+    CloseHandle(cookie.advise_time_called_event);
+    ref = IDirectDrawStreamSample_Release(stream_sample);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    IMediaFilter_Release(graph_media_filter);
+    ref = IGraphBuilder_Release(graph);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    IPin_Release(pin);
+    IMemInputPin_Release(mem_input_pin);
+    IDirectDrawMediaStream_Release(ddraw_stream);
+    ref = IMediaStream_Release(stream);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
 static void test_ddrawstreamsample_get_media_stream(void)
 {
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
@@ -9480,6 +9810,7 @@ START_TEST(amstream)
     test_ddrawstream_begin_flush_end_flush();
     test_ddrawstream_new_segment();
     test_ddrawstream_get_time_per_frame();
+    test_ddrawstream_qc();
 
     test_ddrawstreamsample_get_media_stream();
     test_ddrawstreamsample_update();

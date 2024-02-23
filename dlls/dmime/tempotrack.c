@@ -19,9 +19,6 @@
  */
 
 #include "dmime_private.h"
-#include "dmobject.h"
-
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmime);
 WINE_DECLARE_DEBUG_CHANNEL(dmfile);
@@ -85,9 +82,8 @@ static ULONG WINAPI tempo_track_Release(IDirectMusicTrack8 *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref) {
-        heap_free(This->items);
-        heap_free(This);
-        DMIME_UnlockModule();
+        free(This->items);
+        free(This);
     }
 
     return ref;
@@ -110,9 +106,7 @@ static HRESULT WINAPI tempo_track_InitPlay(IDirectMusicTrack8 *iface,
 
   FIXME("(%p, %p, %p, %p, %ld, %ld): semi-stub\n", This, pSegmentState, pPerformance, ppStateData, dwVirtualTrack8ID, dwFlags);
 
-  pState = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DMUS_PRIVATE_TEMPO_PLAY_STATE));
-  if (NULL == pState)
-    return E_OUTOFMEMORY;
+  if (!(pState = calloc(1, sizeof(*pState)))) return E_OUTOFMEMORY;
 
   /** TODO real fill useful data */
   pState->dummy = 0;
@@ -132,7 +126,7 @@ static HRESULT WINAPI tempo_track_EndPlay(IDirectMusicTrack8 *iface, void *pStat
     return E_POINTER;
   }
   /** TODO real clean up */
-  HeapFree(GetProcessHeap(), 0, pState);
+  free(pState);
   return S_OK;
 }
 
@@ -146,42 +140,32 @@ static HRESULT WINAPI tempo_track_Play(IDirectMusicTrack8 *iface, void *pStateDa
   return S_OK;
 }
 
-static HRESULT WINAPI tempo_track_GetParam(IDirectMusicTrack8 *iface, REFGUID type, MUSIC_TIME time,
-        MUSIC_TIME *next, void *param)
+static HRESULT WINAPI tempo_track_GetParam(IDirectMusicTrack8 *iface, REFGUID type, MUSIC_TIME music_time,
+        MUSIC_TIME *next_time, void *param)
 {
     IDirectMusicTempoTrack *This = impl_from_IDirectMusicTrack8(iface);
-    DMUS_TEMPO_PARAM *prm = param;
-    unsigned int i;
+    DMUS_IO_TEMPO_ITEM *item = This->items, *end = item + This->count;
+    DMUS_TEMPO_PARAM *tempo = param;
 
-    TRACE("(%p, %s, %ld, %p, %p)\n", This, debugstr_dmguid(type), time, next, param);
+    TRACE("(%p, %s, %ld, %p, %p)\n", This, debugstr_dmguid(type), music_time, next_time, param);
 
-    if (!param)
-        return E_POINTER;
-    if (!IsEqualGUID(type, &GUID_TempoParam))
-        return DMUS_E_GET_UNSUPPORTED;
+    if (!param) return E_POINTER;
+    if (!IsEqualGUID(type, &GUID_TempoParam)) return DMUS_E_GET_UNSUPPORTED;
+    if (item == end) return DMUS_E_NOT_FOUND;
 
-    FIXME("Partial support for GUID_TempoParam\n");
+    tempo->mtTime = item->lTime - music_time;
+    tempo->dblTempo = item->dblTempo;
 
-    if (next)
-        *next = 0;
-    prm->mtTime = 0;
-    prm->dblTempo = 0.123456;
-
-    for (i = 0; i < This->count; i++) {
-        if (This->items[i].lTime <= time) {
-            MUSIC_TIME ofs = This->items[i].lTime - time;
-            if (ofs > prm->mtTime) {
-                prm->mtTime = ofs;
-                prm->dblTempo = This->items[i].dblTempo;
-            }
-            if (next && This->items[i].lTime > time && This->items[i].lTime < *next)
-                *next = This->items[i].lTime;
-        }
+    for (; item < end; item++)
+    {
+        MUSIC_TIME time = item->lTime - music_time;
+        if (next_time) *next_time = item->lTime - music_time;
+        if (time > 0) break;
+        tempo->mtTime = time;
+        tempo->dblTempo = item->dblTempo;
     }
 
-    if (0.123456 == prm->dblTempo)
-        return DMUS_E_NOT_FOUND;
-
+    if (next_time && item == end) *next_time = 0;
     return S_OK;
 }
 
@@ -375,18 +359,14 @@ HRESULT create_dmtempotrack(REFIID lpcGUID, void **ppobj)
     IDirectMusicTempoTrack *track;
     HRESULT hr;
 
-    track = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*track));
-    if (!track) {
-        *ppobj = NULL;
-        return E_OUTOFMEMORY;
-    }
+    *ppobj = NULL;
+    if (!(track = calloc(1, sizeof(*track)))) return E_OUTOFMEMORY;
     track->IDirectMusicTrack8_iface.lpVtbl = &dmtrack8_vtbl;
     track->ref = 1;
     dmobject_init(&track->dmobj, &CLSID_DirectMusicTempoTrack,
                   (IUnknown *)&track->IDirectMusicTrack8_iface);
     track->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
 
-    DMIME_LockModule();
     hr = IDirectMusicTrack8_QueryInterface(&track->IDirectMusicTrack8_iface, lpcGUID, ppobj);
     IDirectMusicTrack8_Release(&track->IDirectMusicTrack8_iface);
 

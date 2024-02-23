@@ -34,7 +34,6 @@
 #include "initguid.h"
 
 #include "wine/test.h"
-#include "wine/heap.h"
 
 #define check_interface(a, b, c) check_interface_(__LINE__, a, b, c)
 static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOOL supported)
@@ -405,7 +404,7 @@ static ULONG WINAPI HeapUnknown_Release(IUnknown *iface)
 {
     HeapUnknown *This = impl_from_IUnknown(iface);
     ULONG refs = InterlockedDecrement((LONG*)&This->refs);
-    if (!refs) HeapFree(GetProcessHeap(), 0, This);
+    if (!refs) free(This);
     return refs;
 }
 
@@ -616,7 +615,7 @@ Moniker_Release(IMoniker* iface)
     ULONG refcount = InterlockedDecrement(&moniker->refcount);
 
     if (!refcount)
-        heap_free(moniker);
+        free(moniker);
 
     return refcount;
 }
@@ -880,7 +879,7 @@ static struct test_moniker *create_test_moniker(void)
 {
     struct test_moniker *obj;
 
-    obj = heap_alloc_zero(sizeof(*obj));
+    obj = calloc(1, sizeof(*obj));
     obj->IMoniker_iface.lpVtbl = &MonikerVtbl;
     obj->IROTData_iface.lpVtbl = &ROTDataVtbl;
     obj->IOleItemContainer_iface.lpVtbl = &test_item_container_vtbl;
@@ -1144,13 +1143,12 @@ static IParseDisplayName ParseDisplayName = { &ParseDisplayName_Vtbl };
 static int count_moniker_matches(IBindCtx * pbc, IEnumMoniker * spEM)
 {
     IMoniker * spMoniker;
-    int monCnt=0, matchCnt=0;
+    int matchCnt = 0;
 
     while ((IEnumMoniker_Next(spEM, 1, &spMoniker, NULL)==S_OK))
     {
         HRESULT hr;
         WCHAR * szDisplayn;
-        monCnt++;
         hr=IMoniker_GetDisplayName(spMoniker, pbc, NULL, &szDisplayn);
         if (SUCCEEDED(hr))
         {
@@ -3037,7 +3035,9 @@ static void test_anti_moniker(void)
     ok(!enummoniker, "Unexpected pointer.\n");
 
     hr = IMoniker_Enum(moniker, FALSE, NULL);
-    todo_wine
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMoniker_Enum(moniker, TRUE, NULL);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
     /* CommonPrefixWith() */
@@ -4390,7 +4390,7 @@ static void test_bind_context(void)
     hr = IBindCtx_RegisterObjectParam(pBindCtx, (WCHAR *)wszParamName, NULL);
     ok(hr == E_INVALIDARG, "IBindCtx_RegisterObjectParam should have returned E_INVALIDARG instead of 0x%08lx\n", hr);
 
-    unknown = HeapAlloc(GetProcessHeap(), 0, sizeof(*unknown));
+    unknown = malloc(sizeof(*unknown));
     unknown->IUnknown_iface.lpVtbl = &HeapUnknown_Vtbl;
     unknown->refs = 1;
     hr = IBindCtx_RegisterObjectParam(pBindCtx, (WCHAR *)wszParamName, &unknown->IUnknown_iface);
@@ -4417,7 +4417,7 @@ static void test_bind_context(void)
     hr = IBindCtx_RevokeObjectBound(pBindCtx, NULL);
     ok(hr == E_INVALIDARG, "IBindCtx_RevokeObjectBound(NULL) should have return E_INVALIDARG instead of 0x%08lx\n", hr);
 
-    unknown2 = HeapAlloc(GetProcessHeap(), 0, sizeof(*unknown));
+    unknown2 = malloc(sizeof(*unknown));
     unknown2->IUnknown_iface.lpVtbl = &HeapUnknown_Vtbl;
     unknown2->refs = 1;
     hr = IBindCtx_RegisterObjectBound(pBindCtx, &unknown2->IUnknown_iface);

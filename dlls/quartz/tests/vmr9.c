@@ -1586,7 +1586,7 @@ static void test_window_close(IPin *pin, IMemInputPin *input, IMediaControl *con
     ok(ret == 1, "Expected EC_USERABORT.\n");
 
     ok(IsWindow(hwnd), "Window should exist.\n");
-    ok(!IsWindowVisible(hwnd), "Window should be visible.\n");
+    ok(!IsWindowVisible(hwnd), "Window should be invisible.\n");
 
     thread = send_frame(input);
     ret = WaitForSingleObject(thread, 1000);
@@ -2934,6 +2934,7 @@ struct presenter
 
     D3DFORMAT format;
     DWORD accept_flags;
+    IDirect3DDevice9 *device;
     IDirect3DSurface9 *surfaces[5];
     IVMRSurfaceAllocatorNotify9 *notify;
     unsigned int got_PresentImage, got_TerminateDevice;
@@ -2979,9 +2980,13 @@ static HRESULT WINAPI presenter_StopPresenting(IVMRImagePresenter9 *iface, DWORD
 static HRESULT WINAPI presenter_PresentImage(IVMRImagePresenter9 *iface, DWORD_PTR cookie, VMR9PresentationInfo *info)
 {
     struct presenter *presenter = impl_from_IVMRImagePresenter9(iface);
+    IDirect3DDevice9 *device;
     static const RECT rect;
 
     if (winetest_debug > 1) trace("PresentImage()\n");
+    IDirect3DSurface9_GetDevice(info->lpSurf, &device);
+    ok(device == presenter->device, "got %p, expected %p\n", device, presenter->device);
+    IDirect3DDevice9_Release(device);
     ok(cookie == 0xabacab, "Got cookie %#Ix.\n", cookie);
     todo_wine ok(info->dwFlags == VMR9Sample_TimeValid, "Got flags %#lx.\n", info->dwFlags);
     ok(!info->rtStart, "Got start time %s.\n", wine_dbgstr_longlong(info->rtStart));
@@ -3224,6 +3229,7 @@ static void test_renderless_formats(void)
     IBaseFilter_QueryInterface(filter, &IID_IVMRSurfaceAllocatorNotify9, (void **)&notify);
 
     hr = IVMRSurfaceAllocatorNotify9_SetD3DDevice(notify, device, MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY));
+    presenter.device = device;
     if (hr == E_NOINTERFACE)
     {
         win_skip("Direct3D does not support video rendering.\n");
@@ -4267,6 +4273,174 @@ static void test_unconnected_eos(void)
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
 }
 
+static void test_notifyevent(void)
+{
+    IFilterGraph2 *graph = create_graph();
+    IBaseFilter *filter = create_vmr9(VMR9Mode_Renderless);
+    IVMRSurfaceAllocatorNotify9 *notify;
+    IMediaEvent *eventsrc;
+    unsigned int ret;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = IFilterGraph2_AddFilter(graph, filter, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IFilterGraph2_QueryInterface(graph, &IID_IMediaEvent, (void **)&eventsrc);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ret = check_event_code(eventsrc, 0, 0x12345678, 0x9ABC, 0xDEF0);
+    ok(ret == 0, "Got %u custom events.\n", ret);
+
+    hr = IBaseFilter_QueryInterface(filter, &IID_IVMRSurfaceAllocatorNotify9, (void **)&notify);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IVMRSurfaceAllocatorNotify9_NotifyEvent(notify, 0x12345678, 0x9ABC, 0xDEF0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ret = check_event_code(eventsrc, 0, 0x12345678, 0x9ABC, 0xDEF0);
+    ok(ret == 1, "Got %u custom events.\n", ret);
+
+    IMediaEvent_Release(eventsrc);
+    ref = IFilterGraph2_Release(graph);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IVMRSurfaceAllocatorNotify9_Release(notify);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
+static void test_changed3ddevice(void)
+{
+    VIDEOINFOHEADER vih =
+    {
+        .rcSource = {4, 6, 16, 12},
+        .rcTarget = {40, 60, 160, 120},
+        .bmiHeader.biSize = sizeof(BITMAPINFOHEADER),
+        .bmiHeader.biWidth = 32,
+        .bmiHeader.biHeight = 16,
+    };
+    AM_MEDIA_TYPE req_mt =
+    {
+        .majortype = MEDIATYPE_Video,
+        .subtype = MEDIASUBTYPE_RGB32,
+        .formattype = FORMAT_VideoInfo,
+        .cbFormat = sizeof(vih),
+        .pbFormat = (BYTE *)&vih,
+    };
+    struct presenter presenter =
+    {
+        .IVMRSurfaceAllocator9_iface.lpVtbl = &allocator_vtbl,
+        .IVMRImagePresenter9_iface.lpVtbl = &presenter_vtbl,
+        .refcount = 1,
+        .accept_flags = VMR9AllocFlag_TextureSurface,
+    };
+    ALLOCATOR_PROPERTIES req_props = {5, 32 * 16 * 4, 1, 0}, ret_props;
+    IBaseFilter *filter = create_vmr9(VMR9Mode_Renderless);
+    IFilterGraph2 *graph = create_graph();
+    IVMRSurfaceAllocatorNotify9 *notify;
+    RECT rect = {0, 0, 640, 480};
+    IDirect3DDevice9 *device;
+    struct testfilter source;
+    IMemAllocator *allocator;
+    IMediaControl *control;
+    IMemInputPin *input;
+    OAFilterState state;
+    IPin *pin = NULL;
+    HWND window;
+    HRESULT hr;
+    ULONG ref;
+
+    testfilter_init(&source);
+
+    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    window = CreateWindowA("static", "quartz_test", WS_OVERLAPPEDWINDOW, 0, 0,
+            rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, NULL, NULL);
+    if (!(device = create_device(window)))
+    {
+        IBaseFilter_Release(filter);
+        DestroyWindow(window);
+        return;
+    }
+
+    IBaseFilter_QueryInterface(filter, &IID_IVMRSurfaceAllocatorNotify9, (void **)&notify);
+    presenter.notify = notify;
+
+    hr = IVMRSurfaceAllocatorNotify9_AdviseSurfaceAllocator(notify, 0xabacab,
+            &presenter.IVMRSurfaceAllocator9_iface);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IVMRSurfaceAllocatorNotify9_SetD3DDevice(notify, device, MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY));
+    if (hr == E_NOINTERFACE)
+    {
+        win_skip("Direct3D does not support video rendering.\n");
+        goto out;
+    }
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    IDirect3DDevice9_Release(device);
+
+    device = create_device(window);
+    ok(device != NULL, "Couldn't create device\n");
+
+    hr = IVMRSurfaceAllocatorNotify9_ChangeD3DDevice(notify, device, MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY));
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    presenter.device = device;
+    presenter.got_PresentImage = 0;
+
+    IFilterGraph2_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
+    IFilterGraph2_AddFilter(graph, filter, NULL);
+
+    IBaseFilter_FindPin(filter, L"VMR Input0", &pin);
+    hr = IFilterGraph2_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &req_mt);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    IPin_QueryInterface(pin, &IID_IMemInputPin, (void **)&input);
+
+    hr = IMemInputPin_GetAllocator(input, &allocator);
+    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    if (hr == VFW_E_NO_ALLOCATOR)
+    {
+        CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
+                &IID_IMemAllocator, (void **)&allocator);
+
+        hr = IMemInputPin_NotifyAllocator(input, allocator, TRUE);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    }
+    hr = IMemAllocator_SetProperties(allocator, &req_props, &ret_props);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IMemAllocator_Commit(allocator);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    IFilterGraph2_QueryInterface(graph, &IID_IMediaControl, (void **)&control);
+    hr = IMediaControl_Run(control);
+    ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
+
+    join_thread(send_frame(input));
+
+    hr = IMediaControl_GetState(control, 100, &state);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ok(presenter.got_PresentImage >= 1, "Got %u calls to PresentImage().\n", presenter.got_PresentImage);
+    IMediaControl_Release(control);
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    IMemAllocator_Release(allocator);
+    IMemInputPin_Release(input);
+    IPin_Release(pin);
+
+out:
+    ref = IFilterGraph2_Release(graph);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    IVMRSurfaceAllocatorNotify9_Release(notify);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IDirect3DDevice9_Release(device);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    DestroyWindow(window);
+}
+
 START_TEST(vmr9)
 {
     IBaseFilter *filter;
@@ -4303,6 +4477,8 @@ START_TEST(vmr9)
     test_windowless_size();
     test_mixing_prefs();
     test_unconnected_eos();
+    test_notifyevent();
+    test_changed3ddevice();
 
     CoUninitialize();
 }

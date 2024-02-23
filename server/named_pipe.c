@@ -183,7 +183,7 @@ static const struct object_ops pipe_server_ops =
     NULL,                         /* unlink_name */
     pipe_server_open_file,        /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
-    no_close_handle,              /* close_handle */
+    async_close_obj_handle,       /* close_handle */
     pipe_server_destroy           /* destroy */
 };
 
@@ -229,7 +229,7 @@ static const struct object_ops pipe_client_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
-    no_close_handle,              /* close_handle */
+    async_close_obj_handle,       /* close_handle */
     pipe_end_destroy              /* destroy */
 };
 
@@ -608,6 +608,17 @@ static void pipe_end_flush( struct fd *fd, struct async *async )
     }
 }
 
+static data_size_t pipe_end_get_avail( struct pipe_end *pipe_end )
+{
+    struct pipe_message *message;
+    data_size_t avail = 0;
+
+    LIST_FOR_EACH_ENTRY( message, &pipe_end->message_queue, struct pipe_message, entry )
+        avail += message->iosb->in_size - message->read_pos;
+
+    return avail;
+}
+
 static void pipe_end_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class )
 {
     struct pipe_end *pipe_end = get_fd_user( fd );
@@ -680,8 +691,6 @@ static void pipe_end_get_file_info( struct fd *fd, obj_handle_t handle, unsigned
     case FilePipeLocalInformation:
         {
             FILE_PIPE_LOCAL_INFORMATION *pipe_info;
-            struct pipe_message *message;
-            data_size_t avail = 0;
 
             if (!(get_handle_access( current->process, handle) & FILE_READ_ATTRIBUTES))
             {
@@ -719,15 +728,43 @@ static void pipe_end_get_file_info( struct fd *fd, obj_handle_t handle, unsigned
             pipe_info->CurrentInstances    = pipe->instances;
             pipe_info->InboundQuota        = pipe->insize;
 
-            LIST_FOR_EACH_ENTRY( message, &pipe_end->message_queue, struct pipe_message, entry )
-                avail += message->iosb->in_size - message->read_pos;
-            pipe_info->ReadDataAvailable   = avail;
+            pipe_info->ReadDataAvailable   = pipe_end_get_avail( pipe_end );
 
             pipe_info->OutboundQuota       = pipe->outsize;
             pipe_info->WriteQuotaAvailable = 0; /* FIXME */
             pipe_info->NamedPipeState      = pipe_end->state;
             pipe_info->NamedPipeEnd        = pipe_end->obj.ops == &pipe_server_ops
                 ? FILE_PIPE_SERVER_END : FILE_PIPE_CLIENT_END;
+            break;
+        }
+    case FileStandardInformation:
+        {
+            FILE_STANDARD_INFORMATION *std_info;
+
+            if (!(get_handle_access( current->process, handle) & FILE_READ_ATTRIBUTES))
+            {
+                set_error( STATUS_ACCESS_DENIED );
+                return;
+            }
+
+            if (get_reply_max_size() < sizeof(*std_info))
+            {
+                set_error( STATUS_INFO_LENGTH_MISMATCH );
+                return;
+            }
+
+            if (!pipe)
+            {
+                set_error( STATUS_PIPE_DISCONNECTED );
+                return;
+            }
+
+            if (!(std_info = set_reply_data_size( sizeof(*std_info) ))) return;
+            std_info->AllocationSize.QuadPart = pipe->outsize + pipe->insize;
+            std_info->EndOfFile.QuadPart      = pipe_end_get_avail( pipe_end );
+            std_info->NumberOfLinks           = 1; /* FIXME */
+            std_info->DeletePending           = 0; /* FIXME */
+            std_info->Directory               = 0;
             break;
         }
     default:
@@ -1413,12 +1450,25 @@ DECL_HANDLER(create_named_pipe)
         if (!(root = get_handle_obj( current->process, objattr->rootdir, 0, NULL ))) return;
     }
 
-    pipe = create_named_object( root, &named_pipe_ops, &name, objattr->attributes | OBJ_OPENIF, NULL );
+    switch (req->disposition)
+    {
+    case FILE_OPEN:
+        pipe = open_named_object( root, &named_pipe_ops, &name, objattr->attributes );
+        break;
+    case FILE_CREATE:
+    case FILE_OPEN_IF:
+        pipe = create_named_object( root, &named_pipe_ops, &name, objattr->attributes | OBJ_OPENIF, NULL );
+        break;
+    default:
+        pipe = NULL;
+        set_error( STATUS_INVALID_PARAMETER );
+        break;
+    }
 
     if (root) release_object( root );
     if (!pipe) return;
 
-    if (get_error() != STATUS_OBJECT_NAME_EXISTS)
+    if (get_error() != STATUS_OBJECT_NAME_EXISTS && req->disposition != FILE_OPEN)
     {
         /* initialize it if it didn't already exist */
         pipe->instances = 0;
@@ -1434,6 +1484,7 @@ DECL_HANDLER(create_named_pipe)
                                                 GROUP_SECURITY_INFORMATION |
                                                 DACL_SECURITY_INFORMATION |
                                                 SACL_SECURITY_INFORMATION );
+        reply->created = 1;
     }
     else
     {
@@ -1443,7 +1494,7 @@ DECL_HANDLER(create_named_pipe)
             release_object( pipe );
             return;
         }
-        if (pipe->sharing != req->sharing)
+        if (pipe->sharing != req->sharing || req->disposition == FILE_CREATE)
         {
             set_error( STATUS_ACCESS_DENIED );
             release_object( pipe );

@@ -21,29 +21,202 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 #include "msvcrt.h"
+#include "mtdll.h"
+#include <winnls.h>
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
+int env_init(BOOL unicode, BOOL modif)
+{
+    if (!unicode && !MSVCRT___initenv)
+    {
+        char *environ_strings = GetEnvironmentStringsA();
+        int count = 1, len = 1, i = 0; /* keep space for the trailing NULLS */
+        char *ptr;
+
+        for (ptr = environ_strings; *ptr; ptr += strlen(ptr) + 1)
+        {
+            /* Don't count environment variables starting with '=' which are command shell specific */
+            if (*ptr != '=') count++;
+            len += strlen(ptr) + 1;
+        }
+        MSVCRT___initenv = malloc(count * sizeof(*MSVCRT___initenv) + len);
+        if (!MSVCRT___initenv)
+        {
+            FreeEnvironmentStringsA(environ_strings);
+            return -1;
+        }
+
+        memcpy(&MSVCRT___initenv[count], environ_strings, len);
+        for (ptr = (char *)&MSVCRT___initenv[count]; *ptr; ptr += strlen(ptr) + 1)
+        {
+            /* Skip special environment strings set by the command shell */
+            if (*ptr != '=') MSVCRT___initenv[i++] = ptr;
+        }
+        MSVCRT___initenv[i] = NULL;
+        FreeEnvironmentStringsA(environ_strings);
+
+        MSVCRT__environ = MSVCRT___initenv;
+    }
+
+    if (!unicode && modif && MSVCRT__environ == MSVCRT___initenv)
+    {
+        int i = 0;
+
+        while(MSVCRT___initenv[i]) i++;
+        MSVCRT__environ = malloc((i + 1) * sizeof(char *));
+        if (!MSVCRT__environ) return -1;
+        for (i = 0; MSVCRT___initenv[i]; i++)
+            MSVCRT__environ[i] = strdup(MSVCRT___initenv[i]);
+        MSVCRT__environ[i] = NULL;
+    }
+
+    if (unicode && !MSVCRT___winitenv)
+    {
+        wchar_t *wenviron_strings = GetEnvironmentStringsW();
+        int count = 1, len = 1, i = 0; /* keep space for the trailing NULLS */
+        wchar_t *wptr;
+
+        for (wptr = wenviron_strings; *wptr; wptr += wcslen(wptr) + 1)
+        {
+            /* Don't count environment variables starting with '=' which are command shell specific */
+            if (*wptr != '=') count++;
+            len += wcslen(wptr) + 1;
+        }
+        MSVCRT___winitenv = malloc(count * sizeof(*MSVCRT___winitenv) + len * sizeof(wchar_t));
+        if (!MSVCRT___winitenv)
+        {
+            FreeEnvironmentStringsW(wenviron_strings);
+            return -1;
+        }
+
+        memcpy(&MSVCRT___winitenv[count], wenviron_strings, len * sizeof(wchar_t));
+        for (wptr = (wchar_t *)&MSVCRT___winitenv[count]; *wptr; wptr += wcslen(wptr) + 1)
+        {
+            /* Skip special environment strings set by the command shell */
+            if (*wptr != '=') MSVCRT___winitenv[i++] = wptr;
+        }
+        MSVCRT___winitenv[i] = NULL;
+        FreeEnvironmentStringsW(wenviron_strings);
+
+        MSVCRT__wenviron = MSVCRT___winitenv;
+    }
+
+    if (unicode && modif && MSVCRT__wenviron == MSVCRT___winitenv)
+    {
+        int i = 0;
+
+        while(MSVCRT___winitenv[i]) i++;
+        MSVCRT__wenviron = malloc((i + 1) * sizeof(wchar_t *));
+        if (!MSVCRT__wenviron) return -1;
+        for (i = 0; MSVCRT___winitenv[i]; i++)
+            MSVCRT__wenviron[i] = wcsdup(MSVCRT___winitenv[i]);
+        MSVCRT__wenviron[i] = NULL;
+    }
+
+    return 0;
+}
+
+static int env_get_index(const char *name)
+{
+    int i, len;
+
+    len = strlen(name);
+    for (i = 0; MSVCRT__environ[i]; i++)
+    {
+        if (!strnicmp(name, MSVCRT__environ[i], len) && MSVCRT__environ[i][len] == '=')
+            return i;
+    }
+    return i;
+}
+
+static int wenv_get_index(const wchar_t *name)
+{
+    int i, len;
+
+    len = wcslen(name);
+    for (i = 0; MSVCRT__wenviron[i]; i++)
+    {
+        if (!wcsnicmp(name, MSVCRT__wenviron[i], len) && MSVCRT__wenviron[i][len] == '=')
+            return i;
+    }
+    return i;
+}
+
+static int env_set(char **env, wchar_t **wenv)
+{
+    wchar_t *weq = wcschr(*wenv, '=');
+    char *eq = strchr(*env, '=');
+    int idx;
+
+    *weq = 0;
+    if (!SetEnvironmentVariableW(*wenv, weq[1] ? weq + 1 : NULL) &&
+            GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+        return -1;
+
+    if (env_init(FALSE, TRUE)) return -1;
+    *eq = 0;
+    idx = env_get_index(*env);
+    *eq = '=';
+    if (!eq[1])
+    {
+        for(; MSVCRT__environ[idx]; idx++)
+            MSVCRT__environ[idx] = MSVCRT__environ[idx + 1];
+    }
+    else if (MSVCRT__environ[idx])
+    {
+        free(MSVCRT__environ[idx]);
+        MSVCRT__environ[idx] = *env;
+        *env = NULL;
+    }
+    else
+    {
+        char **new_env = realloc(MSVCRT__environ, (idx + 2) * sizeof(*MSVCRT__environ));
+        if (!new_env) return -1;
+        MSVCRT__environ = new_env;
+        MSVCRT__environ[idx] = *env;
+        MSVCRT__environ[idx + 1] = NULL;
+        *env = NULL;
+    }
+
+    if (!MSVCRT__wenviron) return 0;
+    if (MSVCRT__wenviron == MSVCRT___winitenv)
+        if (env_init(TRUE, TRUE)) return -1;
+    idx = wenv_get_index(*wenv);
+    *weq = '=';
+    if (!weq[1])
+    {
+        for(; MSVCRT__wenviron[idx]; idx++)
+            MSVCRT__wenviron[idx] = MSVCRT__wenviron[idx + 1];
+    }
+    else if (MSVCRT__wenviron[idx])
+    {
+        free(MSVCRT__wenviron[idx]);
+        MSVCRT__wenviron[idx] = *wenv;
+        *wenv = NULL;
+    }
+    else
+    {
+        wchar_t **new_env = realloc(MSVCRT__wenviron, (idx + 2) * sizeof(*MSVCRT__wenviron));
+        if (!new_env) return -1;
+        MSVCRT__wenviron = new_env;
+        MSVCRT__wenviron[idx] = *wenv;
+        MSVCRT__wenviron[idx + 1] = NULL;
+        *wenv = NULL;
+    }
+    return 0;
+}
+
 static char * getenv_helper(const char *name)
 {
-    char **env;
-    size_t len;
+    int idx;
 
     if (!name) return NULL;
-    len = strlen(name);
 
-    for (env = MSVCRT__environ; *env; env++)
-    {
-        char *str = *env;
-        char *pos = strchr(str,'=');
-        if (pos && ((pos - str) == len) && !_strnicmp(str, name, len))
-        {
-            TRACE("(%s): got %s\n", debugstr_a(name), debugstr_a(pos + 1));
-            return pos + 1;
-        }
-    }
-    return NULL;
+    idx = env_get_index(name);
+    if (!MSVCRT__environ[idx]) return NULL;
+    return strchr(MSVCRT__environ[idx], '=') + 1;
 }
 
 /*********************************************************************
@@ -51,34 +224,26 @@ static char * getenv_helper(const char *name)
  */
 char * CDECL getenv(const char *name)
 {
+    char *ret;
+
     if (!MSVCRT_CHECK_PMT(name != NULL)) return NULL;
 
-    return getenv_helper(name);
+    _lock(_ENV_LOCK);
+    ret = getenv_helper(name);
+    _unlock(_ENV_LOCK);
+    return ret;
 }
 
 static wchar_t * wgetenv_helper(const wchar_t *name)
 {
-    wchar_t **env;
-    size_t len;
+    int idx;
 
     if (!name) return NULL;
-    len = wcslen(name);
+    if (env_init(TRUE, FALSE)) return NULL;
 
-    /* Initialize the _wenviron array if it's not already created. */
-    if (!MSVCRT__wenviron)
-        MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(NULL);
-
-    for (env = MSVCRT__wenviron; *env; env++)
-    {
-        wchar_t *str = *env;
-        wchar_t *pos = wcschr(str,'=');
-        if (pos && ((pos - str) == len) && !_wcsnicmp(str, name, len))
-        {
-            TRACE("(%s): got %s\n", debugstr_w(name), debugstr_w(pos + 1));
-            return pos + 1;
-        }
-    }
-    return NULL;
+    idx = wenv_get_index(name);
+    if (!MSVCRT__wenviron[idx]) return NULL;
+    return wcschr(MSVCRT__wenviron[idx], '=') + 1;
 }
 
 /*********************************************************************
@@ -86,9 +251,107 @@ static wchar_t * wgetenv_helper(const wchar_t *name)
  */
 wchar_t * CDECL _wgetenv(const wchar_t *name)
 {
+    wchar_t *ret;
+
     if (!MSVCRT_CHECK_PMT(name != NULL)) return NULL;
 
-    return wgetenv_helper(name);
+    _lock(_ENV_LOCK);
+    ret = wgetenv_helper(name);
+    _unlock(_ENV_LOCK);
+    return ret;
+}
+
+static int putenv_helper(const char *name, const char *val, const char *eq)
+{
+    wchar_t *wenv;
+    char *env;
+    int r;
+
+    if (eq)
+    {
+        env = strdup(name);
+        if (!env) return -1;
+    }
+    else
+    {
+        int name_len = strlen(name);
+
+        r = strlen(val);
+        env = malloc(name_len + r + 2);
+        if (!env) return -1;
+        memcpy(env, name, name_len);
+        env[name_len] = '=';
+        strcpy(env + name_len + 1, val);
+    }
+
+    wenv = msvcrt_wstrdupa(env);
+    if (!wenv)
+    {
+        free(env);
+        return -1;
+    }
+
+    _lock(_ENV_LOCK);
+    r = env_set(&env, &wenv);
+    _unlock(_ENV_LOCK);
+    free(env);
+    free(wenv);
+    return r;
+}
+
+static char *msvcrt_astrdupw(const wchar_t *wstr)
+{
+    const unsigned int len = WideCharToMultiByte(CP_ACP, 0, wstr, -1, NULL, 0, NULL, NULL);
+    char *str = malloc(len * sizeof(char));
+
+    if (!str)
+        return NULL;
+    WideCharToMultiByte(CP_ACP, 0, wstr, -1, str, len, NULL, NULL);
+    return str;
+}
+
+
+static int wputenv_helper(const wchar_t *name, const wchar_t *val, const wchar_t *eq)
+{
+    wchar_t *wenv;
+    char *env;
+    int r;
+
+    _lock(_ENV_LOCK);
+    r = env_init(TRUE, TRUE);
+    _unlock(_ENV_LOCK);
+    if (r) return -1;
+
+    if (eq)
+    {
+        wenv = wcsdup(name);
+        if (!wenv) return -1;
+    }
+    else
+    {
+        int name_len = wcslen(name);
+
+        r = wcslen(val);
+        wenv = malloc((name_len + r + 2) * sizeof(wchar_t));
+        if (!wenv) return -1;
+        memcpy(wenv, name, name_len * sizeof(wchar_t));
+        wenv[name_len] = '=';
+        wcscpy(wenv + name_len + 1, val);
+    }
+
+    env = msvcrt_astrdupw(wenv);
+    if (!env)
+    {
+        free(wenv);
+        return -1;
+    }
+
+    _lock(_ENV_LOCK);
+    r = env_set(&env, &wenv);
+    _unlock(_ENV_LOCK);
+    free(env);
+    free(wenv);
+    return r;
 }
 
 /*********************************************************************
@@ -96,45 +359,14 @@ wchar_t * CDECL _wgetenv(const wchar_t *name)
  */
 int CDECL _putenv(const char *str)
 {
- char *name, *value;
- char *dst;
- int ret;
+    const char *eq;
 
- TRACE("%s\n", debugstr_a(str));
+    TRACE("%s\n", debugstr_a(str));
 
- if (!str)
-   return -1;
-   
- name = HeapAlloc(GetProcessHeap(), 0, strlen(str) + 1);
- if (!name)
-   return -1;
- dst = name;
- while (*str && *str != '=')
-  *dst++ = *str++;
- if (!*str++)
- {
-   ret = -1;
-   goto finish;
- }
- *dst++ = '\0';
- value = dst;
- while (*str)
-  *dst++ = *str++;
- *dst = '\0';
+    if (!str || !(eq = strchr(str, '=')))
+        return -1;
 
- ret = SetEnvironmentVariableA(name, value[0] ? value : NULL) ? 0 : -1;
-
- /* _putenv returns success on deletion of nonexistent variable, unlike [Rtl]SetEnvironmentVariable */
- if ((ret == -1) && (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) ret = 0;
-
- MSVCRT__environ = msvcrt_SnapshotOfEnvironmentA(MSVCRT__environ);
- /* Update the __p__wenviron array only when already initialized */
- if (MSVCRT__wenviron)
-   MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(MSVCRT__wenviron);
-   
-finish:
- HeapFree(GetProcessHeap(), 0, name);
- return ret;
+    return putenv_helper(str, NULL, eq);
 }
 
 /*********************************************************************
@@ -142,42 +374,14 @@ finish:
  */
 int CDECL _wputenv(const wchar_t *str)
 {
- wchar_t *name, *value;
- wchar_t *dst;
- int ret;
+    const wchar_t *eq;
 
- TRACE("%s\n", debugstr_w(str));
+    TRACE("%s\n", debugstr_w(str));
 
- if (!str)
-   return -1;
- name = HeapAlloc(GetProcessHeap(), 0, (wcslen(str) + 1) * sizeof(wchar_t));
- if (!name)
-   return -1;
- dst = name;
- while (*str && *str != '=')
-  *dst++ = *str++;
- if (!*str++)
- {
-   ret = -1;
-   goto finish;
- }
- *dst++ = 0;
- value = dst;
- while (*str)
-  *dst++ = *str++;
- *dst = 0;
+    if (!str || !(eq = wcschr(str, '=')))
+        return -1;
 
- ret = SetEnvironmentVariableW(name, value[0] ? value : NULL) ? 0 : -1;
-
- /* _putenv returns success on deletion of nonexistent variable, unlike [Rtl]SetEnvironmentVariable */
- if ((ret == -1) && (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) ret = 0;
-
- MSVCRT__environ = msvcrt_SnapshotOfEnvironmentA(MSVCRT__environ);
- MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(MSVCRT__wenviron);
-
-finish:
- HeapFree(GetProcessHeap(), 0, name);
- return ret;
+    return wputenv_helper(str, NULL, eq);
 }
 
 /*********************************************************************
@@ -192,18 +396,11 @@ errno_t CDECL _putenv_s(const char *name, const char *value)
     if (!MSVCRT_CHECK_PMT(name != NULL)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(value != NULL)) return EINVAL;
 
-    if (!SetEnvironmentVariableA(name, value[0] ? value : NULL))
+    if (putenv_helper(name, value, NULL) < 0)
     {
-        /* _putenv returns success on deletion of nonexistent variable */
-        if (GetLastError() != ERROR_ENVVAR_NOT_FOUND)
-        {
-            msvcrt_set_errno(GetLastError());
-            ret = *_errno();
-        }
+        msvcrt_set_errno(GetLastError());
+        ret = *_errno();
     }
-
-    MSVCRT__environ = msvcrt_SnapshotOfEnvironmentA(MSVCRT__environ);
-    MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(MSVCRT__wenviron);
 
     return ret;
 }
@@ -220,18 +417,11 @@ errno_t CDECL _wputenv_s(const wchar_t *name, const wchar_t *value)
     if (!MSVCRT_CHECK_PMT(name != NULL)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(value != NULL)) return EINVAL;
 
-    if (!SetEnvironmentVariableW(name, value[0] ? value : NULL))
+    if (wputenv_helper(name, value, NULL) < 0)
     {
-        /* _putenv returns success on deletion of nonexistent variable */
-        if (GetLastError() != ERROR_ENVVAR_NOT_FOUND)
-        {
-            msvcrt_set_errno(GetLastError());
-            ret = *_errno();
-        }
+        msvcrt_set_errno(GetLastError());
+        ret = *_errno();
     }
-
-    MSVCRT__environ = msvcrt_SnapshotOfEnvironmentA(MSVCRT__environ);
-    MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(MSVCRT__wenviron);
 
     return ret;
 }
@@ -249,15 +439,25 @@ int CDECL _dupenv_s(char **buffer, size_t *numberOfElements, const char *varname
     if (!MSVCRT_CHECK_PMT(buffer != NULL)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(varname != NULL)) return EINVAL;
 
-    if (!(e = getenv(varname))) return *_errno() = EINVAL;
+    _lock(_ENV_LOCK);
+    if (!(e = getenv(varname)))
+    {
+        _unlock(_ENV_LOCK);
+        *buffer = NULL;
+        if (numberOfElements) *numberOfElements = 0;
+        return 0;
+    }
 
     sz = strlen(e) + 1;
-    if (!(*buffer = malloc(sz)))
+    *buffer = malloc(sz);
+    if (*buffer) strcpy(*buffer, e);
+    _unlock(_ENV_LOCK);
+
+    if (!*buffer)
     {
         if (numberOfElements) *numberOfElements = 0;
         return *_errno() = ENOMEM;
     }
-    strcpy(*buffer, e);
     if (numberOfElements) *numberOfElements = sz;
     return 0;
 }
@@ -274,15 +474,25 @@ int CDECL _wdupenv_s(wchar_t **buffer, size_t *numberOfElements,
     if (!MSVCRT_CHECK_PMT(buffer != NULL)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(varname != NULL)) return EINVAL;
 
-    if (!(e = _wgetenv(varname))) return *_errno() = EINVAL;
+    _lock(_ENV_LOCK);
+    if (!(e = _wgetenv(varname)))
+    {
+        _unlock(_ENV_LOCK);
+        *buffer = NULL;
+        if (numberOfElements) *numberOfElements = 0;
+        return 0;
+    }
 
     sz = wcslen(e) + 1;
-    if (!(*buffer = malloc(sz * sizeof(wchar_t))))
+    *buffer = malloc(sz * sizeof(wchar_t));
+    if (*buffer) wcscpy(*buffer, e);
+    _unlock(_ENV_LOCK);
+
+    if (!*buffer)
     {
         if (numberOfElements) *numberOfElements = 0;
         return *_errno() = ENOMEM;
     }
-    wcscpy(*buffer, e);
     if (numberOfElements) *numberOfElements = sz;
     return 0;
 }
@@ -301,12 +511,17 @@ int CDECL getenv_s(size_t *ret_len, char* buffer, size_t len, const char *varnam
     if (!MSVCRT_CHECK_PMT((buffer && len > 0) || (!buffer && !len))) return EINVAL;
     if (buffer) buffer[0] = 0;
 
-    if (!(e = getenv_helper(varname))) return 0;
-    *ret_len = strlen(e) + 1;
-    if (!len) return 0;
-    if (len < *ret_len) return ERANGE;
+    _lock(_ENV_LOCK);
+    e = getenv_helper(varname);
+    if (e)
+    {
+        *ret_len = strlen(e) + 1;
+        if (len >= *ret_len) strcpy(buffer, e);
+    }
+    _unlock(_ENV_LOCK);
 
-    strcpy(buffer, e);
+    if (!e || !len) return 0;
+    if (len < *ret_len) return ERANGE;
     return 0;
 }
 
@@ -323,12 +538,17 @@ int CDECL _wgetenv_s(size_t *ret_len, wchar_t *buffer, size_t len,
     if (!MSVCRT_CHECK_PMT((buffer && len > 0) || (!buffer && !len))) return EINVAL;
     if (buffer) buffer[0] = 0;
 
-    if (!(e = wgetenv_helper(varname))) return 0;
-    *ret_len = wcslen(e) + 1;
-    if (!len) return 0;
-    if (len < *ret_len) return ERANGE;
+    _lock(_ENV_LOCK);
+    e = wgetenv_helper(varname);
+    if (e)
+    {
+        *ret_len = wcslen(e) + 1;
+        if (len >= *ret_len) wcscpy(buffer, e);
+    }
+    _unlock(_ENV_LOCK);
 
-    wcscpy(buffer, e);
+    if (!e || !len) return 0;
+    if (len < *ret_len) return ERANGE;
     return 0;
 }
 

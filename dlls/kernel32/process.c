@@ -209,31 +209,6 @@ void WINAPI ExitProcess( DWORD status )
 
 #endif
 
-#ifdef __i386__
-/* CX HACK 22643 */
-static BOOL WINAPI check_is_steamwebhelper( INIT_ONCE *once, void *param, void **ctx )
-{
-    BOOL *is_swh = param;
-    WCHAR name[MAX_PATH], *module_exe;
-    if (GetModuleFileNameW(NULL, name, ARRAYSIZE(name)))
-    {
-        module_exe = wcsrchr(name, '\\');
-        module_exe = module_exe ? module_exe + 1 : name;
-        *is_swh = !wcsicmp(module_exe, L"steamwebhelper.exe");
-    }
-
-    return TRUE;
-}
-
-static BOOL is_steamwebhelper(void)
-{
-    static BOOL is_swh = FALSE;
-    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
-    InitOnceExecuteOnce( &once, check_is_steamwebhelper, &is_swh, NULL );
-    return is_swh;
-}
-#endif
-
 /***********************************************************************
  * GetExitCodeProcess           [KERNEL32.@]
  *
@@ -254,17 +229,6 @@ BOOL WINAPI GetExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
     if (!set_ntstatus( NtQueryInformationProcess( hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL )))
         return FALSE;
     if (lpExitCode) *lpExitCode = pbi.ExitStatus;
-#ifdef __i386__
-    /* CX HACK 22643:
-     * A Rosetta bug in macOS Monterey causes steamwebhelpers to die,
-     * return exit code 1 so they get restarted.
-     */
-    if (lpExitCode && *lpExitCode == 0 && is_steamwebhelper())
-    {
-        TRACE("For steamwebhelper, returning exit code 1\n");
-        *lpExitCode = 1;
-    }
-#endif
     return TRUE;
 }
 
@@ -458,11 +422,19 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateActCtxA( const ACTCTXA *actctx )
 
     TRACE("%p %08lx\n", actctx, actctx ? actctx->dwFlags : 0);
 
-    if (!actctx || actctx->cbSize != sizeof(*actctx))
+#define CHECK_LIMIT( field ) (actctx->cbSize >= RTL_SIZEOF_THROUGH_FIELD( ACTCTXA, field ))
+    if (!actctx || !CHECK_LIMIT( lpSource ) ||
+        ((actctx->dwFlags & ACTCTX_FLAG_PROCESSOR_ARCHITECTURE_VALID) && !CHECK_LIMIT( wProcessorArchitecture )) ||
+        ((actctx->dwFlags & ACTCTX_FLAG_LANGID_VALID) && !CHECK_LIMIT( wLangId )) ||
+        ((actctx->dwFlags & ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID) && !CHECK_LIMIT( lpAssemblyDirectory )) ||
+        ((actctx->dwFlags & ACTCTX_FLAG_RESOURCE_NAME_VALID) && !CHECK_LIMIT( lpResourceName )) ||
+        ((actctx->dwFlags & ACTCTX_FLAG_APPLICATION_NAME_VALID) && !CHECK_LIMIT( lpApplicationName )) ||
+        ((actctx->dwFlags & ACTCTX_FLAG_HMODULE_VALID) && !CHECK_LIMIT( hModule )))
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return INVALID_HANDLE_VALUE;
     }
+#undef CHECK_LIMIT
 
     actw.cbSize = sizeof(actw);
     actw.dwFlags = actctx->dwFlags;
@@ -774,6 +746,18 @@ BOOL WINAPI SetFirmwareEnvironmentVariableW(const WCHAR *name, const WCHAR *guid
     FIXME("stub: %s %s %p %lu\n", debugstr_w(name), debugstr_w(guid), buffer, size);
     SetLastError(ERROR_INVALID_FUNCTION);
     return FALSE;
+}
+
+/***********************************************************************
+ *           GetFirmwareType     (KERNEL32.@)
+ */
+BOOL WINAPI GetFirmwareType(FIRMWARE_TYPE *type)
+{
+    if (!type)
+        return FALSE;
+
+    *type = FirmwareTypeUnknown;
+    return TRUE;
 }
 
 /**********************************************************************

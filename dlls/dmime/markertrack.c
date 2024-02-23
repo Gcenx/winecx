@@ -18,7 +18,6 @@
  */
 
 #include "dmime_private.h"
-#include "dmobject.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmime);
 
@@ -77,8 +76,7 @@ static ULONG WINAPI IDirectMusicTrackImpl_Release(IDirectMusicTrack *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref) {
-        HeapFree(GetProcessHeap(), 0, This);
-        DMIME_UnlockModule();
+        free(This);
     }
 
     return ref;
@@ -226,18 +224,14 @@ HRESULT create_dmmarkertrack(REFIID lpcGUID, void **ppobj)
     IDirectMusicMarkerTrack *track;
     HRESULT hr;
 
-    track = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*track));
-    if (!track) {
-        *ppobj = NULL;
-        return E_OUTOFMEMORY;
-    }
+    *ppobj = NULL;
+    if (!(track = calloc(1, sizeof(*track)))) return E_OUTOFMEMORY;
     track->IDirectMusicTrack_iface.lpVtbl = &dmtrack_vtbl;
     track->ref = 1;
     dmobject_init(&track->dmobj, &CLSID_DirectMusicMarkerTrack,
                   (IUnknown *)&track->IDirectMusicTrack_iface);
     track->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
 
-    DMIME_LockModule();
     hr = IDirectMusicTrack_QueryInterface(&track->IDirectMusicTrack_iface, lpcGUID, ppobj);
     IDirectMusicTrack_Release(&track->IDirectMusicTrack_iface);
 

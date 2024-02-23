@@ -44,7 +44,6 @@
 #include "ddk/hidsdi.h"
 #include "ddk/hidpi.h"
 #include "wine/test.h"
-#include "wine/heap.h"
 #include "wine/mssign.h"
 
 #include "driver.h"
@@ -386,29 +385,29 @@ static void cat_okfile(void)
     SetFilePointer(okfile, 0, NULL, FILE_BEGIN);
     SetEndOfFile(okfile);
 
+    InterlockedAdd(&winetest_successes, InterlockedExchange(&test_data->successes, 0));
     winetest_add_failures(InterlockedExchange(&test_data->failures, 0));
+    InterlockedAdd(&winetest_todo_successes, InterlockedExchange(&test_data->todo_successes, 0));
     winetest_add_failures(InterlockedExchange(&test_data->todo_failures, 0));
+    InterlockedAdd(&winetest_skipped, InterlockedExchange(&test_data->skipped, 0));
 }
 
 static ULONG64 modified_value;
 
 static void main_test(void)
 {
-    struct main_test_input *test_input;
+    struct main_test_input test_input;
     DWORD size;
     BOOL res;
 
-    test_input = heap_alloc( sizeof(*test_input) );
-    test_input->process_id = GetCurrentProcessId();
-    test_input->teststr_offset = (SIZE_T)((BYTE *)&teststr - (BYTE *)NtCurrentTeb()->Peb->ImageBaseAddress);
-    test_input->modified_value = &modified_value;
+    test_input.process_id = GetCurrentProcessId();
+    test_input.teststr_offset = (SIZE_T)((BYTE *)&teststr - (BYTE *)NtCurrentTeb()->Peb->ImageBaseAddress);
+    test_input.modified_value = &modified_value;
     modified_value = 0;
 
-    res = DeviceIoControl(device, IOCTL_WINETEST_MAIN_TEST, test_input, sizeof(*test_input), NULL, 0, &size, NULL);
+    res = DeviceIoControl(device, IOCTL_WINETEST_MAIN_TEST, &test_input, sizeof(test_input), NULL, 0, &size, NULL);
     ok(res, "DeviceIoControl failed: %lu\n", GetLastError());
     ok(!size, "got size %lu\n", size);
-
-    heap_free(test_input);
 }
 
 static void test_basic_ioctl(void)
@@ -673,7 +672,7 @@ static void do_return_status(ULONG ioctl, struct return_status_params *params)
     }
     else
     {
-        ok(GetLastError() == RtlNtStatusToDosError(expect_status), "got error %lu\n", GetLastError());
+        ok(GetLastError() == RtlNtStatusToDosErrorNoTeb(expect_status), "got error %lu\n", GetLastError());
     }
     if (NT_ERROR(expect_status))
         ok(size == 0xdeadf00d, "got size %lu\n", size);
@@ -1400,13 +1399,13 @@ static LRESULT WINAPI device_notify_proc(HWND window, UINT message, WPARAM wpara
             if (IsEqualGUID(&iface->dbcc_classguid, &bus_class))
             {
                 ++got_bus_arrival;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             else if (IsEqualGUID(&iface->dbcc_classguid, &child_class))
             {
                 ++got_child_arrival;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\wine#test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\Wine#Test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             break;
@@ -1428,13 +1427,13 @@ static LRESULT WINAPI device_notify_proc(HWND window, UINT message, WPARAM wpara
             if (IsEqualGUID(&iface->dbcc_classguid, &bus_class))
             {
                 ++got_bus_removal;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             else if (IsEqualGUID(&iface->dbcc_classguid, &child_class))
             {
                 ++got_child_removal;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\wine#test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\Wine#Test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             break;
@@ -1506,7 +1505,7 @@ static void test_pnp_devices(void)
 
     ret = SetupDiGetDeviceInstanceIdA(set, &device, buffer, sizeof(buffer), NULL);
     ok(ret, "failed to get device ID, error %#lx\n", GetLastError());
-    ok(!strcasecmp(buffer, "root\\winetest\\0"), "got ID %s\n", debugstr_a(buffer));
+    ok(!strcmp(buffer, "ROOT\\WINETEST\\0"), "got ID %s\n", debugstr_a(buffer));
 
     ret = SetupDiEnumDeviceInterfaces(set, NULL, &control_class, 0, &iface);
     ok(ret, "failed to get interface, error %#lx\n", GetLastError());
@@ -1517,7 +1516,7 @@ static void test_pnp_devices(void)
     iface_detail->cbSize = sizeof(*iface_detail);
     ret = SetupDiGetDeviceInterfaceDetailA(set, &iface, iface_detail, sizeof(buffer), NULL, NULL);
     ok(ret, "failed to get interface path, error %#lx\n", GetLastError());
-    ok(!strcasecmp(iface_detail->DevicePath, "\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}"),
+    ok(!strcmp(iface_detail->DevicePath, "\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}"),
             "wrong path %s\n", debugstr_a(iface_detail->DevicePath));
 
     SetupDiDestroyDeviceInfoList(set);
@@ -1614,7 +1613,7 @@ static void test_pnp_devices(void)
 
     ret = SetupDiGetDeviceInstanceIdA(set, &device, buffer, sizeof(buffer), NULL);
     ok(ret, "failed to get device ID, error %#lx\n", GetLastError());
-    ok(!strcasecmp(buffer, "wine\\test\\1"), "got ID %s\n", debugstr_a(buffer));
+    ok(!strcmp(buffer, "WINE\\TEST\\1"), "got ID %s\n", debugstr_a(buffer));
 
     ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CAPABILITIES,
             &type, (BYTE *)&dword, sizeof(dword), NULL);
@@ -1679,6 +1678,18 @@ static void test_pnp_devices(void)
         ok(type == REG_SZ, "got type %lu\n", type);
         ok(!strcmp(buffer, "\\Device\\winetest_pnp_1"), "got PDO name %s\n", debugstr_a(buffer));
     }
+
+    ret = SetupDiEnumDeviceInterfaces(set, NULL, &child_class, 0, &iface);
+    ok(ret, "failed to get interface, error %#lx\n", GetLastError());
+    ok(IsEqualGUID(&iface.InterfaceClassGuid, &child_class),
+            "wrong class %s\n", debugstr_guid(&iface.InterfaceClassGuid));
+    ok(iface.Flags == SPINT_ACTIVE, "got flags %#lx\n", iface.Flags);
+
+    iface_detail->cbSize = sizeof(*iface_detail);
+    ret = SetupDiGetDeviceInterfaceDetailA(set, &iface, iface_detail, sizeof(buffer), NULL, NULL);
+    ok(ret, "failed to get interface path, error %#lx\n", GetLastError());
+    ok(!strcmp(iface_detail->DevicePath, "\\\\?\\wine#test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
+            "wrong path %s\n", debugstr_a(iface_detail->DevicePath));
 
     SetupDiDestroyDeviceInfoList(set);
 
@@ -1863,7 +1874,7 @@ static void test_pnp_driver(struct testsign_context *ctx)
     GetFullPathNameA("winetest.inf", sizeof(path), path, NULL);
     ret = SetupCopyOEMInfA(path, NULL, 0, 0, dest, sizeof(dest), NULL, &filepart);
     ok(ret, "Failed to copy INF, error %#lx\n", GetLastError());
-    ret = SetupUninstallOEMInfA(filepart, 0, NULL);
+    ret = SetupUninstallOEMInfA(filepart, SUOI_FORCEDELETE, NULL);
     ok(ret, "Failed to uninstall INF, error %lu\n", GetLastError());
 
     ret = DeleteFileA("winetest.cat");

@@ -34,6 +34,10 @@
 
 #include "dinput_test.h"
 
+#include "initguid.h"
+
+DEFINE_GUID(GUID_keyboard_action_mapping,0x00000001,0x0002,0x0003,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b);
+
 struct enum_data
 {
     DWORD version;
@@ -42,43 +46,7 @@ struct enum_data
         IDirectInput8A *dinput8;
         IDirectInputA *dinput;
     };
-    DIACTIONFORMATA *lpdiaf;
-    IDirectInputDevice8A *keyboard;
-    IDirectInputDevice8A *mouse;
-    const char *username;
-    int ndevices;
-    HWND hwnd;
 };
-
-/* Dummy GUID */
-static const GUID ACTION_MAPPING_GUID = { 0x1, 0x2, 0x3, { 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb } };
-
-enum {
-    DITEST_AXIS,
-    DITEST_BUTTON,
-    DITEST_KEYBOARDSPACE,
-    DITEST_MOUSEBUTTON0,
-    DITEST_YAXIS
-};
-
-static DIACTIONA actionMapping[]=
-{
-  /* axis */
-  { 0, 0x01008A01 /* DIAXIS_DRIVINGR_STEER */,      0, { "Steer.\0" }   },
-  /* button */
-  { 1, 0x01000C01 /* DIBUTTON_DRIVINGR_SHIFTUP */,  0, { "Upshift.\0" } },
-  /* keyboard key */
-  { 2, DIKEYBOARD_SPACE,                            0, { "Missile.\0" } },
-  /* mouse button */
-  { 3, DIMOUSE_BUTTON0,                             0, { "Select\0" }   },
-  /* mouse axis */
-  { 4, DIMOUSE_YAXIS,                               0, { "Y Axis\0" }   }
-};
-/* By placing the memory pointed to by lptszActionName right before memory with PAGE_NOACCESS
- * one can find out that the regular ansi string termination is not respected by EnumDevicesBySemantics.
- * Adding a double termination, making it a valid wide string termination, made the test succeed.
- * Therefore it looks like ansi version of EnumDevicesBySemantics forwards the string to
- * the wide variant without conversation. */
 
 static void flush_events(void)
 {
@@ -116,7 +84,6 @@ static HRESULT create_dinput_device( DWORD version, const GUID *guid, IDirectInp
     ok( hr == DI_OK, "CreateDevice returned %#lx\n", hr );
 
     ref = IDirectInput_Release( dinput );
-    todo_wine
     ok( ref == 0, "Release returned %ld\n", ref );
 
     return DI_OK;
@@ -345,19 +312,20 @@ void test_overlapped_format( DWORD version )
 
 
     hr = IDirectInputDevice_Acquire( keyboard );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_overlapped_format\n", hr );
+    if (hr != DI_OK) goto cleanup;
 
     keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE, 0 );
     res = WaitForSingleObject( event, 100 );
     if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
     {
         keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
     }
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, 0 );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     count = 10;
@@ -368,7 +336,7 @@ void test_overlapped_format( DWORD version )
 
     /* press D */
     keybd_event( 0, DIK_D, KEYEVENTF_SCANCODE, 0 );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     count = 10;
@@ -388,7 +356,7 @@ void test_overlapped_format( DWORD version )
 
     /* release D */
     keybd_event( 0, DIK_D, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, 0 );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     count = 10;
@@ -406,19 +374,20 @@ void test_overlapped_format( DWORD version )
 
 
     hr = IDirectInputDevice_Acquire( keyboard );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_overlapped_format\n", hr );
+    if (hr != DI_OK) goto cleanup;
 
     keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE, 0 );
     res = WaitForSingleObject( event, 100 );
     if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
     {
         keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
     }
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, 0 );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     count = 10;
@@ -429,12 +398,14 @@ void test_overlapped_format( DWORD version )
 
     /* press D */
     keybd_event( 0, DIK_D, KEYEVENTF_SCANCODE, 0 );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
+    flaky_wine_if( GetForegroundWindow() != hwnd && version == 0x800 ) /* FIXME: fvwm sometimes steals input focus */
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     count = 10;
     hr = IDirectInputDevice_GetDeviceData( keyboard, data_size, NULL, &count, 0 );
     ok( hr == DI_OK, "GetDeviceData returned %#lx\n", hr );
+    flaky_wine_if( GetForegroundWindow() != hwnd && version == 0x800 ) /* FIXME: fvwm sometimes steals input focus */
     ok( count == 1, "got count %lu\n", count );
 
     memset( &state, 0xFF, sizeof(state) );
@@ -449,16 +420,20 @@ void test_overlapped_format( DWORD version )
 
     /* release D */
     keybd_event( 0, DIK_D, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, 0 );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
+    flaky_wine_if( GetForegroundWindow() != hwnd && version == 0x800 ) /* FIXME: fvwm sometimes steals input focus */
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
     count = 10;
     hr = IDirectInputDevice_GetDeviceData( keyboard, data_size, NULL, &count, 0 );
     ok( hr == DI_OK, "GetDeviceData returned %#lx\n", hr );
+    flaky_wine_if( GetForegroundWindow() != hwnd && version == 0x800 ) /* FIXME: fvwm sometimes steals input focus */
     ok( count == 1, "got count %lu\n", count );
 
 
+cleanup:
     IUnknown_Release( keyboard );
+    IDirectInput_Release( dinput );
 
     DestroyWindow( hwnd );
     CloseHandle( event );
@@ -492,12 +467,12 @@ static void test_device_input( IDirectInputDevice8A *device, DWORD type, DWORD c
         if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
         {
             keybd_event( 0, code, KEYEVENTF_SCANCODE, 0 );
-            res = WaitForSingleObject( event, 100 );
+            res = WaitForSingleObject( event, 5000 );
         }
         ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
         keybd_event( 0, code, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
         ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
     }
     if (type == INPUT_MOUSE)
@@ -507,12 +482,12 @@ static void test_device_input( IDirectInputDevice8A *device, DWORD type, DWORD c
         if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
         {
             mouse_event( MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0 );
-            res = WaitForSingleObject( event, 100 );
+            res = WaitForSingleObject( event, 5000 );
         }
         ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
         mouse_event( MOUSEEVENTF_LEFTUP, 0, 0, 0, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
         ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
     }
 
@@ -528,21 +503,21 @@ static void test_device_input( IDirectInputDevice8A *device, DWORD type, DWORD c
         if (type == INPUT_KEYBOARD)
         {
             keybd_event( VK_SPACE, DIK_SPACE, 0, 0 );
-            res = WaitForSingleObject( event, 100 );
+            res = WaitForSingleObject( event, 5000 );
             ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
             keybd_event( VK_SPACE, DIK_SPACE, KEYEVENTF_KEYUP, 0 );
-            res = WaitForSingleObject( event, 100 );
+            res = WaitForSingleObject( event, 5000 );
             ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
         }
         if (type == INPUT_MOUSE)
         {
             mouse_event( MOUSEEVENTF_LEFTDOWN, 1, 1, 0, 0 );
-            res = WaitForSingleObject( event, 100 );
+            res = WaitForSingleObject( event, 5000 );
             ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
 
             mouse_event( MOUSEEVENTF_LEFTUP, 1, 1, 0, 0 );
-            res = WaitForSingleObject( event, 100 );
+            res = WaitForSingleObject( event, 5000 );
             ok( res == WAIT_OBJECT_0, "WaitForSingleObject returned %#lx\n", res );
         }
     }
@@ -572,485 +547,6 @@ static void test_device_input( IDirectInputDevice8A *device, DWORD type, DWORD c
     CloseHandle( event );
 }
 
-static void test_build_action_map(IDirectInputDevice8A *lpdid, DIACTIONFORMATA *lpdiaf,
-                                  int action_index, DWORD expected_type, DWORD expected_inst)
-{
-    HRESULT hr;
-    DIACTIONA *actions;
-    DWORD instance, type, how;
-    GUID assigned_to;
-    DIDEVICEINSTANCEA ddi;
-
-    ddi.dwSize = sizeof(ddi);
-    IDirectInputDevice_GetDeviceInfo(lpdid, &ddi);
-
-    hr = IDirectInputDevice8_BuildActionMap(lpdid, lpdiaf, NULL, DIDBAM_HWDEFAULTS);
-    ok (SUCCEEDED(hr), "BuildActionMap failed hr=%#lx\n", hr);
-
-    actions = lpdiaf->rgoAction;
-    instance = DIDFT_GETINSTANCE(actions[action_index].dwObjID);
-    type = DIDFT_GETTYPE(actions[action_index].dwObjID);
-    how = actions[action_index].dwHow;
-    assigned_to = actions[action_index].guidInstance;
-
-    ok (how == DIAH_USERCONFIG || how == DIAH_DEFAULT, "Action was not set dwHow=%#lx\n", how);
-    ok (instance == expected_inst, "Action not mapped correctly instance=%#lx expected=%#lx\n", instance, expected_inst);
-    ok (type == expected_type, "Action type not mapped correctly type=%#lx expected=%#lx\n", type, expected_type);
-    ok (IsEqualGUID(&assigned_to, &ddi.guidInstance), "Action and device GUID do not match action=%d\n", action_index);
-}
-
-static BOOL CALLBACK enumeration_callback(const DIDEVICEINSTANCEA *lpddi, IDirectInputDevice8A *lpdid,
-                                          DWORD dwFlags, DWORD dwRemaining, LPVOID pvRef)
-{
-    HRESULT hr;
-    DIPROPDWORD dp;
-    DIPROPRANGE dpr;
-    DIPROPSTRING dps;
-    WCHAR usernameW[MAX_PATH];
-    DWORD username_size = MAX_PATH;
-    struct enum_data *data = pvRef;
-    DWORD cnt;
-    DIDEVICEOBJECTDATA buffer[5];
-    IDirectInputDevice8A *lpdid2;
-
-    if (!data) return DIENUM_CONTINUE;
-
-    data->ndevices++;
-
-    /* Convert username to WCHAR */
-    if (data->username != NULL)
-    {
-        username_size = MultiByteToWideChar(CP_ACP, 0, data->username, -1, usernameW, 0);
-        MultiByteToWideChar(CP_ACP, 0, data->username, -1, usernameW, username_size);
-    }
-    else
-        GetUserNameW(usernameW, &username_size);
-
-    /* collect the mouse and keyboard */
-    if (IsEqualGUID(&lpddi->guidInstance, &GUID_SysKeyboard))
-    {
-        IDirectInputDevice_AddRef(lpdid);
-        data->keyboard = lpdid;
-
-        ok (dwFlags & DIEDBS_MAPPEDPRI1, "Keyboard should be mapped as pri1 dwFlags=%#lx\n", dwFlags);
-    }
-
-    if (IsEqualGUID(&lpddi->guidInstance, &GUID_SysMouse))
-    {
-        IDirectInputDevice_AddRef(lpdid);
-        data->mouse = lpdid;
-
-        ok (dwFlags & DIEDBS_MAPPEDPRI1, "Mouse should be mapped as pri1 dwFlags=%#lx\n", dwFlags);
-    }
-
-    /* Creating second device object to check if it has the same username */
-    hr = IDirectInput_CreateDevice(data->dinput8, &lpddi->guidInstance, &lpdid2, NULL);
-    ok(SUCCEEDED(hr), "IDirectInput_CreateDevice() failed: %#lx\n", hr);
-
-    /* Building and setting an action map */
-    /* It should not use any pre-stored mappings so we use DIDBAM_HWDEFAULTS */
-    hr = IDirectInputDevice8_BuildActionMap(lpdid, data->lpdiaf, NULL, DIDBAM_HWDEFAULTS);
-    ok (SUCCEEDED(hr), "BuildActionMap failed hr=%#lx\n", hr);
-
-    /* Device has no data format and thus can't be acquired */
-    hr = IDirectInputDevice8_Acquire(lpdid);
-    ok (hr == DIERR_INVALIDPARAM, "Device was acquired before SetActionMap hr=%#lx\n", hr);
-
-    hr = IDirectInputDevice8_SetActionMap(lpdid, data->lpdiaf, data->username, 0);
-    ok (SUCCEEDED(hr), "SetActionMap failed hr=%#lx\n", hr);
-
-    /* Some joysticks may have no suitable actions and thus should not be tested */
-    if (hr == DI_NOEFFECT) return DIENUM_CONTINUE;
-
-    /* Test username after SetActionMap */
-    dps.diph.dwSize = sizeof(dps);
-    dps.diph.dwHeaderSize = sizeof(DIPROPHEADER);
-    dps.diph.dwObj = 0;
-    dps.diph.dwHow  = DIPH_DEVICE;
-    dps.wsz[0] = '\0';
-
-    hr = IDirectInputDevice_GetProperty(lpdid, DIPROP_USERNAME, &dps.diph);
-    ok (SUCCEEDED(hr), "GetProperty failed hr=%#lx\n", hr);
-    ok (!lstrcmpW(usernameW, dps.wsz), "Username not set correctly expected=%s, got=%s\n", wine_dbgstr_w(usernameW), wine_dbgstr_w(dps.wsz));
-
-    dps.wsz[0] = '\0';
-    hr = IDirectInputDevice_GetProperty(lpdid2, DIPROP_USERNAME, &dps.diph);
-    ok (SUCCEEDED(hr), "GetProperty failed hr=%#lx\n", hr);
-    ok (!lstrcmpW(usernameW, dps.wsz), "Username not set correctly expected=%s, got=%s\n", wine_dbgstr_w(usernameW), wine_dbgstr_w(dps.wsz));
-
-    /* Test buffer size */
-    memset(&dp, 0, sizeof(dp));
-    dp.diph.dwSize = sizeof(dp);
-    dp.diph.dwHeaderSize = sizeof(DIPROPHEADER);
-    dp.diph.dwHow  = DIPH_DEVICE;
-
-    hr = IDirectInputDevice_GetProperty(lpdid, DIPROP_BUFFERSIZE, &dp.diph);
-    ok (SUCCEEDED(hr), "GetProperty failed hr=%#lx\n", hr);
-    ok (dp.dwData == data->lpdiaf->dwBufferSize, "SetActionMap must set the buffer, buffersize=%lu\n", dp.dwData);
-
-    cnt = 1;
-    hr = IDirectInputDevice_GetDeviceData(lpdid, sizeof(buffer[0]), buffer, &cnt, 0);
-    ok(hr == DIERR_NOTACQUIRED, "GetDeviceData() failed hr=%#lx\n", hr);
-
-    /* Test axis range */
-    memset(&dpr, 0, sizeof(dpr));
-    dpr.diph.dwSize = sizeof(dpr);
-    dpr.diph.dwHeaderSize = sizeof(DIPROPHEADER);
-    dpr.diph.dwHow  = DIPH_DEVICE;
-
-    hr = IDirectInputDevice_GetProperty(lpdid, DIPROP_RANGE, &dpr.diph);
-    /* Only test if device supports the range property */
-    if (SUCCEEDED(hr))
-    {
-        ok (dpr.lMin == data->lpdiaf->lAxisMin, "SetActionMap must set the min axis range expected=%ld got=%ld\n", data->lpdiaf->lAxisMin, dpr.lMin);
-        ok (dpr.lMax == data->lpdiaf->lAxisMax, "SetActionMap must set the max axis range expected=%ld got=%ld\n", data->lpdiaf->lAxisMax, dpr.lMax);
-    }
-
-    /* SetActionMap has set the data format so now it should work */
-    hr = IDirectInputDevice8_Acquire(lpdid);
-    ok (SUCCEEDED(hr), "Acquire failed hr=%#lx\n", hr);
-
-    cnt = 1;
-    hr = IDirectInputDevice_GetDeviceData(lpdid, sizeof(buffer[0]), buffer, &cnt, 0);
-    ok(hr == DI_OK, "GetDeviceData() failed hr=%#lx\n", hr);
-
-    /* SetActionMap should not work on an acquired device */
-    hr = IDirectInputDevice8_SetActionMap(lpdid, data->lpdiaf, NULL, 0);
-    ok (hr == DIERR_ACQUIRED, "SetActionMap succeeded with an acquired device hr=%#lx\n", hr);
-
-    IDirectInputDevice_Release(lpdid2);
-
-    return DIENUM_CONTINUE;
-}
-
-static void test_appdata_property_vs_map(struct enum_data *data)
-{
-    HRESULT hr;
-    DIPROPPOINTER dp;
-
-    dp.diph.dwSize = sizeof(dp);
-    dp.diph.dwHeaderSize = sizeof(DIPROPHEADER);
-    dp.diph.dwHow = DIPH_BYID;
-    dp.diph.dwObj = DIDFT_MAKEINSTANCE(DIK_SPACE) | DIDFT_PSHBUTTON;
-    dp.uData = 10;
-    hr = IDirectInputDevice8_SetProperty(data->keyboard, DIPROP_APPDATA, &(dp.diph));
-    ok(SUCCEEDED(hr), "IDirectInputDevice8_SetProperty failed hr=%#lx\n", hr);
-
-    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_SPACE, 10);
-
-    dp.diph.dwHow = DIPH_BYID;
-    dp.diph.dwObj = DIDFT_MAKEINSTANCE(DIK_V) | DIDFT_PSHBUTTON;
-    dp.uData = 11;
-    hr = IDirectInputDevice8_SetProperty(data->keyboard, DIPROP_APPDATA, &(dp.diph));
-    ok(hr == DIERR_OBJECTNOTFOUND, "IDirectInputDevice8_SetProperty should not find key that's not in the action map hr=%#lx\n", hr);
-
-    /* setting format should reset action map */
-    hr = IDirectInputDevice8_SetDataFormat(data->keyboard, &c_dfDIKeyboard);
-    ok(SUCCEEDED(hr), "SetDataFormat failed: %#lx\n", hr);
-
-    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_SPACE, -1);
-
-    dp.diph.dwHow = DIPH_BYID;
-    dp.diph.dwObj = DIDFT_MAKEINSTANCE(DIK_V) | DIDFT_PSHBUTTON;
-    dp.uData = 11;
-    hr = IDirectInputDevice8_SetProperty(data->keyboard, DIPROP_APPDATA, &(dp.diph));
-    ok(SUCCEEDED(hr), "IDirectInputDevice8_SetProperty failed hr=%#lx\n", hr);
-
-    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_V, 11);
-
-    /* back to action map */
-    hr = IDirectInputDevice8_SetActionMap(data->keyboard, data->lpdiaf, NULL, 0);
-    ok(SUCCEEDED(hr), "SetActionMap failed hr=%#lx\n", hr);
-
-    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_SPACE, 2);
-}
-
-static void test_action_mapping(void)
-{
-    HRESULT hr;
-    IDirectInput8A *pDI = NULL;
-    DIACTIONFORMATA af;
-    DIPROPSTRING dps;
-    struct enum_data data =  {.version = 0x800, .lpdiaf = &af};
-    HWND hwnd;
-
-    hr = CoCreateInstance(&CLSID_DirectInput8, 0, CLSCTX_INPROC_SERVER, &IID_IDirectInput8A, (LPVOID*)&pDI);
-    if (hr == DIERR_OLDDIRECTINPUTVERSION ||
-        hr == DIERR_BETADIRECTINPUTVERSION ||
-        hr == REGDB_E_CLASSNOTREG)
-    {
-        win_skip("ActionMapping requires dinput8\n");
-        return;
-    }
-    ok(SUCCEEDED(hr), "DirectInput8 Create failed: hr=%#lx\n", hr);
-    if (FAILED(hr)) return;
-
-    hr = IDirectInput8_Initialize(pDI, instance, DIRECTINPUT_VERSION);
-    if (hr == DIERR_OLDDIRECTINPUTVERSION || hr == DIERR_BETADIRECTINPUTVERSION)
-    {
-        win_skip("ActionMapping requires dinput8\n");
-        return;
-    }
-    ok(SUCCEEDED(hr), "DirectInput8 Initialize failed: hr=%#lx\n", hr);
-    if (FAILED(hr)) return;
-
-    memset (&af, 0, sizeof(af));
-    af.dwSize = sizeof(af);
-    af.dwActionSize = sizeof(DIACTIONA);
-    af.dwDataSize = 4 * ARRAY_SIZE(actionMapping);
-    af.dwNumActions = ARRAY_SIZE(actionMapping);
-    af.rgoAction = actionMapping;
-    af.guidActionMap = ACTION_MAPPING_GUID;
-    af.dwGenre = 0x01000000; /* DIVIRTUAL_DRIVING_RACE */
-    af.dwBufferSize = 32;
-
-    /* This enumeration builds and sets the action map for all devices */
-    data.dinput8 = pDI;
-    hr = IDirectInput8_EnumDevicesBySemantics(pDI, 0, &af, enumeration_callback, &data, DIEDBSFL_ATTACHEDONLY);
-    ok (SUCCEEDED(hr), "EnumDevicesBySemantics failed: hr=%#lx\n", hr);
-
-    if (data.keyboard)
-        IDirectInputDevice_Release(data.keyboard);
-
-    if (data.mouse)
-        IDirectInputDevice_Release(data.mouse);
-
-    /* Repeat tests with a non NULL user */
-    data.username = "Ninja Brian";
-    hr = IDirectInput8_EnumDevicesBySemantics(pDI, NULL, &af, enumeration_callback, &data, DIEDBSFL_ATTACHEDONLY);
-    ok (SUCCEEDED(hr), "EnumDevicesBySemantics failed: hr=%#lx\n", hr);
-
-    hwnd = CreateWindowExA(WS_EX_TOPMOST, "static", "dinput",
-            WS_POPUP | WS_VISIBLE, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
-    ok(hwnd != NULL, "failed to create window\n");
-    SetCursorPos(50, 50);
-
-    if (data.keyboard != NULL)
-    {
-        /* Test keyboard BuildActionMap */
-        test_build_action_map(data.keyboard, data.lpdiaf, DITEST_KEYBOARDSPACE, DIDFT_PSHBUTTON, DIK_SPACE);
-        /* Test keyboard input */
-        test_device_input(data.keyboard, INPUT_KEYBOARD, DIK_SPACE, 2);
-
-        /* setting format should reset action map */
-        hr = IDirectInputDevice8_SetDataFormat(data.keyboard, &c_dfDIKeyboard);
-        ok (SUCCEEDED(hr), "IDirectInputDevice8_SetDataFormat failed: %#lx\n", hr);
-
-        test_device_input(data.keyboard, INPUT_KEYBOARD, DIK_SPACE, -1);
-
-        /* back to action map */
-        hr = IDirectInputDevice8_SetActionMap(data.keyboard, data.lpdiaf, NULL, 0);
-        ok (SUCCEEDED(hr), "SetActionMap should succeed hr=%#lx\n", hr);
-
-        test_device_input(data.keyboard, INPUT_KEYBOARD, DIK_SPACE, 2);
-
-        test_appdata_property_vs_map(&data);
-
-        /* Test BuildActionMap with no suitable actions for a device */
-        IDirectInputDevice_Unacquire(data.keyboard);
-        af.dwDataSize = 4 * DITEST_KEYBOARDSPACE;
-        af.dwNumActions = DITEST_KEYBOARDSPACE;
-
-        hr = IDirectInputDevice8_BuildActionMap(data.keyboard, data.lpdiaf, NULL, DIDBAM_HWDEFAULTS);
-        ok (hr == DI_NOEFFECT, "BuildActionMap should have no effect with no actions hr=%#lx\n", hr);
-
-        hr = IDirectInputDevice8_SetActionMap(data.keyboard, data.lpdiaf, NULL, 0);
-        ok (hr == DI_NOEFFECT, "SetActionMap should have no effect with no actions to map hr=%#lx\n", hr);
-
-        af.dwDataSize = 4 * ARRAY_SIZE(actionMapping);
-        af.dwNumActions = ARRAY_SIZE(actionMapping);
-
-        /* test DIDSAM_NOUSER */
-        dps.diph.dwSize = sizeof(dps);
-        dps.diph.dwHeaderSize = sizeof(DIPROPHEADER);
-        dps.diph.dwObj = 0;
-        dps.diph.dwHow = DIPH_DEVICE;
-        dps.wsz[0] = '\0';
-
-        hr = IDirectInputDevice_GetProperty(data.keyboard, DIPROP_USERNAME, &dps.diph);
-        ok (SUCCEEDED(hr), "GetProperty failed hr=%#lx\n", hr);
-        ok (dps.wsz[0] != 0, "Expected any username, got=%s\n", wine_dbgstr_w(dps.wsz));
-
-        hr = IDirectInputDevice8_SetActionMap(data.keyboard, data.lpdiaf, NULL, DIDSAM_NOUSER);
-        ok (SUCCEEDED(hr), "SetActionMap failed hr=%#lx\n", hr);
-
-        dps.diph.dwSize = sizeof(dps);
-        dps.diph.dwHeaderSize = sizeof(DIPROPHEADER);
-        dps.diph.dwObj = 0;
-        dps.diph.dwHow = DIPH_DEVICE;
-        dps.wsz[0] = '\0';
-
-        hr = IDirectInputDevice_GetProperty(data.keyboard, DIPROP_USERNAME, &dps.diph);
-        ok (SUCCEEDED(hr), "GetProperty failed hr=%#lx\n", hr);
-        ok (dps.wsz[0] == 0, "Expected empty username, got=%s\n", wine_dbgstr_w(dps.wsz));
-
-        IDirectInputDevice_Release(data.keyboard);
-    }
-
-    if (data.mouse != NULL)
-    {
-        /* Test mouse BuildActionMap */
-        test_build_action_map(data.mouse, data.lpdiaf, DITEST_MOUSEBUTTON0, DIDFT_PSHBUTTON, 0x03);
-        test_build_action_map(data.mouse, data.lpdiaf, DITEST_YAXIS, DIDFT_RELAXIS, 0x01);
-
-        test_device_input(data.mouse, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, 3);
-
-        IDirectInputDevice_Release(data.mouse);
-    }
-
-    DestroyWindow(hwnd);
-    IDirectInput_Release(pDI);
-}
-
-static void test_save_settings(void)
-{
-    HRESULT hr;
-    IDirectInput8A *pDI = NULL;
-    DIACTIONFORMATA af;
-    IDirectInputDevice8A *pKey;
-
-    static const GUID mapping_guid = { 0xcafecafe, 0x2, 0x3, { 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb } };
-    static const GUID other_guid = { 0xcafe, 0xcafe, 0x3, { 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb } };
-
-    static DIACTIONA actions[] = {
-        { 0, DIKEYBOARD_A , 0, { "Blam" } },
-        { 1, DIKEYBOARD_B , 0, { "Kapow"} }
-    };
-    static const DWORD results[] = {
-        DIDFT_MAKEINSTANCE(DIK_A) | DIDFT_PSHBUTTON,
-        DIDFT_MAKEINSTANCE(DIK_B) | DIDFT_PSHBUTTON
-    };
-    static const DWORD other_results[] = {
-        DIDFT_MAKEINSTANCE(DIK_C) | DIDFT_PSHBUTTON,
-        DIDFT_MAKEINSTANCE(DIK_D) | DIDFT_PSHBUTTON
-    };
-
-    hr = CoCreateInstance(&CLSID_DirectInput8, 0, CLSCTX_INPROC_SERVER, &IID_IDirectInput8A, (LPVOID*)&pDI);
-    if (hr == DIERR_OLDDIRECTINPUTVERSION ||
-        hr == DIERR_BETADIRECTINPUTVERSION ||
-        hr == REGDB_E_CLASSNOTREG)
-    {
-        win_skip("ActionMapping requires dinput8\n");
-        return;
-    }
-    ok (SUCCEEDED(hr), "DirectInput8 Create failed: hr=%#lx\n", hr);
-    if (FAILED(hr)) return;
-
-    hr = IDirectInput8_Initialize(pDI, instance, DIRECTINPUT_VERSION);
-    if (hr == DIERR_OLDDIRECTINPUTVERSION || hr == DIERR_BETADIRECTINPUTVERSION)
-    {
-        win_skip("ActionMapping requires dinput8\n");
-        return;
-    }
-    ok (SUCCEEDED(hr), "DirectInput8 Initialize failed: hr=%#lx\n", hr);
-    if (FAILED(hr)) return;
-
-    hr = IDirectInput_CreateDevice(pDI, &GUID_SysKeyboard, &pKey, NULL);
-    ok (SUCCEEDED(hr), "IDirectInput_Create device failed hr: 0x%#lx\n", hr);
-    if (FAILED(hr)) return;
-
-    memset (&af, 0, sizeof(af));
-    af.dwSize = sizeof(af);
-    af.dwActionSize = sizeof(DIACTIONA);
-    af.dwDataSize = 4 * ARRAY_SIZE(actions);
-    af.dwNumActions = ARRAY_SIZE(actions);
-    af.rgoAction = actions;
-    af.guidActionMap = mapping_guid;
-    af.dwGenre = 0x01000000; /* DIVIRTUAL_DRIVING_RACE */
-    af.dwBufferSize = 32;
-
-    /* Easy case. Ask for default mapping, save, ask for previous map and read it back */
-    hr = IDirectInputDevice8_BuildActionMap(pKey, &af, NULL, DIDBAM_HWDEFAULTS);
-    ok (SUCCEEDED(hr), "BuildActionMap failed hr=%#lx\n", hr);
-    ok (results[0] == af.rgoAction[0].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", results[0], af.rgoAction[0].dwObjID);
-
-    ok (results[1] == af.rgoAction[1].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", results[1], af.rgoAction[1].dwObjID);
-
-    hr = IDirectInputDevice8_SetActionMap(pKey, &af, NULL, DIDSAM_FORCESAVE);
-    ok (SUCCEEDED(hr), "SetActionMap failed hr=%#lx\n", hr);
-
-    if (hr == DI_SETTINGSNOTSAVED)
-    {
-        skip ("Can't test saving settings if SetActionMap returns DI_SETTINGSNOTSAVED\n");
-        return;
-    }
-
-    af.rgoAction[0].dwObjID = 0;
-    af.rgoAction[1].dwObjID = 0;
-    memset(&af.rgoAction[0].guidInstance, 0, sizeof(GUID));
-    memset(&af.rgoAction[1].guidInstance, 0, sizeof(GUID));
-
-    hr = IDirectInputDevice8_BuildActionMap(pKey, &af, NULL, 0);
-    ok (SUCCEEDED(hr), "BuildActionMap failed hr=%#lx\n", hr);
-
-    ok (results[0] == af.rgoAction[0].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", results[0], af.rgoAction[0].dwObjID);
-    ok (IsEqualGUID(&GUID_SysKeyboard, &af.rgoAction[0].guidInstance), "Action should be mapped to keyboard\n");
-
-    ok (results[1] == af.rgoAction[1].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", results[1], af.rgoAction[1].dwObjID);
-    ok (IsEqualGUID(&GUID_SysKeyboard, &af.rgoAction[1].guidInstance), "Action should be mapped to keyboard\n");
-
-    /* Test that a different action map with no pre-stored settings, in spite of the flags,
-       does not try to load mappings and instead applies the default mapping */
-    af.guidActionMap = other_guid;
-
-    af.rgoAction[0].dwObjID = 0;
-    af.rgoAction[1].dwObjID = 0;
-    memset(&af.rgoAction[0].guidInstance, 0, sizeof(GUID));
-    memset(&af.rgoAction[1].guidInstance, 0, sizeof(GUID));
-
-    hr = IDirectInputDevice8_BuildActionMap(pKey, &af, NULL, 0);
-    ok (SUCCEEDED(hr), "BuildActionMap failed hr=%#lx\n", hr);
-
-    ok (results[0] == af.rgoAction[0].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", results[0], af.rgoAction[0].dwObjID);
-    ok (IsEqualGUID(&GUID_SysKeyboard, &af.rgoAction[0].guidInstance), "Action should be mapped to keyboard\n");
-
-    ok (results[1] == af.rgoAction[1].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", results[1], af.rgoAction[1].dwObjID);
-    ok (IsEqualGUID(&GUID_SysKeyboard, &af.rgoAction[1].guidInstance), "Action should be mapped to keyboard\n");
-
-    af.guidActionMap = mapping_guid;
-    /* Hard case. Customized mapping, save, ask for previous map and read it back */
-    af.rgoAction[0].dwObjID = other_results[0];
-    af.rgoAction[0].dwHow = DIAH_USERCONFIG;
-    af.rgoAction[0].guidInstance = GUID_SysKeyboard;
-    af.rgoAction[1].dwObjID = other_results[1];
-    af.rgoAction[1].dwHow = DIAH_USERCONFIG;
-    af.rgoAction[1].guidInstance = GUID_SysKeyboard;
-
-    hr = IDirectInputDevice8_SetActionMap(pKey, &af, NULL, DIDSAM_FORCESAVE);
-    ok (SUCCEEDED(hr), "SetActionMap failed hr=%#lx\n", hr);
-
-    if (hr == DI_SETTINGSNOTSAVED)
-    {
-        skip ("Can't test saving settings if SetActionMap returns DI_SETTINGSNOTSAVED\n");
-        return;
-    }
-
-    af.rgoAction[0].dwObjID = 0;
-    af.rgoAction[1].dwObjID = 0;
-    memset(&af.rgoAction[0].guidInstance, 0, sizeof(GUID));
-    memset(&af.rgoAction[1].guidInstance, 0, sizeof(GUID));
-
-    hr = IDirectInputDevice8_BuildActionMap(pKey, &af, NULL, 0);
-    ok (SUCCEEDED(hr), "BuildActionMap failed hr=%#lx\n", hr);
-
-    ok (other_results[0] == af.rgoAction[0].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", other_results[0], af.rgoAction[0].dwObjID);
-    ok (IsEqualGUID(&GUID_SysKeyboard, &af.rgoAction[0].guidInstance), "Action should be mapped to keyboard\n");
-
-    ok (other_results[1] == af.rgoAction[1].dwObjID,
-        "Mapped incorrectly expected: 0x%#lx got: 0x%#lx\n", other_results[1], af.rgoAction[1].dwObjID);
-    ok (IsEqualGUID(&GUID_SysKeyboard, &af.rgoAction[1].guidInstance), "Action should be mapped to keyboard\n");
-
-    IDirectInputDevice_Release(pKey);
-    IDirectInput_Release(pDI);
-}
-
 static void test_mouse_keyboard(void)
 {
     HRESULT hr;
@@ -1062,6 +558,7 @@ static void test_mouse_keyboard(void)
 
     hwnd = CreateWindowExA(WS_EX_TOPMOST, "static", "dinput", WS_POPUP | WS_VISIBLE, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
     ok(hwnd != NULL, "CreateWindowExA failed\n");
+    flush_events();
 
     hr = CoCreateInstance(&CLSID_DirectInput8, 0, CLSCTX_INPROC_SERVER, &IID_IDirectInput8A, (LPVOID*)&di);
     if (hr == DIERR_OLDDIRECTINPUTVERSION ||
@@ -1100,15 +597,11 @@ static void test_mouse_keyboard(void)
     raw_devices_count = ARRAY_SIZE(raw_devices);
     memset(raw_devices, 0, sizeof(raw_devices));
     hr = GetRegisteredRawInputDevices(raw_devices, &raw_devices_count, sizeof(RAWINPUTDEVICE));
-    todo_wine
     ok(hr == 1, "GetRegisteredRawInputDevices returned %ld, raw_devices_count: %d\n", hr, raw_devices_count);
-    todo_wine
     ok(raw_devices[0].usUsagePage == HID_USAGE_PAGE_GENERIC, "got usUsagePage: %x\n", raw_devices[0].usUsagePage);
-    todo_wine
     ok(raw_devices[0].usUsage == HID_USAGE_GENERIC_KEYBOARD, "got usUsage: %x\n", raw_devices[0].usUsage);
     todo_wine
     ok(raw_devices[0].dwFlags == RIDEV_INPUTSINK, "Unexpected raw device flags: %#lx\n", raw_devices[0].dwFlags);
-    todo_wine
     ok(raw_devices[0].hwndTarget != NULL, "Unexpected raw device target: %p\n", raw_devices[0].hwndTarget);
     hr = IDirectInputDevice8_Unacquire(di_keyboard);
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %#lx\n", hr);
@@ -1140,7 +633,6 @@ static void test_mouse_keyboard(void)
     ok(raw_devices[0].usUsagePage == HID_USAGE_PAGE_GENERIC, "got usUsagePage: %x\n", raw_devices[0].usUsagePage);
     ok(raw_devices[0].usUsage == HID_USAGE_GENERIC_MOUSE, "got usUsage: %x\n", raw_devices[0].usUsage);
     ok(raw_devices[0].dwFlags == RIDEV_INPUTSINK, "Unexpected raw device flags: %#lx\n", raw_devices[0].dwFlags);
-    todo_wine
     ok(raw_devices[0].hwndTarget == di_hwnd, "Unexpected raw device target: %p\n", raw_devices[0].hwndTarget);
     hr = IDirectInputDevice8_Unacquire(di_mouse);
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %#lx\n", hr);
@@ -1186,9 +678,6 @@ static void test_mouse_keyboard(void)
     ok(raw_devices[1].hwndTarget == hwnd, "Unexpected raw device target: %p\n", raw_devices[1].hwndTarget);
     ok(raw_devices[2].usUsagePage == HID_USAGE_PAGE_GENERIC, "got usUsagePage: %x\n", raw_devices[1].usUsagePage);
     ok(raw_devices[2].usUsage == HID_USAGE_GENERIC_KEYBOARD, "got usUsage: %x\n", raw_devices[1].usUsage);
-    todo_wine
-    ok(raw_devices[2].dwFlags == RIDEV_INPUTSINK, "Unexpected raw device flags: %#lx\n", raw_devices[1].dwFlags);
-    todo_wine
     ok(raw_devices[2].hwndTarget == di_hwnd, "Unexpected raw device target: %p\n", raw_devices[1].hwndTarget);
     hr = IDirectInputDevice8_Unacquire(di_keyboard);
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %#lx\n", hr);
@@ -1196,22 +685,25 @@ static void test_mouse_keyboard(void)
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %#lx\n", hr);
     raw_devices_count = ARRAY_SIZE(raw_devices);
     GetRegisteredRawInputDevices(NULL, &raw_devices_count, sizeof(RAWINPUTDEVICE));
-    todo_wine
     ok(raw_devices_count == 1, "Unexpected raw devices registered: %d\n", raw_devices_count);
 
     IDirectInputDevice8_SetCooperativeLevel(di_mouse, hwnd, DISCL_FOREGROUND|DISCL_EXCLUSIVE);
     IDirectInputDevice8_SetCooperativeLevel(di_keyboard, hwnd, DISCL_FOREGROUND|DISCL_EXCLUSIVE);
 
     hr = IDirectInputDevice8_Acquire(di_keyboard);
+    flaky_wine_if( GetForegroundWindow() != hwnd ) /* FIXME: fvwm sometimes steals input focus */
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %#lx\n", hr);
     hr = IDirectInputDevice8_Acquire(di_mouse);
+    flaky_wine_if( GetForegroundWindow() != hwnd ) /* FIXME: fvwm sometimes steals input focus */
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %#lx\n", hr);
     raw_devices_count = ARRAY_SIZE(raw_devices);
     memset(raw_devices, 0, sizeof(raw_devices));
     hr = GetRegisteredRawInputDevices(raw_devices, &raw_devices_count, sizeof(RAWINPUTDEVICE));
+    flaky_wine_if( GetForegroundWindow() != hwnd ) /* FIXME: fvwm sometimes steals input focus */
     ok(hr == 3, "GetRegisteredRawInputDevices returned %ld, raw_devices_count: %d\n", hr, raw_devices_count);
+    flaky_wine_if( GetForegroundWindow() != hwnd ) /* FIXME: fvwm sometimes steals input focus */
     ok(raw_devices[0].dwFlags == (RIDEV_CAPTUREMOUSE|RIDEV_NOLEGACY), "Unexpected raw device flags: %#lx\n", raw_devices[0].dwFlags);
-    todo_wine
+    flaky_wine_if( GetForegroundWindow() != hwnd ) /* FIXME: fvwm sometimes steals input focus */
     ok(raw_devices[2].dwFlags == (RIDEV_NOHOTKEYS|RIDEV_NOLEGACY), "Unexpected raw device flags: %#lx\n", raw_devices[1].dwFlags);
     hr = IDirectInputDevice8_Unacquire(di_keyboard);
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %#lx\n", hr);
@@ -1220,7 +712,6 @@ static void test_mouse_keyboard(void)
 
     raw_devices_count = ARRAY_SIZE(raw_devices);
     hr = GetRegisteredRawInputDevices(raw_devices, &raw_devices_count, sizeof(RAWINPUTDEVICE));
-    todo_wine
     ok(hr == 1, "GetRegisteredRawInputDevices returned %ld, raw_devices_count: %d\n", hr, raw_devices_count);
     ok(raw_devices[0].usUsagePage == HID_USAGE_PAGE_GENERIC, "got usUsagePage: %x\n", raw_devices[0].usUsagePage);
     ok(raw_devices[0].usUsage == HID_USAGE_GENERIC_GAMEPAD, "got usUsage: %x\n", raw_devices[0].usUsage);
@@ -1512,6 +1003,13 @@ static BOOL CALLBACK check_object_count( const DIDEVICEOBJECTINSTANCEW *obj, voi
     DWORD *count = args;
     *count = *count + 1;
     return DIENUM_CONTINUE;
+}
+
+static BOOL CALLBACK check_object_count_bad_retval( const DIDEVICEOBJECTINSTANCEW *obj, void *args )
+{
+    DWORD *count = args;
+    *count = *count + 1;
+    return -1; /* Invalid, but should CONTINUE. Only explicit DIENUM_STOP will stop enumeration. */
 }
 
 static void test_sys_mouse( DWORD version )
@@ -1859,6 +1357,11 @@ static void test_sys_mouse( DWORD version )
     ok( check_objects_params.index >= check_objects_params.expect_count, "missing %u objects\n",
         check_objects_params.expect_count - check_objects_params.index );
 
+    res = 0;
+    hr = IDirectInputDevice8_EnumObjects( device, check_object_count_bad_retval, &res, DIDFT_AXIS );
+    ok( hr == DI_OK, "EnumObjects returned %#lx\n", hr );
+    ok( res == 3, "got %lu expected 3\n", res );
+
     objinst.dwSize = sizeof(DIDEVICEOBJECTINSTANCEW);
     res = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
     hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, res, DIPH_BYUSAGE );
@@ -1981,7 +1484,8 @@ static void test_sys_mouse( DWORD version )
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_NOEFFECT, "Unacquire returned %#lx\n", hr );
     hr = IDirectInputDevice8_Acquire( device );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_sys_mouse\n", hr );
+    if (hr != DI_OK) goto cleanup;
     hr = IDirectInputDevice8_Acquire( device );
     ok( hr == DI_NOEFFECT, "Acquire returned %#lx\n", hr );
 
@@ -1990,7 +1494,7 @@ static void test_sys_mouse( DWORD version )
     if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
     {
         mouse_event( MOUSEEVENTF_MOVE, 10, 10, 0, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
     }
     ok( !res, "WaitForSingleObject returned %#lx\n", res );
 
@@ -2000,7 +1504,7 @@ static void test_sys_mouse( DWORD version )
     ok( count == 1, "got count %lu\n", count );
 
     mouse_event( MOUSEEVENTF_MOVE, 10, 10, 0, 0 );
-    res = WaitForSingleObject( event, 100 );
+    res = WaitForSingleObject( event, 5000 );
     ok( !res, "WaitForSingleObject returned %#lx\n", res );
 
     hr = IDirectInputDevice8_Unacquire( device );
@@ -2011,14 +1515,15 @@ static void test_sys_mouse( DWORD version )
     ok( count == 1, "got count %lu\n", count );
 
     hr = IDirectInputDevice8_Acquire( device );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_sys_mouse\n", hr );
+    if (hr != DI_OK) goto cleanup;
 
     mouse_event( MOUSEEVENTF_MOVE, 10, 10, 0, 0 );
     res = WaitForSingleObject( event, 100 );
     if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
     {
         mouse_event( MOUSEEVENTF_MOVE, 10, 10, 0, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
     }
     ok( !res, "WaitForSingleObject returned %#lx\n", res );
 
@@ -2026,7 +1531,9 @@ static void test_sys_mouse( DWORD version )
     ok( hr == DI_OK, "Unacquire returned %#lx\n", hr );
 
     hr = IDirectInputDevice8_Acquire( device );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_sys_mouse\n", hr );
+    if (hr != DI_OK) goto cleanup;
+
     count = 1;
     hr = IDirectInputDevice8_GetDeviceData( device, sizeof(objdata), &objdata, &count, 0 );
     ok( hr == (version < 0x800 ? DI_OK : DI_BUFFEROVERFLOW), "GetDeviceData returned %#lx\n", hr );
@@ -2037,14 +1544,14 @@ static void test_sys_mouse( DWORD version )
     if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
     {
         mouse_event( MOUSEEVENTF_MOVE, 10, 10, 0, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
     }
     ok( !res, "WaitForSingleObject returned %#lx\n", res );
 
     for (i = 0; i < 2; i++)
     {
         mouse_event( MOUSEEVENTF_MOVE, 10 + i, 10 + i, 0, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
         ok( !res, "WaitForSingleObject returned %#lx\n", res );
     }
 
@@ -2077,6 +1584,7 @@ static void test_sys_mouse( DWORD version )
     DestroyWindow( tmp_hwnd );
 
 
+cleanup:
     CloseHandle( event );
     DestroyWindow( hwnd );
 
@@ -2087,7 +1595,7 @@ static void test_sys_mouse( DWORD version )
     localized = old_localized;
 }
 
-static void test_dik_codes( IDirectInputDevice8W *device, HANDLE event, HWND hwnd )
+static void test_dik_codes( IDirectInputDevice8W *device, HANDLE event, HWND hwnd, DWORD version )
 {
     static const struct key2dik
     {
@@ -2179,7 +1687,7 @@ static void test_dik_codes( IDirectInputDevice8W *device, HANDLE event, HWND hwn
             if (i == 0 && j == 0 && res == WAIT_TIMEOUT) /* Acquire is asynchronous */
             {
                 keybd_event( vkey, scan, 0, 0 );
-                res = WaitForSingleObject( event, 100 );
+                res = WaitForSingleObject( event, 5000 );
             }
             ok( !res, "WaitForSingleObject returned %#lx\n", res );
 
@@ -2190,7 +1698,8 @@ static void test_dik_codes( IDirectInputDevice8W *device, HANDLE event, HWND hwn
             ok( key_state[map[j].dik] == 0x80, "got state %#x\n", key_state[map[j].dik] );
 
             keybd_event( vkey, scan, KEYEVENTF_KEYUP, 0 );
-            res = WaitForSingleObject( event, 100 );
+            res = WaitForSingleObject( event, 5000 );
+            flaky_wine_if( GetForegroundWindow() != hwnd && version == 0x800 ) /* FIXME: fvwm sometimes steals input focus */
             ok( !res, "WaitForSingleObject returned %#lx\n", res );
 
             winetest_pop_context();
@@ -2198,13 +1707,62 @@ static void test_dik_codes( IDirectInputDevice8W *device, HANDLE event, HWND hwn
 
     skip_key_tests:
         ActivateKeyboardLayout( old_hkl, 0 );
-        UnloadKeyboardLayout( hkl );
 
         winetest_pop_context();
     }
 
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_OK, "Unacquire returned %#lx\n", hr );
+}
+
+#define check_member_str_( file, line, val, exp, member )                                         \
+    ok_(file, line)( !strcmp( (val).member, (exp).member ), "got " #member " %s\n",               \
+                     debugstr_a((val).member) )
+#define check_member_str( val, exp, member )                                                      \
+    check_member_str_( __FILE__, __LINE__, val, exp, member )
+
+#define check_diactionA( a, b ) check_diactionA_( __LINE__, a, b )
+static void check_diactionA_( int line, const DIACTIONA *actual, const DIACTIONA *expected )
+{
+    check_member_( __FILE__, line, *actual, *expected, "%#Ix", uAppData );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwSemantic );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwFlags );
+    if (actual->lptszActionName && expected->lptszActionName)
+        check_member_str_( __FILE__, line, *actual, *expected, lptszActionName );
+    else
+        check_member_( __FILE__, line, *actual, *expected, "%p", lptszActionName );
+    check_member_guid_( __FILE__, line, *actual, *expected, guidInstance );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwObjID );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwHow );
+}
+
+#define check_diactionformatA( a, b ) check_diactionformatA_( __LINE__, a, b )
+static void check_diactionformatA_( int line, const DIACTIONFORMATA *actual, const DIACTIONFORMATA *expected )
+{
+    DWORD i;
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwSize );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwActionSize );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwDataSize );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwNumActions );
+    for (i = 0; i < min( actual->dwNumActions, expected->dwNumActions ); ++i)
+    {
+        winetest_push_context( "action[%lu]", i );
+        check_diactionA_( line, actual->rgoAction + i, expected->rgoAction + i );
+        winetest_pop_context();
+        if (expected->dwActionSize != sizeof(DIACTIONA)) break;
+        if (actual->dwActionSize != sizeof(DIACTIONA)) break;
+    }
+    check_member_guid_( __FILE__, line, *actual, *expected, guidActionMap );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwGenre );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwBufferSize );
+    check_member_( __FILE__, line, *actual, *expected, "%+ld", lAxisMin );
+    check_member_( __FILE__, line, *actual, *expected, "%+ld", lAxisMax );
+    check_member_( __FILE__, line, *actual, *expected, "%p", hInstString );
+    check_member_( __FILE__, line, *actual, *expected, "%ld", ftTimeStamp.dwLowDateTime );
+    check_member_( __FILE__, line, *actual, *expected, "%ld", ftTimeStamp.dwHighDateTime );
+    todo_wine
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwCRC );
+    check_member_str_( __FILE__, line, *actual, *expected, tszActionMap );
 }
 
 static void test_sys_keyboard( DWORD version )
@@ -2649,7 +2207,7 @@ static void test_sys_keyboard( DWORD version )
     hr = IDirectInputDevice8_GetDeviceState( device, sizeof(full_state), full_state );
     ok( hr == DI_OK, "GetDeviceState returned %#lx\n", hr );
     hr = IDirectInputDevice8_Unacquire( device );
-    ok( hr == DI_OK, "Uncquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Unacquire returned %#lx\n", hr );
     hr = IDirectInputDevice8_SetDataFormat( device, &data_format );
     ok( hr == DI_OK, "SetDataFormat returned %#lx\n", hr );
     hr = IDirectInputDevice8_Acquire( device );
@@ -2669,7 +2227,7 @@ static void test_sys_keyboard( DWORD version )
     if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
     {
         keybd_event( 'Q', 0, 0, 0 );
-        res = WaitForSingleObject( event, 100 );
+        res = WaitForSingleObject( event, 5000 );
     }
     ok( !res, "WaitForSingleObject returned %#lx\n", res );
 
@@ -2694,9 +2252,8 @@ static void test_sys_keyboard( DWORD version )
 
 skip_key_tests:
     ActivateKeyboardLayout( old_hkl, 0 );
-    UnloadKeyboardLayout( hkl );
 
-    test_dik_codes( device, event, hwnd );
+    test_dik_codes( device, event, hwnd, version );
 
     CloseHandle( event );
     DestroyWindow( hwnd );
@@ -2706,6 +2263,64 @@ skip_key_tests:
 
     winetest_pop_context();
     localized = old_localized;
+}
+
+static void test_sys_keyboard_action_format(void)
+{
+    DIACTIONA actions[] =
+    {
+        {.uAppData = 0x1, .dwSemantic = 0x810004c8, .dwFlags = DIA_APPNOMAP},
+        {.uAppData = 0x1, .dwSemantic = 0x81000448, .dwFlags = 0},
+    };
+    const DIACTIONA expect_actions[ARRAY_SIZE(actions)] =
+    {
+        {.uAppData = 0x1, .dwSemantic = 0x810004c8, .dwFlags = 0, .guidInstance = GUID_SysKeyboard, .dwObjID = 0xc804, .dwHow = DIAH_DEFAULT},
+        {.uAppData = 0x1, .dwSemantic = 0x81000448, .dwFlags = 0, .guidInstance = GUID_SysKeyboard, .dwObjID = 0x4804, .dwHow = DIAH_DEFAULT},
+    };
+    DIACTIONFORMATA action_format =
+    {
+        .dwSize = sizeof(DIACTIONFORMATA),
+        .dwActionSize = sizeof(DIACTIONA),
+        .dwNumActions = ARRAY_SIZE(actions),
+        .dwDataSize = ARRAY_SIZE(actions) * 4,
+        .rgoAction = actions,
+        .dwGenre = 0x1000000,
+        .guidActionMap = GUID_keyboard_action_mapping,
+    };
+    const DIACTIONFORMATA expect_action_format =
+    {
+        .dwSize = sizeof(DIACTIONFORMATA),
+        .dwActionSize = sizeof(DIACTIONA),
+        .dwNumActions = ARRAY_SIZE(expect_actions),
+        .dwDataSize = ARRAY_SIZE(expect_actions) * 4,
+        .rgoAction = (DIACTIONA *)expect_actions,
+        .dwGenre = 0x1000000,
+        .guidActionMap = GUID_keyboard_action_mapping,
+        .dwCRC = 0x68e7e227,
+    };
+    IDirectInputDevice8A *device;
+    IDirectInput8A *dinput;
+    HRESULT hr;
+    LONG ref;
+
+    hr = DirectInput8Create( instance, 0x800, &IID_IDirectInput8A, (void **)&dinput, NULL );
+    ok( hr == DI_OK, "CreateDevice returned %#lx\n", hr );
+    hr = IDirectInput_CreateDevice( dinput, &GUID_SysKeyboard, &device, NULL );
+    ok( hr == DI_OK, "CreateDevice returned %#lx\n", hr );
+    ref = IDirectInput_Release( dinput );
+    ok( ref == 0, "Release returned %ld\n", ref );
+
+    hr = IDirectInputDevice8_BuildActionMap( device, &action_format, NULL, 2 );
+    ok( hr == DI_OK, "BuildActionMap returned %#lx\n", hr );
+    check_diactionformatA(&action_format, &expect_action_format);
+
+    hr = IDirectInputDevice8_SetActionMap( device, &action_format, NULL, 2 );
+    ok( hr == DI_SETTINGSNOTSAVED, "SetActionMap returned %#lx\n", hr );
+    hr = IDirectInputDevice8_SetActionMap( device, &action_format, NULL, 0 );
+    ok( hr == DI_OK, "SetActionMap returned %#lx\n", hr );
+
+    ref = IDirectInputDevice8_Release( device );
+    ok( ref == 0, "Release returned %ld\n", ref );
 }
 
 START_TEST(device8)
@@ -2728,8 +2343,8 @@ START_TEST(device8)
     test_sys_keyboard( 0x700 );
     test_sys_keyboard( 0x800 );
 
-    test_action_mapping();
-    test_save_settings();
+    test_sys_keyboard_action_format();
+
     test_mouse_keyboard();
     test_keyboard_events();
     test_appdata_property();

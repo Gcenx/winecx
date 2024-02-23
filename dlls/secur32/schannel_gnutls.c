@@ -84,6 +84,7 @@ static void *libgnutls_handle;
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_alert_get);
 MAKE_FUNCPTR(gnutls_alert_get_name);
+MAKE_FUNCPTR(gnutls_alert_send);
 MAKE_FUNCPTR(gnutls_certificate_allocate_credentials);
 MAKE_FUNCPTR(gnutls_certificate_free_credentials);
 MAKE_FUNCPTR(gnutls_certificate_get_peers);
@@ -121,7 +122,6 @@ MAKE_FUNCPTR(gnutls_x509_crt_deinit);
 MAKE_FUNCPTR(gnutls_x509_crt_import);
 MAKE_FUNCPTR(gnutls_x509_crt_init);
 MAKE_FUNCPTR(gnutls_x509_privkey_deinit);
-MAKE_FUNCPTR(gnutls_alert_send);
 #undef MAKE_FUNCPTR
 
 #if GNUTLS_VERSION_MAJOR < 3
@@ -354,10 +354,12 @@ static ssize_t push_adapter(gnutls_transport_ptr_t transport, const void *buff, 
     return len;
 }
 
-static const struct {
+struct protocol_priority_flag {
     DWORD enable_flag;
     const char *gnutls_flag;
-} protocol_priority_flags[] = {
+};
+
+static const struct protocol_priority_flag client_protocol_priority_flags[] = {
     {SP_PROT_DTLS1_2_CLIENT, "VERS-DTLS1.2"},
     {SP_PROT_DTLS1_0_CLIENT, "VERS-DTLS1.0"},
     {SP_PROT_TLS1_3_CLIENT, "VERS-TLS1.3"},
@@ -368,33 +370,46 @@ static const struct {
     /* {SP_PROT_SSL2_CLIENT} is not supported by GnuTLS */
 };
 
+static const struct protocol_priority_flag server_protocol_priority_flags[] = {
+    {SP_PROT_DTLS1_2_SERVER, "VERS-DTLS1.2"},
+    {SP_PROT_DTLS1_0_SERVER, "VERS-DTLS1.0"},
+    {SP_PROT_TLS1_3_SERVER, "VERS-TLS1.3"},
+    {SP_PROT_TLS1_2_SERVER, "VERS-TLS1.2"},
+    {SP_PROT_TLS1_1_SERVER, "VERS-TLS1.1"},
+    {SP_PROT_TLS1_0_SERVER, "VERS-TLS1.0"},
+    {SP_PROT_SSL3_SERVER,   "VERS-SSL3.0"}
+    /* {SP_PROT_SSL2_SERVER} is not supported by GnuTLS */
+};
+
 static DWORD supported_protocols;
 
-static void check_supported_protocols(void)
+static void check_supported_protocols(
+ const struct protocol_priority_flag *flags, int num_flags, BOOLEAN server)
 {
+    const char *type_desc = server ? "server" : "client";
     gnutls_session_t session;
     char priority[64];
     unsigned i;
     int err;
 
-    err = pgnutls_init(&session, GNUTLS_CLIENT);
+    err = pgnutls_init(&session, server ? GNUTLS_SERVER : GNUTLS_CLIENT);
     if (err != GNUTLS_E_SUCCESS)
     {
         pgnutls_perror(err);
         return;
     }
 
-    for(i = 0; i < ARRAY_SIZE(protocol_priority_flags); i++)
+    for(i = 0; i < num_flags; i++)
     {
-        sprintf(priority, "NORMAL:-%s", protocol_priority_flags[i].gnutls_flag);
+        sprintf(priority, "NORMAL:-%s", flags[i].gnutls_flag);
         err = pgnutls_priority_set_direct(session, priority, NULL);
         if (err == GNUTLS_E_SUCCESS)
         {
-            TRACE("%s is supported\n", protocol_priority_flags[i].gnutls_flag);
-            supported_protocols |= protocol_priority_flags[i].enable_flag;
+            TRACE("%s %s is supported\n", type_desc, flags[i].gnutls_flag);
+            supported_protocols |= flags[i].enable_flag;
         }
         else
-            TRACE("%s is not supported\n", protocol_priority_flags[i].gnutls_flag);
+            TRACE("%s %s is not supported\n", type_desc, flags[i].gnutls_flag);
     }
 
     pgnutls_deinit(session);
@@ -420,6 +435,11 @@ static int pull_timeout(gnutls_transport_ptr_t transport, unsigned int timeout)
 static NTSTATUS set_priority(schan_credentials *cred, gnutls_session_t session)
 {
     char priority[128] = "NORMAL:%LATEST_RECORD_VERSION", *p;
+    BOOL server = !!(cred->credential_use & SECPKG_CRED_INBOUND);
+    const struct protocol_priority_flag *protocols =
+        server ? server_protocol_priority_flags : client_protocol_priority_flags;
+    int num_protocols = server ? ARRAYSIZE(server_protocol_priority_flags)
+                               : ARRAYSIZE(client_protocol_priority_flags);
     BOOL using_vers_all = FALSE, disabled;
     int i, err;
 
@@ -447,16 +467,16 @@ static NTSTATUS set_priority(schan_credentials *cred, gnutls_session_t session)
         using_vers_all = TRUE;
     }
 
-    for (i = 0; i < ARRAY_SIZE(protocol_priority_flags); i++)
+    for (i = 0; i < num_protocols; i++)
     {
-        if (!(supported_protocols & protocol_priority_flags[i].enable_flag)) continue;
+        if (!(supported_protocols & protocols[i].enable_flag)) continue;
 
-        disabled = !(cred->enabled_protocols & protocol_priority_flags[i].enable_flag);
+        disabled = !(cred->enabled_protocols & protocols[i].enable_flag);
         if (using_vers_all && disabled) continue;
 
         *p++ = ':';
         *p++ = disabled ? '-' : '+';
-        strcpy(p, protocol_priority_flags[i].gnutls_flag);
+        strcpy(p, protocols[i].gnutls_flag);
         p += strlen(p);
     }
 
@@ -483,7 +503,7 @@ static NTSTATUS schan_create_session( void *args )
 
     *params->session = 0;
 
-    if (cred->enabled_protocols & (SP_PROT_DTLS1_0_CLIENT | SP_PROT_DTLS1_2_CLIENT))
+    if (cred->enabled_protocols & SP_PROT_DTLS1_X)
     {
         flags |= GNUTLS_DATAGRAM | GNUTLS_NONBLOCK;
     }
@@ -546,6 +566,74 @@ static NTSTATUS schan_set_session_target( void *args )
     return STATUS_SUCCESS;
 }
 
+static gnutls_alert_level_t map_alert_type(unsigned int type)
+{
+    switch (type)
+    {
+    case TLS1_ALERT_WARNING: return GNUTLS_AL_WARNING;
+    case TLS1_ALERT_FATAL:   return GNUTLS_AL_FATAL;
+    default:
+        FIXME( "unknown type %u\n", type );
+        return -1;
+    }
+}
+
+static gnutls_alert_description_t map_alert_number(unsigned int number)
+{
+    switch (number)
+    {
+    case TLS1_ALERT_CLOSE_NOTIFY:           return GNUTLS_A_CLOSE_NOTIFY;
+    case TLS1_ALERT_UNEXPECTED_MESSAGE:     return GNUTLS_A_UNEXPECTED_MESSAGE;
+    case TLS1_ALERT_BAD_RECORD_MAC:         return GNUTLS_A_BAD_RECORD_MAC;
+    case TLS1_ALERT_DECRYPTION_FAILED:      return GNUTLS_A_DECRYPTION_FAILED;
+    case TLS1_ALERT_RECORD_OVERFLOW:        return GNUTLS_A_RECORD_OVERFLOW;
+    case TLS1_ALERT_DECOMPRESSION_FAIL:     return GNUTLS_A_DECOMPRESSION_FAILURE;
+    case TLS1_ALERT_HANDSHAKE_FAILURE:      return GNUTLS_A_HANDSHAKE_FAILURE;
+    case TLS1_ALERT_BAD_CERTIFICATE:        return GNUTLS_A_BAD_CERTIFICATE;
+    case TLS1_ALERT_UNSUPPORTED_CERT:       return GNUTLS_A_UNSUPPORTED_CERTIFICATE;
+    case TLS1_ALERT_CERTIFICATE_REVOKED:    return GNUTLS_A_CERTIFICATE_REVOKED;
+    case TLS1_ALERT_CERTIFICATE_EXPIRED:    return GNUTLS_A_CERTIFICATE_EXPIRED;
+    case TLS1_ALERT_CERTIFICATE_UNKNOWN:    return GNUTLS_A_CERTIFICATE_UNKNOWN;
+    case TLS1_ALERT_ILLEGAL_PARAMETER:      return GNUTLS_A_ILLEGAL_PARAMETER;
+    case TLS1_ALERT_UNKNOWN_CA:             return GNUTLS_A_UNKNOWN_CA;
+    case TLS1_ALERT_ACCESS_DENIED:          return GNUTLS_A_ACCESS_DENIED;
+    case TLS1_ALERT_DECODE_ERROR:           return GNUTLS_A_DECODE_ERROR;
+    case TLS1_ALERT_DECRYPT_ERROR:          return GNUTLS_A_DECRYPT_ERROR;
+    case TLS1_ALERT_EXPORT_RESTRICTION:     return GNUTLS_A_EXPORT_RESTRICTION;
+    case TLS1_ALERT_PROTOCOL_VERSION:       return GNUTLS_A_PROTOCOL_VERSION;
+    case TLS1_ALERT_INSUFFIENT_SECURITY:    return GNUTLS_A_INSUFFICIENT_SECURITY;
+    case TLS1_ALERT_INTERNAL_ERROR:         return GNUTLS_A_INTERNAL_ERROR;
+    case TLS1_ALERT_USER_CANCELED:          return GNUTLS_A_USER_CANCELED;
+    case TLS1_ALERT_NO_RENEGOTIATION:       return GNUTLS_A_NO_RENEGOTIATION;
+    case TLS1_ALERT_UNSUPPORTED_EXT:        return GNUTLS_A_UNSUPPORTED_EXTENSION;
+    case TLS1_ALERT_UNKNOWN_PSK_IDENTITY:   return GNUTLS_A_UNKNOWN_PSK_IDENTITY;
+    case TLS1_ALERT_NO_APP_PROTOCOL:        return GNUTLS_A_NO_APPLICATION_PROTOCOL;
+    default:
+        FIXME("unhandled alert %u\n", number);
+        return -1;
+    }
+}
+
+static NTSTATUS send_alert(gnutls_session_t session, unsigned int type, unsigned int number)
+{
+    gnutls_alert_level_t level = map_alert_type(type);
+    gnutls_alert_description_t desc = map_alert_number(number);
+    int ret;
+
+    do
+    {
+        ret = pgnutls_alert_send(session, level, desc);
+    }
+    while (ret == GNUTLS_E_INTERRUPTED || ret == GNUTLS_E_AGAIN);
+
+    if (ret < 0)
+    {
+        pgnutls_perror(ret);
+        return SEC_E_INTERNAL_ERROR;
+    }
+    return SEC_E_OK;
+}
+
 static NTSTATUS schan_handshake( void *args )
 {
     const struct handshake_params *params = args;
@@ -558,22 +646,9 @@ static NTSTATUS schan_handshake( void *args )
     t->in.limit = params->input_size;
     init_schan_buffers(&t->out, params->output);
 
-    if (params->control_token == control_token_shutdown)
+    if (params->control_token)
     {
-        err = pgnutls_alert_send(s, GNUTLS_AL_WARNING, GNUTLS_A_CLOSE_NOTIFY);
-        if (err == GNUTLS_E_SUCCESS)
-        {
-            status = SEC_E_OK;
-        }
-        else if (err == GNUTLS_E_AGAIN)
-        {
-            status = SEC_E_INVALID_TOKEN;
-        }
-        else
-        {
-            pgnutls_perror(err);
-            status = SEC_E_INTERNAL_ERROR;
-        }
+        status = send_alert(s, params->alert_type, params->alert_number);
         goto done;
     }
 
@@ -1423,6 +1498,7 @@ else
 
     LOAD_FUNCPTR(gnutls_alert_get)
     LOAD_FUNCPTR(gnutls_alert_get_name)
+    LOAD_FUNCPTR(gnutls_alert_send)
     LOAD_FUNCPTR(gnutls_certificate_allocate_credentials)
     LOAD_FUNCPTR(gnutls_certificate_free_credentials)
     LOAD_FUNCPTR(gnutls_certificate_get_peers)
@@ -1460,7 +1536,6 @@ else
     LOAD_FUNCPTR(gnutls_x509_crt_import)
     LOAD_FUNCPTR(gnutls_x509_crt_init)
     LOAD_FUNCPTR(gnutls_x509_privkey_deinit)
-    LOAD_FUNCPTR(gnutls_alert_send)
 #undef LOAD_FUNCPTR
 
     if (!(pgnutls_cipher_get_block_size = dlsym(libgnutls_handle, "gnutls_cipher_get_block_size")))
@@ -1517,7 +1592,8 @@ else
         pgnutls_global_set_log_function(gnutls_log);
     }
 
-    check_supported_protocols();
+    check_supported_protocols(client_protocol_priority_flags, ARRAYSIZE(client_protocol_priority_flags), FALSE);
+    check_supported_protocols(server_protocol_priority_flags, ARRAYSIZE(server_protocol_priority_flags), TRUE);
     return STATUS_SUCCESS;
 
 fail:
@@ -1742,6 +1818,8 @@ static NTSTATUS wow64_schan_handshake( void *args )
         PTR32 output_buffer_idx;
         PTR32 output_offset;
         enum control_token control_token;
+        unsigned int alert_type;
+        unsigned int alert_number;
     } const *params32 = args;
     struct handshake_params params =
     {
@@ -1753,6 +1831,8 @@ static NTSTATUS wow64_schan_handshake( void *args )
         ULongToPtr(params32->output_buffer_idx),
         ULongToPtr(params32->output_offset),
         params32->control_token,
+        params32->alert_type,
+        params32->alert_number,
     };
     if (params32->input)
     {

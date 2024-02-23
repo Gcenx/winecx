@@ -21,16 +21,6 @@
 #ifndef __WINE_COREAUDIO_COCOA_H
 #define __WINE_COREAUDIO_COCOA_H
 
-#ifndef DECLSPEC_HIDDEN
-# if defined(_MSC_VER) || defined(__MINGW32__) || defined(__CYGWIN__)
-#  define DECLSPEC_HIDDEN
-# elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
-#  define DECLSPEC_HIDDEN __attribute__((visibility ("hidden")))
-# else
-#  define DECLSPEC_HIDDEN
-# endif
-#endif
-
 /* Must match the values of the AVAuthorizationStatus enum. */
 enum {
     NOT_DETERMINED = 0,
@@ -39,7 +29,7 @@ enum {
     AUTHORIZED     = 3
 };
 
-extern int CoreAudio_get_capture_authorization_status(void) DECLSPEC_HIDDEN;
-extern int CoreAudio_request_capture_authorization(void) DECLSPEC_HIDDEN;
+extern int CoreAudio_get_capture_authorization_status(void);
+extern int CoreAudio_request_capture_authorization(void);
 
 #endif /* __WINE_COREAUDIO_COCOA_H */

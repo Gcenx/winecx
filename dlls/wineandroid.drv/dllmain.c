@@ -119,7 +119,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
     struct init_params params;
     void **callback_table;
 
-    if (reason == DLL_PROCESS_ATTACH) return TRUE;
+    if (reason != DLL_PROCESS_ATTACH) return TRUE;
 
     DisableThreadLibraryCalls( inst );
     if (__wine_init_unix_call()) return FALSE;
@@ -131,13 +131,4 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
     callback_table[client_start_device] = android_start_device;
 
     return TRUE;
-}
-
-
-/***********************************************************************
- *           wine_create_desktop (wineandroid.@)
- */
-BOOL CDECL wine_create_desktop( UINT width, UINT height )
-{
-    return ANDROID_CALL( create_desktop, NULL );
 }

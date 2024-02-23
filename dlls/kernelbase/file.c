@@ -23,8 +23,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "winerror.h"
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -60,6 +58,7 @@ typedef struct
     UINT              data_pos;    /* current position in dir data */
     UINT              data_len;    /* length of dir data */
     UINT              data_size;   /* size of data buffer, or 0 when everything has been read */
+    WCHAR            *mask;        /* mask string to match if wildcards are used */
     BYTE              data[1];     /* directory data */
 } FIND_FIRST_INFO;
 
@@ -76,7 +75,7 @@ static BOOL oem_file_apis;
 static void WINAPI read_write_apc( void *apc_user, PIO_STATUS_BLOCK io, ULONG reserved )
 {
     LPOVERLAPPED_COMPLETION_ROUTINE func = apc_user;
-    func( RtlNtStatusToDosError( io->u.Status ), io->Information, (LPOVERLAPPED)io );
+    func( RtlNtStatusToDosError( io->Status ), io->Information, (LPOVERLAPPED)io );
 }
 
 static const WCHAR *get_machine_wow64_dir( WORD machine )
@@ -86,8 +85,6 @@ static const WCHAR *get_machine_wow64_dir( WORD machine )
     case IMAGE_FILE_MACHINE_TARGET_HOST: return system_dir;
     case IMAGE_FILE_MACHINE_I386:        return L"C:\\windows\\syswow64";
     case IMAGE_FILE_MACHINE_ARMNT:       return L"C:\\windows\\sysarm32";
-    case IMAGE_FILE_MACHINE_AMD64:       return L"C:\\windows\\sysx8664";
-    case IMAGE_FILE_MACHINE_ARM64:       return L"C:\\windows\\sysarm64";
     default: return NULL;
     }
 }
@@ -1139,7 +1136,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
     NTSTATUS status;
-    DWORD size, device = 0;
+    DWORD size, mask_size = 0, device = 0;
 
     TRACE( "%s %d %p %d %p %lx\n", debugstr_w(filename), level, data, search_op, filter, flags );
 
@@ -1201,10 +1198,16 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
     {
         nt_name.Length = (mask - nt_name.Buffer) * sizeof(WCHAR);
         has_wildcard = wcspbrk( mask, L"*?" ) != NULL;
-        size = has_wildcard ? 8192 : max_entry_size;
+        if (has_wildcard)
+        {
+            size = 8192;
+            mask = PathFindFileNameW( filename );
+            mask_size = (lstrlenW( mask ) + 1) * sizeof(*mask);
+        }
+        else size = max_entry_size;
     }
 
-    if (!(info = HeapAlloc( GetProcessHeap(), 0, offsetof( FIND_FIRST_INFO, data[size] ))))
+    if (!(info = HeapAlloc( GetProcessHeap(), 0, offsetof( FIND_FIRST_INFO, data[size + mask_size] ))))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         goto error;
@@ -1248,6 +1251,13 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
     info->data_size = size;
     info->search_op = search_op;
     info->level     = level;
+    if (mask_size)
+    {
+        info->mask = (WCHAR *)(info->data + size);
+        memcpy( info->mask, mask, mask_size );
+        mask = NULL;
+    }
+    else info->mask = NULL;
 
     if (device)
     {
@@ -1265,7 +1275,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
 
         RtlInitUnicodeString( &mask_str, mask );
         status = NtQueryDirectoryFile( info->handle, 0, NULL, NULL, &io, info->data, info->data_size,
-                                       FileBothDirectoryInformation, FALSE, &mask_str, TRUE );
+                                       FileBothDirectoryInformation, FALSE, has_wildcard ? NULL : &mask_str, TRUE );
         if (status)
         {
             FindClose( info );
@@ -1348,6 +1358,95 @@ BOOL WINAPI DECLSPEC_HOTPATCH FindNextFileA( HANDLE handle, WIN32_FIND_DATAA *da
 }
 
 
+/***********************************************************************
+ *	name_has_ext
+ *
+ * Check if the file name has extension (skipping leading dots).
+ */
+static BOOL name_has_ext( const WCHAR *name, const WCHAR *name_end )
+{
+    while (name != name_end && *name == '.') ++name;
+    while (name != name_end && *name != '.') ++name;
+    return name != name_end;
+}
+
+
+/***********************************************************************
+ *	match_filename
+ *
+ * Check if the file name matches mask containing wildcards.
+ */
+static BOOL match_filename( const WCHAR *name, int length, const WCHAR *mask )
+{
+    BOOL mismatch;
+    const WCHAR *name_end = name + length;
+    const WCHAR *mask_end = mask + lstrlenW( mask );
+    const WCHAR *lastjoker = NULL;
+    const WCHAR *next_to_retry = NULL;
+    const WCHAR *asterisk;
+
+    if (mask != mask_end && mask_end[-1] == '.' && (asterisk = wcschr( mask, '*' )) && asterisk == wcsrchr( mask, '*' )
+        && name_has_ext( name, name_end ))
+    {
+        /* Single '*' mask ending with '.' only matches files without extension. */
+        return FALSE;
+    }
+
+    while (name < name_end && mask < mask_end)
+    {
+        switch(*mask)
+        {
+        case '*':
+            mask++;
+            while (mask < mask_end && *mask == '*') mask++;
+            if (mask == mask_end) return TRUE; /* end of mask is all '*', so match */
+            lastjoker = mask;
+
+            /* skip to the next match after the joker(s) */
+            while (name < name_end && towupper( *name ) != towupper( *mask )) name++;
+            next_to_retry = name;
+            break;
+        case '?':
+        case '>':
+            mask++;
+            name++;
+            break;
+        default:
+            mismatch = towupper( *mask ) != towupper( *name );
+
+            if (!mismatch)
+            {
+                mask++;
+                name++;
+                if (mask == mask_end)
+                {
+                    if (name == name_end) return TRUE;
+                    if (lastjoker) mask = lastjoker;
+                }
+            }
+            else /* mismatch ! */
+            {
+                if (lastjoker) /* we had an '*', so we can try unlimitedly */
+                {
+                    mask = lastjoker;
+
+                    /* this scan sequence was a mismatch, so restart
+                     * 1 char after the first char we checked last time */
+                    next_to_retry++;
+                    name = next_to_retry;
+                }
+                else return FALSE;
+            }
+            break;
+        }
+    }
+
+    while (mask < mask_end && (*mask == ' ' || *mask == '.' || *mask == '*'))
+        mask++;
+    return (name == name_end && mask == mask_end);
+}
+
+
 /******************************************************************************
  *	FindNextFileW   (kernelbase.@)
  */
@@ -1405,6 +1504,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *da
             if (dir_info->FileNameLength == sizeof(WCHAR) && dir_info->FileName[0] == '.') continue;
             if (dir_info->FileNameLength == 2 * sizeof(WCHAR) &&
                 dir_info->FileName[0] == '.' && dir_info->FileName[1] == '.') continue;
+        }
+
+        if (info->mask)
+        {
+            if (!match_filename( dir_info->FileName, dir_info->FileNameLength / sizeof(WCHAR), info->mask )
+                && (!dir_info->ShortNameLength
+                    || !match_filename( dir_info->ShortName, dir_info->ShortNameLength  / sizeof(WCHAR), info->mask )))
+            continue;
         }
 
         data->dwFileAttributes = dir_info->FileAttributes;
@@ -2873,6 +2980,17 @@ BOOL WINAPI DECLSPEC_HOTPATCH Wow64DisableWow64FsRedirection( PVOID *old_value )
 
 
 /***********************************************************************
+ *	Wow64EnableWow64FsRedirection   (kernelbase.@)
+ *
+ * Microsoft C++ Redistributable installers are depending on all %eax bits being set.
+ */
+DWORD /*BOOLEAN*/ WINAPI kernelbase_Wow64EnableWow64FsRedirection( BOOLEAN enable )
+{
+    return set_ntstatus( RtlWow64EnableFsRedirection( enable ));
+}
+
+
+/***********************************************************************
  *	Wow64RevertWow64FsRedirection   (kernelbase.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH Wow64RevertWow64FsRedirection( PVOID old_value )
@@ -3233,12 +3351,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH LockFileEx( HANDLE file, DWORD flags, DWORD reserv
     }
 
     TRACE( "%p %lx%08lx %lx%08lx flags %lx\n",
-           file, overlapped->u.s.OffsetHigh, overlapped->u.s.Offset, count_high, count_low, flags );
+           file, overlapped->OffsetHigh, overlapped->Offset, count_high, count_low, flags );
 
     count.u.LowPart = count_low;
     count.u.HighPart = count_high;
-    offset.u.LowPart = overlapped->u.s.Offset;
-    offset.u.HighPart = overlapped->u.s.OffsetHigh;
+    offset.u.LowPart = overlapped->Offset;
+    offset.u.HighPart = overlapped->OffsetHigh;
 
     if (((ULONG_PTR)overlapped->hEvent & 1) == 0) cvalue = overlapped;
 
@@ -3279,7 +3397,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenFileById( HANDLE handle, LPFILE_ID_DESCRIPTO
     flags &= FILE_ATTRIBUTE_VALID_FLAGS;
 
     objectName.Length             = sizeof(ULONGLONG);
-    objectName.Buffer             = (WCHAR *)&id->u.FileId;
+    objectName.Buffer             = (WCHAR *)&id->FileId;
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = handle;
     attr.Attributes               = 0;
@@ -3339,7 +3457,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH ReOpenFile( HANDLE handle, DWORD access, DWORD s
 static void WINAPI invoke_completion( void *context, IO_STATUS_BLOCK *io, ULONG res )
 {
     LPOVERLAPPED_COMPLETION_ROUTINE completion = context;
-    completion( RtlNtStatusToDosError( io->u.Status ), io->Information, (LPOVERLAPPED)io );
+    completion( RtlNtStatusToDosError( io->Status ), io->Information, (LPOVERLAPPED)io );
 }
 
 /****************************************************************************
@@ -3372,7 +3490,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadDirectoryChangesW( HANDLE handle, LPVOID buffe
     }
 
     ios = (PIO_STATUS_BLOCK)pov;
-    ios->u.Status = STATUS_PENDING;
+    ios->Status = STATUS_PENDING;
 
     status = NtNotifyChangeDirectoryFile( handle, completion && overlapped ? NULL : pov->hEvent,
                                           completion && overlapped ? invoke_completion : NULL,
@@ -3382,7 +3500,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadDirectoryChangesW( HANDLE handle, LPVOID buffe
         if (overlapped) return TRUE;
         WaitForSingleObjectEx( ov.hEvent, INFINITE, TRUE );
         if (returned) *returned = ios->Information;
-        status = ios->u.Status;
+        status = ios->Status;
     }
     if (!overlapped) CloseHandle( ov.hEvent );
     return set_ntstatus( status );
@@ -3409,22 +3527,22 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadFile( HANDLE file, LPVOID buffer, DWORD count,
 
     if (overlapped)
     {
-        offset.u.LowPart = overlapped->u.s.Offset;
-        offset.u.HighPart = overlapped->u.s.OffsetHigh;
+        offset.u.LowPart = overlapped->Offset;
+        offset.u.HighPart = overlapped->OffsetHigh;
         poffset = &offset;
         event = overlapped->hEvent;
         io_status = (PIO_STATUS_BLOCK)overlapped;
         if (((ULONG_PTR)event & 1) == 0) cvalue = overlapped;
     }
     else io_status->Information = 0;
-    io_status->u.Status = STATUS_PENDING;
+    io_status->Status = STATUS_PENDING;
 
     status = NtReadFile( file, event, NULL, cvalue, io_status, buffer, count, poffset, NULL);
 
     if (status == STATUS_PENDING && !overlapped)
     {
         WaitForSingleObject( file, INFINITE );
-        status = io_status->u.Status;
+        status = io_status->Status;
     }
 
     if (result) *result = overlapped && status ? 0 : io_status->Information;
@@ -3464,10 +3582,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadFileEx( HANDLE file, LPVOID buffer, DWORD coun
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
-    offset.u.LowPart = overlapped->u.s.Offset;
-    offset.u.HighPart = overlapped->u.s.OffsetHigh;
+    offset.u.LowPart = overlapped->Offset;
+    offset.u.HighPart = overlapped->OffsetHigh;
     io = (PIO_STATUS_BLOCK)overlapped;
-    io->u.Status = STATUS_PENDING;
+    io->Status = STATUS_PENDING;
     io->Information = 0;
 
     status = NtReadFile( file, NULL, read_write_apc, completion, io, buffer, count, &offset, NULL);
@@ -3488,11 +3606,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadFileScatter( HANDLE file, FILE_SEGMENT_ELEMENT
 
     TRACE( "(%p %p %lu %p)\n", file, segments, count, overlapped );
 
-    offset.u.LowPart = overlapped->u.s.Offset;
-    offset.u.HighPart = overlapped->u.s.OffsetHigh;
+    offset.u.LowPart = overlapped->Offset;
+    offset.u.HighPart = overlapped->OffsetHigh;
     if (!((ULONG_PTR)overlapped->hEvent & 1)) cvalue = overlapped;
     io = (PIO_STATUS_BLOCK)overlapped;
-    io->u.Status = STATUS_PENDING;
+    io->Status = STATUS_PENDING;
     io->Information = 0;
 
     return set_ntstatus( NtReadFileScatter( file, overlapped->hEvent, NULL, cvalue, io,
@@ -3705,7 +3823,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetFilePointerEx( HANDLE file, LARGE_INTEGER dista
     }
 
 error:
-    return set_ntstatus( io.u.Status );
+    return set_ntstatus( io.Status );
 }
 
 
@@ -3782,7 +3900,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH UnlockFileEx( HANDLE file, DWORD reserved,
     }
     if (overlapped->hEvent) FIXME("Unimplemented overlapped operation\n");
 
-    return UnlockFile( file, overlapped->u.s.Offset, overlapped->u.s.OffsetHigh, count_low, count_high );
+    return UnlockFile( file, overlapped->Offset, overlapped->OffsetHigh, count_low, count_high );
 }
 
 
@@ -3804,22 +3922,22 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteFile( HANDLE file, LPCVOID buffer, DWORD coun
 
     if (overlapped)
     {
-        offset.u.LowPart = overlapped->u.s.Offset;
-        offset.u.HighPart = overlapped->u.s.OffsetHigh;
+        offset.u.LowPart = overlapped->Offset;
+        offset.u.HighPart = overlapped->OffsetHigh;
         poffset = &offset;
         event = overlapped->hEvent;
         piosb = (PIO_STATUS_BLOCK)overlapped;
         if (((ULONG_PTR)event & 1) == 0) cvalue = overlapped;
     }
     else piosb->Information = 0;
-    piosb->u.Status = STATUS_PENDING;
+    piosb->Status = STATUS_PENDING;
 
     status = NtWriteFile( file, event, NULL, cvalue, piosb, buffer, count, poffset, NULL );
 
     if (status == STATUS_PENDING && !overlapped)
     {
         WaitForSingleObject( file, INFINITE );
-        status = piosb->u.Status;
+        status = piosb->Status;
     }
 
     if (result) *result = overlapped && status ? 0 : piosb->Information;
@@ -3851,11 +3969,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteFileEx( HANDLE file, LPCVOID buffer,
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
-    offset.u.LowPart = overlapped->u.s.Offset;
-    offset.u.HighPart = overlapped->u.s.OffsetHigh;
+    offset.u.LowPart = overlapped->Offset;
+    offset.u.HighPart = overlapped->OffsetHigh;
 
     io = (PIO_STATUS_BLOCK)overlapped;
-    io->u.Status = STATUS_PENDING;
+    io->Status = STATUS_PENDING;
     io->Information = 0;
 
     status = NtWriteFile( file, NULL, read_write_apc, completion, io, buffer, count, &offset, NULL );
@@ -3876,11 +3994,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteFileGather( HANDLE file, FILE_SEGMENT_ELEMENT
 
     TRACE( "%p %p %lu %p\n", file, segments, count, overlapped );
 
-    offset.u.LowPart = overlapped->u.s.Offset;
-    offset.u.HighPart = overlapped->u.s.OffsetHigh;
+    offset.u.LowPart = overlapped->Offset;
+    offset.u.HighPart = overlapped->OffsetHigh;
     if (!((ULONG_PTR)overlapped->hEvent & 1)) cvalue = overlapped;
     io = (PIO_STATUS_BLOCK)overlapped;
-    io->u.Status = STATUS_PENDING;
+    io->Status = STATUS_PENDING;
     io->Information = 0;
 
     return set_ntstatus( NtWriteFileGather( file, overlapped->hEvent, NULL, cvalue,
