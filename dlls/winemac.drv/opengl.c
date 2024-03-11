@@ -2839,7 +2839,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
         if (profile != WGL_CONTEXT_CORE_PROFILE_BIT_ARB)
         {
             WARN("Compatibility profiles for GL version >= 3.2 not supported\n");
-            SetLastError(ERROR_INVALID_PROFILE_ARB);
+            RtlSetLastWin32Error(ERROR_INVALID_PROFILE_ARB);
             return NULL;
         }
         if (major > gl_info.max_major ||
@@ -2847,7 +2847,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
         {
             WARN("This GL implementation does not support the requested GL version %u.%u\n",
                  major, minor);
-            SetLastError(ERROR_INVALID_PROFILE_ARB);
+            RtlSetLastWin32Error(ERROR_INVALID_PROFILE_ARB);
             return NULL;
         }
         core = TRUE;
