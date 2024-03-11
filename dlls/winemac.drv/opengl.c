@@ -2821,19 +2821,25 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
         }
     }
 
-    if ((major == 3 && (minor == 2 || minor == 3)) ||
+    if (major == 3 && (minor == 0 || minor == 1))
+    {
+        WARN("Upgrading context to 3.2 Core, deprecated features will not be available\n");
+        minor = 2;
+        profile |= WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
+    }
+
+    if (major == 3 ||
         (major == 4 && (minor == 0 || minor == 1)))
     {
         if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
         {
-            WARN("OS X only supports forward-compatible 3.2+ contexts\n");
-            RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
-            return NULL;
+            WARN("Forcing forward-compatible context, wide-lines will not be available\n");
+            flags |= WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
         }
         if (profile != WGL_CONTEXT_CORE_PROFILE_BIT_ARB)
         {
             WARN("Compatibility profiles for GL version >= 3.2 not supported\n");
-            RtlSetLastWin32Error(ERROR_INVALID_PROFILE_ARB);
+            SetLastError(ERROR_INVALID_PROFILE_ARB);
             return NULL;
         }
         if (major > gl_info.max_major ||
@@ -2841,7 +2847,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
         {
             WARN("This GL implementation does not support the requested GL version %u.%u\n",
                  major, minor);
-            RtlSetLastWin32Error(ERROR_INVALID_PROFILE_ARB);
+            SetLastError(ERROR_INVALID_PROFILE_ARB);
             return NULL;
         }
         core = TRUE;

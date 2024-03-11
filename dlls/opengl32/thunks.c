@@ -14,6 +14,10 @@
 
 #include "wine/debug.h"
 
+#define OPENGL32_TEXCONV_IMPLEMENTATION
+#include "texconv.h"
+#undef OPENGL32_TEXCONV_IMPLEMENTATION
+
 WINE_DEFAULT_DEBUG_CHANNEL(opengl);
 
 BOOL WINAPI wglCopyContext( HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask )
@@ -4688,33 +4692,97 @@ static void WINAPI glCompressedTexImage1DARB( GLenum target, GLint level, GLenum
 
 static void WINAPI glCompressedTexImage2D( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, internalformat %d, width %d, height %d, border %d, imageSize %d, data %p\n", target, level, internalformat, width, height, border, imageSize, data );
+    if ( (internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || internalformat == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && (target == GL_TEXTURE_2D || target == GL_PROXY_TEXTURE_2D) )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, 1 );
+            struct glTexImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = ( internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_SRGB8_ALPHA8 : GL_RGBA8 ), .width = width, .height = height, .border = border, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexImage2D, &args ))) WARN( "glTexImage2D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+            internalformat = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    struct glCompressedTexImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexImage2D, &args ))) WARN( "glCompressedTexImage2D returned %#lx\n", status );
 }
 
 static void WINAPI glCompressedTexImage2DARB( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexImage2DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, internalformat %d, width %d, height %d, border %d, imageSize %d, data %p\n", target, level, internalformat, width, height, border, imageSize, data );
+    if ( (internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || internalformat == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && (target == GL_TEXTURE_2D || target == GL_PROXY_TEXTURE_2D) )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, 1 );
+            struct glTexImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = ( internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_SRGB8_ALPHA8 : GL_RGBA8 ), .width = width, .height = height, .border = border, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexImage2D, &args ))) WARN( "glTexImage2D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+            internalformat = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    struct glCompressedTexImage2DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexImage2DARB, &args ))) WARN( "glCompressedTexImage2DARB returned %#lx\n", status );
 }
 
 static void WINAPI glCompressedTexImage3D( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, internalformat %d, width %d, height %d, depth %d, border %d, imageSize %d, data %p\n", target, level, internalformat, width, height, depth, border, imageSize, data );
+    if ( (internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || internalformat == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && (target == GL_TEXTURE_2D_ARRAY || target == GL_PROXY_TEXTURE_2D_ARRAY) )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, depth );
+            struct glTexImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = ( internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_SRGB8_ALPHA8 : GL_RGBA8 ), .width = width, .height = height, .depth = depth, .border = border, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexImage3D, &args ))) WARN( "glTexImage3D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+            internalformat = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    struct glCompressedTexImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexImage3D, &args ))) WARN( "glCompressedTexImage3D returned %#lx\n", status );
 }
 
 static void WINAPI glCompressedTexImage3DARB( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexImage3DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, internalformat %d, width %d, height %d, depth %d, border %d, imageSize %d, data %p\n", target, level, internalformat, width, height, depth, border, imageSize, data );
+    if ( (internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || internalformat == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && (target == GL_TEXTURE_2D_ARRAY || target == GL_PROXY_TEXTURE_2D_ARRAY) )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, depth );
+            struct glTexImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = ( internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_SRGB8_ALPHA8 : GL_RGBA8 ), .width = width, .height = height, .depth = depth, .border = border, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexImage3D, &args ))) WARN( "glTexImage3D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+        internalformat = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    struct glCompressedTexImage3DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexImage3DARB, &args ))) WARN( "glCompressedTexImage3DARB returned %#lx\n", status );
 }
 
@@ -4736,33 +4804,98 @@ static void WINAPI glCompressedTexSubImage1DARB( GLenum target, GLint level, GLi
 
 static void WINAPI glCompressedTexSubImage2D( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexSubImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = format, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, xoffset %d, yoffset %d, width %d, height %d, format %d, imageSize %d, data %p\n", target, level, xoffset, yoffset, width, height, format, imageSize, data );
+    if ( (format == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || format == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && target == GL_TEXTURE_2D )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, 1 );
+            struct glTexSubImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexSubImage2D, &args ))) WARN( "glTexSubImage2D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+            format = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    
+    struct glCompressedTexSubImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = format, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexSubImage2D, &args ))) WARN( "glCompressedTexSubImage2D returned %#lx\n", status );
 }
 
 static void WINAPI glCompressedTexSubImage2DARB( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexSubImage2DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = format, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, xoffset %d, yoffset %d, width %d, height %d, format %d, imageSize %d, data %p\n", target, level, xoffset, yoffset, width, height, format, imageSize, data );
+    if ( (format == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || format == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && GL_TEXTURE_2D )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, 1 );
+            struct glTexSubImage2D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexSubImage2D, &args ))) WARN( "glTexSubImage2D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+            format = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    struct glCompressedTexSubImage2DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = format, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexSubImage2DARB, &args ))) WARN( "glCompressedTexSubImage2DARB returned %#lx\n", status );
 }
 
 static void WINAPI glCompressedTexSubImage3D( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexSubImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = format, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, format %d, imageSize %d, data %p\n", target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data );
+    if ( (format == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || format == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && (target == GL_TEXTURE_2D_ARRAY || target == GL_PROXY_TEXTURE_2D_ARRAY) )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, depth );            
+            struct glTexSubImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexSubImage3D, &args ))) WARN( "glTexSubImage3D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+            format = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    struct glCompressedTexSubImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = format, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexSubImage3D, &args ))) WARN( "glCompressedTexSubImage3D returned %#lx\n", status );
 }
 
 static void WINAPI glCompressedTexSubImage3DARB( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data )
 {
-    struct glCompressedTexSubImage3DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = format, .imageSize = imageSize, .data = data };
     NTSTATUS status;
     TRACE( "target %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, format %d, imageSize %d, data %p\n", target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data );
+    if ( (format == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB || format == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) && (target == GL_TEXTURE_2D_ARRAY || target == GL_PROXY_TEXTURE_2D_ARRAY) )
+    {
+        unsigned char outfmt = get_btpc_convfmt();
+        if ( outfmt == 1 )
+        {
+            char *rawdata = decode_bptc_unorm_to_rgba( data, width, height, depth );            
+            struct glTexSubImage3D_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = GL_RGBA, .type = GL_UNSIGNED_BYTE, .pixels = rawdata };
+            if ((status = UNIX_CALL( glTexSubImage3D, &args ))) WARN( "glTexSubImage3D returned %#lx\n", status );
+            if ( rawdata != NULL ) free( rawdata );
+            return;
+        }
+        else if ( outfmt == 2 )
+        {
+            format = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        }
+    }
+    struct glCompressedTexSubImage3DARB_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = format, .imageSize = imageSize, .data = data };
     if ((status = UNIX_CALL( glCompressedTexSubImage3DARB, &args ))) WARN( "glCompressedTexSubImage3DARB returned %#lx\n", status );
 }
 
