@@ -13,7 +13,8 @@ void * decode_bptc_unorm_to_rgba( const void *data, int width, int height, int d
 #ifdef OPENGL32_TEXCONV_IMPLEMENTATION
 unsigned char get_btpc_convfmt()
 {
-    const char* winegl_bptc = getenv( "WINEGL_BPTC" );
+    const char *winegl_bptc;
+    winegl_bptc = getenv("WINEGL_BPTC");
 
     if (winegl_bptc != 0)
     {
