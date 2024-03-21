@@ -4401,6 +4401,88 @@ static LSTATUS get_device_property(struct device *device, const DEVPROPKEY *prop
     return ls;
 }
 
+
+/* CW HACK 23560: Diablo IV needs GPU LUIDs to match between setupapi and (D3DMetal's) dxgi */
+#ifdef __x86_64__
+#define COBJMACROS
+#include <dxgi.h>
+
+static const DEVPROPKEY DEVPROPKEY_GPU_LUID =
+{ { 0x60b193cb, 0x5276, 0x4d0f, { 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6 } }, 2 };
+
+static const GUID my_IDXGIFactory =
+{ 0x7b7166ec, 0x21c7, 0x44ae, { 0xb2,0x1a, 0xc9,0xae,0x32,0x1a,0xe3,0x69 } };
+
+static BOOL CALLBACK check_is_diablo_iv(INIT_ONCE *once, void *param, void **context)
+{
+    BOOL *is_d4 = param;
+    WCHAR name[MAX_PATH], *module_exe;
+    if (GetModuleFileNameW(NULL, name, ARRAYSIZE(name)))
+    {
+        module_exe = wcsrchr(name, '\\');
+        module_exe = module_exe ? module_exe + 1 : name;
+        *is_d4 = !wcsicmp(module_exe, L"Diablo IV.exe");
+    }
+
+    return TRUE;
+}
+
+static BOOL is_diablo_iv(void)
+{
+    static BOOL is_d4 = FALSE;
+    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
+    InitOnceExecuteOnce(&once, check_is_diablo_iv, &is_d4, NULL);
+    return is_d4;
+}
+
+static BOOL using_d3dmetal(void)
+{
+    /* D3DMetal's dxgi.dll doesn't include a version resource (or any resources) */
+    return (GetFileVersionInfoSizeW(L"dxgi.dll", NULL) > 0) ? FALSE : TRUE;
+}
+
+static void get_luid_from_d3dmetal(LUID *luid)
+{
+    /* Diablo IV retrieves the GPU LUID through setupapi and expects it to match the LUID reported by
+     * D3DMetal.
+     *
+     * For now, load D3DMetal's dxgi and get its LUID.
+     *
+     * This assumes there's only one GPU (which is currently always true on Apple Silicon Macs).
+     */
+    static HMODULE dxgi;
+    typeof(CreateDXGIFactory) *dxgi_CreateDXGIFactory;
+    IDXGIFactory *factory = NULL;
+    IDXGIAdapter *adapter = NULL;
+    DXGI_ADAPTER_DESC desc;
+
+    if (!dxgi)
+    {
+        dxgi = LoadLibraryW(L"dxgi.dll");
+        if (!dxgi) return;
+    }
+
+    dxgi_CreateDXGIFactory = (void *)GetProcAddress(dxgi, "CreateDXGIFactory");
+    if (!dxgi_CreateDXGIFactory) goto done;
+
+    dxgi_CreateDXGIFactory(&my_IDXGIFactory, (void **)&factory);
+    if (!factory) goto done;
+
+    IDXGIFactory_EnumAdapters(factory, 0, &adapter);
+    if (!adapter) goto done;
+
+    if (IDXGIAdapter_GetDesc(adapter, &desc) != S_OK)
+        goto done;
+
+    TRACE("Using LUID %08lx:%08lx from D3DMetal dxgi\n", desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart);
+    memcpy(luid, &desc.AdapterLuid, sizeof(*luid));
+
+done:
+    if (adapter) IDXGIAdapter_Release(adapter);
+    if (factory) IDXGIFactory_Release(factory);
+}
+#endif
+
 /***********************************************************************
  *              SetupDiGetDevicePropertyW (SETUPAPI.@)
  */
@@ -4418,6 +4500,15 @@ BOOL WINAPI SetupDiGetDevicePropertyW(HDEVINFO devinfo, PSP_DEVINFO_DATA device_
         return FALSE;
 
     ls = get_device_property(device, prop_key, prop_type, prop_buff, prop_buff_size, required_size, flags);
+
+#ifdef __x86_64__
+    /* CW HACK 23560 */
+    if (ls == NO_ERROR && prop_buff && prop_buff_size == sizeof(LUID) &&
+        IsEqualDevPropKey(*prop_key, DEVPROPKEY_GPU_LUID) && is_diablo_iv() && using_d3dmetal())
+    {
+        get_luid_from_d3dmetal((LUID *)prop_buff);
+    }
+#endif
 
     SetLastError(ls);
     return !ls;

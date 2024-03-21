@@ -2703,6 +2703,19 @@ cant_match:
     return TRUE;
 }
 
+/* CX HACK 23422 */
+static int is_tomb_raider_remastered(void)
+{
+    static const WCHAR tomb123_exeW[] = {'t','o','m','b','1','2','3','.','e','x','e',0};
+    WCHAR *name, *module_exe;
+
+    name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    module_exe = wcsrchr(name, '\\');
+    module_exe = module_exe ? module_exe + 1 : name;
+
+    return !wcsicmp(module_exe, tomb123_exeW);
+}
+
 
 /***********************************************************************
  *              macdrv_wglCreateContextAttribsARB
@@ -2821,9 +2834,20 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
         }
     }
 
+
     if ((major == 3 && (minor == 2 || minor == 3)) ||
         (major == 4 && (minor == 0 || minor == 1)))
     {
+        /* CX HACK 23422:
+         * Tomb Raider 1-3 Remastered requests a non-forward-compatible 3.2 core context, but works
+         * with a forward-compatible context.
+         */
+        if (is_tomb_raider_remastered())
+        {
+            if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
+                flags |= WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
+        }
+
         if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
         {
             WARN("OS X only supports forward-compatible 3.2+ contexts\n");
@@ -4112,6 +4136,95 @@ static BOOL macdrv_wglSwapIntervalEXT(int interval)
     return TRUE;
 }
 
+/* CX HACK 23422 - START
+ * Tomb Raider 1-3 Remastered uses BC7 compressed textures in Remastered mode.
+ *
+ * Credit to nastys
+ */
+
+#define BCDEC_IMPLEMENTATION
+#define BCDEC_STATIC
+#include "opengl_bcdec.h"
+
+static void (*pglCompressedTexImage3D)(GLenum target, GLint level, GLenum internalformat,
+                                       GLsizei width, GLsizei height, GLsizei depth, GLint border,
+                                       GLsizei imageSize, const void *data);
+
+static void (*pglCompressedTexSubImage3D)(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                          GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
+                                          GLenum format, GLsizei imageSize, const void *data);
+
+static void *decode_bptc_unorm_to_rgba(const void *data, GLsizei width, GLsizei height, GLsizei depth)
+{
+    GLsizei numBlocksX = (width + 3) / 4;
+    GLsizei numBlocksY = (height + 3) / 4;
+    GLsizei numBlocksZ = (depth + 3) / 4;
+    char *pixels;
+
+    if (!data)
+        return NULL;
+
+    pixels = malloc(width * height * depth * 4);
+
+    for (GLsizei z = 0; z < numBlocksZ; z++)
+    {
+        for (GLsizei y = 0; y < numBlocksY; y++)
+        {
+            for (GLsizei x = 0; x < numBlocksX; x++)
+            {
+                GLsizei blockOffsetX = x * 4;
+                GLsizei blockOffsetY = y * 4;
+                GLsizei blockOffsetZ = z;
+                GLsizei blockOffset = blockOffsetZ * numBlocksX * numBlocksY * 4 + blockOffsetY * numBlocksX * 4 + blockOffsetX * 4;
+
+                GLsizei pixelOffsetX = x * 4;
+                GLsizei pixelOffsetY = y * 4;
+                GLsizei pixelOffsetZ = z * width * height * 4;
+                GLsizei pixelOffset = pixelOffsetZ + pixelOffsetY * width * 4 + pixelOffsetX * 4;
+
+                bcdec_bc7((const void*)((const char*)data + blockOffset), (void *)(pixels + pixelOffset), width * 4);
+            }
+        }
+    }
+
+    return pixels;
+}
+
+static void macdrv_glCompressedTexImage3D(GLenum target, GLint level, GLenum internalformat,
+                                          GLsizei width, GLsizei height, GLsizei depth, GLint border,
+                                          GLsizei imageSize, const void *data)
+{
+    if ((internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ||
+         internalformat == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) &&
+        (target == GL_TEXTURE_2D_ARRAY || target == GL_PROXY_TEXTURE_2D_ARRAY))
+    {
+        char *rawdata = decode_bptc_unorm_to_rgba(data, width, height, depth);
+        opengl_funcs.ext.p_glTexImage3D(target, level, (internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_SRGB8_ALPHA8 : GL_RGBA8), width, height, depth, border, GL_RGBA, GL_UNSIGNED_BYTE, rawdata);
+        if (rawdata)
+            free(rawdata);
+    }
+    else
+        pglCompressedTexImage3D(target, level, internalformat, width, height, depth, border, imageSize, data);
+}
+
+static void macdrv_glCompressedTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                             GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
+                                             GLenum format, GLsizei imageSize, const void *data)
+{
+    if ((format == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ||
+         format == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) &&
+        (target == GL_TEXTURE_2D_ARRAY || target == GL_PROXY_TEXTURE_2D_ARRAY))
+    {
+        char *pixels = decode_bptc_unorm_to_rgba(data, width, height, depth);
+        opengl_funcs.ext.p_glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        if (pixels)
+            free(pixels);
+    }
+    else
+        pglCompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data);
+}
+
+/* CX HACK 23422 - END */
 
 static void register_extension(const char *ext)
 {
@@ -4263,6 +4376,10 @@ static void init_opengl(void)
 #define REDIRECT(func) \
     do { if ((p##func = dlsym(opengl_handle, #func))) { opengl_funcs.ext.p_##func = macdrv_##func; } } while(0)
     REDIRECT(glCopyColorTable);
+
+    /* CX HACK 23422 */
+    REDIRECT(glCompressedTexImage3D);
+    REDIRECT(glCompressedTexSubImage3D);
 #undef REDIRECT
 
     if (gluCheckExtension((GLubyte*)"GL_APPLE_flush_render", (GLubyte*)gl_info.glExtensions))
